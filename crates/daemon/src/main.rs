@@ -22,6 +22,15 @@ use tokio::sync::broadcast;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let _telemetry = ferrent_telemetry::init("ferrentd");
+    let result = run().await;
+    if let Err(error) = &result {
+        ferrent_telemetry::capture_error(error.as_ref());
+    }
+    result
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     let data_dir = env::var_os("FERRENT_DATA_DIR")
         .map(PathBuf::from)

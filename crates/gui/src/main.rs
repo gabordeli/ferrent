@@ -1461,13 +1461,19 @@ fn read_rss_kb() -> u64 {
 }
 
 fn main() -> iced::Result {
+    let _telemetry = ferrent_telemetry::init("ferrent-gui");
     let app = iced::application("Ferrent", App::update, App::view)
         .subscription(App::subscription)
         .window_size(Size::new(1100.0, 700.0));
 
-    if std::env::args().any(|argument| argument == "--connect" || argument == "--measure") {
-        app.run_with(|| (App::default(), Task::done(Message::Connect)))
-    } else {
-        app.run()
+    let result =
+        if std::env::args().any(|argument| argument == "--connect" || argument == "--measure") {
+            app.run_with(|| (App::default(), Task::done(Message::Connect)))
+        } else {
+            app.run()
+        };
+    if let Err(error) = &result {
+        ferrent_telemetry::capture_error(error);
     }
+    result
 }

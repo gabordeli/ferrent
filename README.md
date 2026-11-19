@@ -42,6 +42,13 @@ A token a GUI `~/.config/ferrent/gui.toml` fájljában `0600` móddal van.
 - A 4 000 torrentes mérés és a 24 órás soak részletei:
   [docs/measurements/mvp.md](docs/measurements/mvp.md).
 
+## Hibajelentés
+
+A `ferrentd`, `ferrent-cli` és `ferrent-gui` induláskor a Bugsink projekt 5
+DSN-jére inicializálja a Sentry klienst; a `FERRENT_BUGSINK_DSN` env var
+felülírhatja. A panelek `service` taget kapnak, a kezeletlen hibák és a
+Rust panics figyelmeztetés nélkül mennek a Bugsinkbe.
+
 ## Ismert korlátok (MVP)
 
 - Nincs `.deb`/APT/Docker csomagolás, Deluge-import és `*arr` API (v1.0).

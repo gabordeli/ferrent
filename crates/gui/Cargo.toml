@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 ferrent-protocol = { path = "../protocol" }
+ferrent-telemetry = { path = "../telemetry" }
 iced = { version = "0.13", features = ["canvas", "tokio"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -29,7 +29,7 @@ clippy-report:
         apt-get update -qq &&
         apt-get install -y -qq --no-install-recommends
           libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
-          libxrandr-dev libxi-dev python3 &&
+          libxrandr-dev libxi-dev libssl-dev pkg-config python3 &&
         rustup component add clippy &&
         cargo clippy --workspace --all-targets --message-format=json > /tmp/clippy.json &&
         python3 ci/clippy_to_sonar.py /tmp/clippy.json /tmp/sonar-issues.json &&

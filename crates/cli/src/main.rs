@@ -149,8 +149,11 @@ impl Action {
 
 #[tokio::main]
 async fn main() {
+    let _telemetry = ferrent_telemetry::init("ferrent-cli");
     let cli = Cli::parse();
     if let Err(error) = run(cli).await {
+        ferrent_telemetry::capture_error(&error);
+        ferrent_telemetry::flush();
         eprintln!("ferrent-cli: {error}");
         std::process::exit(error.exit_code());
     }

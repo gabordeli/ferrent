@@ -35,6 +35,7 @@ path = "examples/rpc_bench.rs"
 arc-swap = "1"
 ferrent-engine = { path = "../engine" }
 ferrent-protocol = { path = "../protocol" }
+ferrent-telemetry = { path = "../telemetry" }
 rcgen = "0.14"
 redb = "2"
 rustls-pemfile = "2"
