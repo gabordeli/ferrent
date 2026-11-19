@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/protocol",
+    "crates/engine",
+    "crates/daemon",
+    "crates/cli",
+    "crates/gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://cirice-gitlab.ddns.net/gabor/ferrent"
+authors = ["Gabor Deli <gabor.deli@gmail.com>"]
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
