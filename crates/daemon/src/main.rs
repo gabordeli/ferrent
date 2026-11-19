@@ -35,12 +35,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     data_dir: Option<PathBuf>,
+    download_dir: Option<PathBuf>,
     bind: Option<String>,
     token_file: Option<PathBuf>,
 }
 
 struct Config {
     data_dir: PathBuf,
+    download_dir: PathBuf,
     bind: String,
     token: String,
 }
@@ -58,6 +60,10 @@ fn load_config() -> Result<Config, Box<dyn Error>> {
         .map(PathBuf::from)
         .or(file.data_dir)
         .unwrap_or_else(|| PathBuf::from("./ferrent-data"));
+    let download_dir = env::var_os("FERRENT_DOWNLOAD_DIR")
+        .map(PathBuf::from)
+        .or(file.download_dir)
+        .unwrap_or_else(|| data_dir.join("downloads"));
     let bind = env::var("FERRENT_BIND")
         .ok()
         .or(file.bind)
@@ -83,6 +89,7 @@ fn load_config() -> Result<Config, Box<dyn Error>> {
     }
     Ok(Config {
         data_dir,
+        download_dir,
         bind,
         token,
     })
@@ -92,6 +99,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     let config = load_config()?;
     let data_dir = config.data_dir;
+    let download_dir = config.download_dir;
     let token = config.token;
     let bind = config.bind;
 
@@ -126,12 +134,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
         store,
         token,
         data_dir.clone(),
+        download_dir.clone(),
     ));
 
     let listener = TcpListener::bind(&bind).await?;
     let local = listener.local_addr()?;
     println!("ferrentd listening on https://{local}");
     println!("restored_torrents={restored_count}");
+    println!("download_dir={}", download_dir.display());
     println!("startup_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
     println!("TLS fingerprint: {}", tls.fingerprint);
     println!(

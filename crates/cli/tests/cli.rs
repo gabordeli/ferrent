@@ -66,6 +66,7 @@ async fn start_server() -> TestServer {
         store,
         "secret",
         PathBuf::from("."),
+        PathBuf::from("/tmp"),
     ));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");

@@ -51,6 +51,7 @@ async fn start_server(token: &str) -> TestServer {
         store,
         token,
         std::path::PathBuf::from("."),
+        std::path::PathBuf::from("/tmp"),
     ));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");

@@ -119,10 +119,12 @@ struct Session::Impl {
 
     FfiStatus make_status(uint64_t id, lt::torrent_handle const &handle) const {
         FfiStatus out{};
-        auto status = handle.status();
+        auto status = handle.status(lt::torrent_handle::query_name |
+                                    lt::torrent_handle::query_save_path);
         out.found = true;
         out.id = id;
         out.name = rust::String(status.name);
+        out.save_path = rust::String(status.save_path);
         out.total_bytes = status.total_wanted > 0
                               ? static_cast<uint64_t>(status.total_wanted)
                               : static_cast<uint64_t>(status.total);
@@ -328,9 +330,31 @@ rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
     for (auto const &tracker : it->second.trackers()) {
         FfiTracker item{};
         item.url = rust::String(tracker.url);
-        item.status = rust::String(tracker.verified ? "working" : "unverified");
-        item.seeds = 0;
-        item.leechers = 0;
+        bool updating = false;
+        bool failed = false;
+        int seeds = -1;
+        int leechers = -1;
+        for (auto const &endpoint : tracker.endpoints) {
+            for (auto const &infohash : endpoint.info_hashes) {
+                updating = updating || infohash.updating;
+                failed = failed || static_cast<bool>(infohash.last_error);
+                seeds = std::max(seeds, infohash.scrape_complete);
+                leechers = std::max(leechers, infohash.scrape_incomplete);
+            }
+        }
+        // Report the live announce state: a tracker that answered is "working"
+        // even while it holds no scrape data, and one that failed is "error".
+        if (updating) {
+            item.status = rust::String("updating");
+        } else if (failed) {
+            item.status = rust::String("error");
+        } else if (tracker.verified) {
+            item.status = rust::String("working");
+        } else {
+            item.status = rust::String("unverified");
+        }
+        item.seeds = seeds > 0 ? static_cast<uint32_t>(seeds) : 0;
+        item.leechers = leechers > 0 ? static_cast<uint32_t>(leechers) : 0;
         out.push_back(std::move(item));
     }
     return out;

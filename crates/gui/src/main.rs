@@ -331,7 +331,7 @@ impl Default for App {
             context: None,
             pending_select: None,
             add_path: String::new(),
-            add_save_path: "./downloads".to_owned(),
+            add_save_path: String::new(),
             add_id: text_input::Id::new("add-path"),
             add_in_flight: false,
             action_in_flight: false,
@@ -1265,10 +1265,6 @@ impl App {
             self.status = "Choose a .torrent path first".to_owned();
             return Task::none();
         }
-        if save_path.is_empty() {
-            self.status = "Save path is required".to_owned();
-            return Task::none();
-        }
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
@@ -2100,7 +2096,7 @@ impl App {
                 .id(self.add_id.clone())
                 .on_input(Message::AddPathChanged)
                 .width(Length::Fill),
-            text_input("Save path", &self.add_save_path)
+            text_input("Save path (daemon default)", &self.add_save_path)
                 .on_input(Message::AddSavePathChanged)
                 .width(Length::Fixed(190.0)),
             action_button("Add torrent", Message::AddTorrent, !self.add_in_flight),
@@ -2264,10 +2260,12 @@ impl App {
                     detail_row("Torrent ID", torrent.id.to_string(), dim),
                     detail_row(
                         "Save",
-                        self.last_config
-                            .as_ref()
-                            .map_or("-".to_owned(), |_| "./downloads".to_owned()),
-                        dim
+                        if torrent.save_path.is_empty() {
+                            "-".to_owned()
+                        } else {
+                            torrent.save_path.clone()
+                        },
+                        dim,
                     ),
                 ]
                 .spacing(24),
@@ -2351,18 +2349,47 @@ impl App {
         let dim = theme::TEXT_SECONDARY;
         match &self.details_payload {
             Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
+                let header = row![
+                    text("TRACKER").size(10).color(theme::TEXT_MUTED),
+                    text("SEEDS / LEECHERS")
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .width(Length::Fixed(110.0)),
+                    text("STATUS")
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .width(Length::Fixed(80.0)),
+                ]
+                .spacing(16);
                 let rows = trackers
                     .iter()
                     .map(|tracker| {
+                        let counts = if tracker.seeds == 0 && tracker.leechers == 0 {
+                            "-".to_owned()
+                        } else {
+                            format!("{} / {}", tracker.seeds, tracker.leechers)
+                        };
+                        let status_color = if tracker.status == "error" {
+                            theme::ERROR
+                        } else {
+                            dim
+                        };
                         row![
                             text(&tracker.url).size(11).width(Length::Fill),
-                            text(&tracker.status).size(11).color(dim),
+                            text(counts).size(11).color(dim).width(Length::Fixed(110.0)),
+                            text(&tracker.status)
+                                .size(11)
+                                .color(status_color)
+                                .width(Length::Fixed(80.0)),
                         ]
                         .spacing(16)
                         .into()
                     })
                     .collect::<Vec<Element<Message>>>();
-                scrollable(WidgetColumn::with_children(rows).spacing(2))
+                let mut children: Vec<Element<Message>> = Vec::with_capacity(rows.len() + 1);
+                children.push(header.into());
+                children.extend(rows);
+                scrollable(WidgetColumn::with_children(children).spacing(2))
                     .height(Length::Fill)
                     .into()
             }

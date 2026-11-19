@@ -151,6 +151,8 @@ message Torrent {
   uint32 peers = 10;
   // Estimated seconds to completion; zero when unknown.
   uint32 eta_seconds = 11;
+  // Directory the torrent's files are written to, as the daemon resolved it.
+  string save_path = 12;
 }
 
 // Sort key for the torrent list.

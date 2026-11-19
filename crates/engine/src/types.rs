@@ -35,6 +35,8 @@ impl fmt::Display for TorrentState {
 pub struct TorrentStatus {
     pub id: TorrentId,
     pub name: String,
+    /// Directory the torrent's files are written to, as the engine resolved it.
+    pub save_path: PathBuf,
     pub total_bytes: u64,
     pub state: TorrentState,
     /// Completion ratio in `0.0..=1.0`.

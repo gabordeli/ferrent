@@ -60,8 +60,8 @@ enum Command {
         /// Display name (defaults to the file name).
         #[arg(long)]
         name: Option<String>,
-        /// Save path on the daemon host.
-        #[arg(long, default_value = ".")]
+        /// Save path on the daemon host (default: the daemon's download dir).
+        #[arg(long, default_value = "")]
         save_path: String,
     },
     /// List torrents.

@@ -90,6 +90,7 @@ impl TorrentEngine for MockEngine {
         let status = TorrentStatus {
             id,
             name: spec.name,
+            save_path: spec.save_path,
             total_bytes: spec.total_bytes,
             state: TorrentState::Queued,
             progress: 0.0,
@@ -113,6 +114,7 @@ impl TorrentEngine for MockEngine {
         let status = TorrentStatus {
             id,
             name: spec.name,
+            save_path: spec.save_path,
             total_bytes: spec.total_bytes,
             state: TorrentState::Queued,
             progress: 0.0,

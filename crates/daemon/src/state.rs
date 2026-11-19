@@ -275,6 +275,8 @@ pub async fn run_mirror(
 mod tests {
     use std::time::Instant;
 
+    use std::path::PathBuf;
+
     use ferrent_engine::TorrentState;
 
     use super::*;
@@ -283,6 +285,7 @@ mod tests {
         TorrentStatus {
             id,
             name: name.to_owned(),
+            save_path: PathBuf::from("/tmp"),
             total_bytes: 1024,
             state: TorrentState::Downloading,
             progress: 0.5,

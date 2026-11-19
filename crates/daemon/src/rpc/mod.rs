@@ -2,7 +2,7 @@
 
 pub mod tls;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -91,6 +91,7 @@ pub struct AppState {
     store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
     data_dir: PathBuf,
+    download_dir: PathBuf,
 }
 
 impl AppState {
@@ -102,6 +103,7 @@ impl AppState {
         store: Box<dyn StateStore>,
         token: impl Into<String>,
         data_dir: PathBuf,
+        download_dir: PathBuf,
     ) -> Self {
         Self {
             engine: Arc::new(Mutex::new(engine)),
@@ -110,6 +112,7 @@ impl AppState {
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
             data_dir,
+            download_dir,
         }
     }
 
@@ -208,11 +211,12 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<AddTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let request = request.into_inner();
+        let save_path = resolve_save_path(&self.state.download_dir, &request.save_path);
         let spec = AddTorrent {
             name: request.name,
             total_bytes: request.total_bytes,
             source: TorrentSource::Metainfo(request.metainfo),
-            save_path: PathBuf::from(request.save_path),
+            save_path,
             resume_data: None,
         };
         let name = spec.name.clone();
@@ -434,6 +438,24 @@ fn engine_status(error: EngineError) -> Status {
     }
 }
 
+/// Resolves a client-supplied save path against the daemon download directory.
+///
+/// An empty path means "the daemon default". Relative paths are anchored to
+/// that directory so the result never depends on the daemon's working
+/// directory.
+fn resolve_save_path(download_dir: &Path, requested: &str) -> PathBuf {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return download_dir.to_path_buf();
+    }
+    let path = Path::new(requested);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        download_dir.join(path)
+    }
+}
+
 fn to_proto_state(state: &EngineState) -> TorrentState {
     match state {
         EngineState::Queued => TorrentState::Queued,
@@ -454,6 +476,7 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
     Torrent {
         id: status.id,
         name: status.name,
+        save_path: status.save_path.to_string_lossy().into_owned(),
         total_bytes: status.total_bytes,
         state: to_proto_state(&status.state) as i32,
         progress: status.progress,
@@ -506,4 +529,34 @@ pub fn spawn_mirror(
     watch: broadcast::Sender<EngineEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_mirror(mirror, events, watch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_save_path;
+
+    #[test]
+    fn empty_save_path_uses_the_daemon_default() {
+        let dir = std::path::Path::new("/srv/downloads");
+        assert_eq!(resolve_save_path(dir, ""), dir.to_path_buf());
+        assert_eq!(resolve_save_path(dir, "   "), dir.to_path_buf());
+    }
+
+    #[test]
+    fn relative_save_path_is_anchored_to_the_download_dir() {
+        let dir = std::path::Path::new("/srv/downloads");
+        assert_eq!(
+            resolve_save_path(dir, "movies"),
+            std::path::PathBuf::from("/srv/downloads/movies")
+        );
+    }
+
+    #[test]
+    fn absolute_save_path_is_kept() {
+        let dir = std::path::Path::new("/srv/downloads");
+        assert_eq!(
+            resolve_save_path(dir, "/mnt/other"),
+            std::path::PathBuf::from("/mnt/other")
+        );
+    }
 }

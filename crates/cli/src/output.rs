@@ -12,6 +12,7 @@ pub fn torrent_json(torrent: &Torrent) -> Value {
     json!({
         "id": torrent.id,
         "name": torrent.name,
+        "save_path": torrent.save_path,
         "state": state_label(torrent.state),
         "progress": torrent.progress,
         "total_bytes": torrent.total_bytes,
@@ -52,6 +53,7 @@ pub fn print_torrent(torrent: &Torrent) {
     println!("state:    {}", state_label(torrent.state));
     println!("progress: {:.1}%", torrent.progress * 100.0);
     println!("size:     {}", format_bytes(torrent.total_bytes));
+    println!("save:     {}", torrent.save_path);
     println!("down:     {}", format_rate(torrent.download_rate));
     println!("up:       {}", format_rate(torrent.upload_rate));
     if !torrent.error.is_empty() {

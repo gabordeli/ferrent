@@ -2,6 +2,7 @@
 //! the Rust side talks to it over a command channel and receives deltas on a
 //! broadcast channel.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -429,6 +430,7 @@ fn convert_status(status: FfiStatus) -> TorrentStatus {
     TorrentStatus {
         id: status.id,
         name: status.name.to_string(),
+        save_path: PathBuf::from(status.save_path.to_string()),
         total_bytes: status.total_bytes,
         state: state_from_code(status.state, error),
         progress: status.progress,

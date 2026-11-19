@@ -4,6 +4,7 @@ pub(crate) mod ffi {
         found: bool,
         id: u64,
         name: String,
+        save_path: String,
         total_bytes: u64,
         state: i32,
         progress: f32,
