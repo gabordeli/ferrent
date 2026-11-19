@@ -99,6 +99,7 @@ async fn run_cli_with_token(
     args: &[&str],
 ) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_ferrent-cli"))
+        .env("FERRENT_BUGSINK_DSN", "")
         .arg("--server")
         .arg(server.uri())
         .arg("--ca")

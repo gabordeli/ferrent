@@ -11,7 +11,11 @@ pub const DEFAULT_DSN: &str = "https://13faf88a2a1e46458c7a3fbf35eca231@cirice-b
 ///
 /// Keep the returned guard alive for the lifetime of the process.
 pub fn init(service: &str) -> sentry::ClientInitGuard {
-    let dsn = env::var("FERRENT_BUGSINK_DSN").unwrap_or_else(|_| DEFAULT_DSN.to_owned());
+    let dsn = env::var("FERRENT_BUGSINK_DSN").ok();
+    if dsn.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        return sentry::init(());
+    }
+    let dsn = dsn.unwrap_or_else(|| DEFAULT_DSN.to_owned());
     let environment = env::var("FERRENT_ENV").unwrap_or_else(|_| "production".to_owned());
     let mut options = sentry::ClientOptions::default();
     options.release = sentry::release_name!();
