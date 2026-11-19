@@ -1584,8 +1584,9 @@ impl App {
             return;
         };
         let (width, height) = modal.size();
-        let limit_x = ((self.window_width - width) / 2.0).max(0.0);
-        let limit_y = ((self.window_height - height) / 2.0).max(0.0);
+        let margin = 8.0;
+        let limit_x = ((self.window_width - width) / 2.0 - margin).max(0.0);
+        let limit_y = ((self.window_height - height) / 2.0 - margin).max(0.0);
         self.modal_offset.0 = self.modal_offset.0.clamp(-limit_x, limit_x);
         self.modal_offset.1 = self.modal_offset.1.clamp(-limit_y, limit_y);
     }
