@@ -28,7 +28,8 @@ class Session {
     rust::Vec<uint8_t> take_resume(uint64_t id);
     bool pause(uint64_t id);
     bool resume(uint64_t id);
-    bool remove(uint64_t id);
+    bool remove(uint64_t id, bool delete_files);
+    bool move_in_queue(uint64_t id, bool up);
     FfiStatus status(uint64_t id) const;
     rust::Vec<FfiFile> files(uint64_t id) const;
     rust::Vec<FfiPeer> peers(uint64_t id) const;

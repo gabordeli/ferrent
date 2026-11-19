@@ -14,6 +14,32 @@ const NAME: &str = "name";
 const SAVE_PATH: &str = "save_path";
 const METAINFO: &str = "metainfo";
 const FAST_RESUME: &str = "fastresume";
+/// Single record holding the download queue order (ids, little endian u64).
+const QUEUE_ORDER: &str = "queue:order";
+
+/// Persists the download queue order.
+pub fn save_queue_order(store: &mut dyn StateStore, ids: &[TorrentId]) -> Result<(), StoreError> {
+    let mut value = Vec::with_capacity(ids.len() * 8);
+    for id in ids {
+        value.extend_from_slice(&id.to_le_bytes());
+    }
+    store.batch(vec![StoreOp::Put {
+        key: QUEUE_ORDER.to_owned(),
+        value,
+    }])
+}
+
+/// Loads the persisted download queue order.
+pub fn load_queue_order(store: &dyn StateStore) -> Result<Vec<TorrentId>, StoreError> {
+    let Some(bytes) = store.get(QUEUE_ORDER)? else {
+        return Ok(Vec::new());
+    };
+    Ok(bytes
+        .chunks_exact(8)
+        .filter_map(|chunk| <[u8; 8]>::try_from(chunk).ok())
+        .map(u64::from_le_bytes)
+        .collect())
+}
 
 /// One torrent record persisted across daemon restarts.
 #[derive(Debug, Clone, PartialEq, Eq)]

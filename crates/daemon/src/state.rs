@@ -22,6 +22,7 @@ pub enum TorrentSort {
     Progress,
     DownloadRate,
     UploadRate,
+    Queue,
 }
 
 /// Server-side query. `limit == 0` means "no limit".
@@ -35,6 +36,15 @@ pub struct TorrentQuery {
     pub descending: bool,
     pub offset: usize,
     pub limit: usize,
+}
+
+/// Sort key for the download queue: torrents without an engine position last.
+fn queue_key(status: &TorrentStatus) -> i32 {
+    if status.queue_position < 0 {
+        i32::MAX
+    } else {
+        status.queue_position
+    }
 }
 
 /// Proto `TorrentState` code for a status, so the query and the GUI agree.
@@ -53,7 +63,18 @@ pub fn state_code(state: &TorrentState) -> i32 {
 #[derive(Debug)]
 struct MirrorData {
     torrents: BTreeMap<TorrentId, Arc<TorrentStatus>>,
+    /// Download queue order; the index is the torrent's queue position.
+    order: Vec<TorrentId>,
     dirty: BTreeSet<TorrentId>,
+}
+
+/// Reassigns queue positions from the order vector.
+fn normalize_queue(data: &mut MirrorData) {
+    for (index, id) in data.order.iter().enumerate() {
+        if let Some(status) = data.torrents.get_mut(id) {
+            Arc::make_mut(status).queue_position = index as i32;
+        }
+    }
 }
 
 /// Concurrent state mirror.
@@ -76,6 +97,7 @@ impl StateMirror {
             snapshot: ArcSwap::from_pointee(BTreeMap::new()),
             data: Mutex::new(MirrorData {
                 torrents: BTreeMap::new(),
+                order: Vec::new(),
                 dirty: BTreeSet::new(),
             }),
             snapshot_dirty: AtomicBool::new(false),
@@ -87,12 +109,46 @@ impl StateMirror {
         {
             let mut data = self.data.lock().expect("state mirror poisoned");
             for status in statuses {
-                data.dirty.insert(status.id);
-                data.torrents.insert(status.id, Arc::new(status));
+                let id = status.id;
+                data.dirty.insert(id);
+                data.torrents.insert(id, Arc::new(status));
+                if !data.order.contains(&id) {
+                    data.order.push(id);
+                }
+            }
+            normalize_queue(&mut data);
+        }
+        self.snapshot_dirty.store(true, Ordering::Release);
+        self.publish();
+    }
+
+    /// Moves a torrent one slot up or down in the download queue.
+    ///
+    /// Returns `false` when the id is unknown; a torrent already at the edge
+    /// stays put but still counts as found.
+    pub fn move_in_queue(&self, id: TorrentId, up: bool) -> bool {
+        {
+            let mut data = self.data.lock().expect("state mirror poisoned");
+            let Some(index) = data.order.iter().position(|queued| *queued == id) else {
+                return false;
+            };
+            let target = if up {
+                index.checked_sub(1)
+            } else if index + 1 < data.order.len() {
+                Some(index + 1)
+            } else {
+                None
+            };
+            if let Some(target) = target {
+                data.order.swap(index, target);
+                normalize_queue(&mut data);
+            } else {
+                return true;
             }
         }
         self.snapshot_dirty.store(true, Ordering::Release);
         self.publish();
+        true
     }
 
     /// Applies one engine delta. The snapshot becomes visible on `publish`.
@@ -101,8 +157,18 @@ impl StateMirror {
             let mut data = self.data.lock().expect("state mirror poisoned");
             match event {
                 EngineEvent::Added(status) => {
-                    data.dirty.insert(status.id);
-                    data.torrents.insert(status.id, Arc::new(status));
+                    let id = status.id;
+                    let mut status = status;
+                    let position = match data.order.iter().position(|queued| *queued == id) {
+                        Some(index) => index,
+                        None => {
+                            data.order.push(id);
+                            data.order.len() - 1
+                        }
+                    };
+                    status.queue_position = position as i32;
+                    data.dirty.insert(id);
+                    data.torrents.insert(id, Arc::new(status));
                 }
                 EngineEvent::StateChanged { id, state } => {
                     let changed = if let Some(status) = data.torrents.get_mut(&id) {
@@ -120,6 +186,7 @@ impl StateMirror {
                     progress,
                     download_rate,
                     upload_rate,
+                    queue_position: _,
                 } => {
                     let changed = if let Some(status) = data.torrents.get_mut(&id) {
                         let status = Arc::make_mut(status);
@@ -136,6 +203,10 @@ impl StateMirror {
                 }
                 EngineEvent::Removed { id } => {
                     data.torrents.remove(&id);
+                    if let Some(index) = data.order.iter().position(|queued| *queued == id) {
+                        data.order.remove(index);
+                        normalize_queue(&mut data);
+                    }
                     data.dirty.insert(id);
                 }
             }
@@ -215,6 +286,7 @@ impl StateMirror {
                 TorrentSort::Progress => left.progress.total_cmp(&right.progress),
                 TorrentSort::DownloadRate => left.download_rate.cmp(&right.download_rate),
                 TorrentSort::UploadRate => left.upload_rate.cmp(&right.upload_rate),
+                TorrentSort::Queue => queue_key(left).cmp(&queue_key(right)),
             };
             let ordering = if query.descending {
                 ordering.reverse()
@@ -294,6 +366,7 @@ mod tests {
             seeds: 0,
             peers: 0,
             eta_seconds: 0,
+            queue_position: 1,
         }
     }
 
@@ -304,6 +377,42 @@ mod tests {
             upload_rate: id / 2,
             ..status(id, &format!("torrent-{id:04}"))
         }));
+    }
+
+    #[test]
+    fn queue_moves_and_removals_renumber() {
+        fn order(mirror: &StateMirror) -> Vec<u64> {
+            mirror
+                .query(&TorrentQuery {
+                    sort: TorrentSort::Queue,
+                    ..TorrentQuery::default()
+                })
+                .into_iter()
+                .map(|torrent| torrent.id)
+                .collect()
+        }
+
+        let mirror = StateMirror::new();
+        mirror.seed(vec![
+            status(1, "Alpha"),
+            status(2, "beta"),
+            status(3, "Gamma"),
+        ]);
+        assert_eq!(order(&mirror), vec![1, 2, 3]);
+
+        assert!(mirror.move_in_queue(3, true));
+        assert_eq!(order(&mirror), vec![1, 3, 2]);
+        assert_eq!(order(&mirror), vec![1, 3, 2]);
+
+        // Already at the top: found, but nothing changes.
+        assert!(mirror.move_in_queue(1, true));
+        assert_eq!(order(&mirror), vec![1, 3, 2]);
+
+        assert!(!mirror.move_in_queue(42, false));
+
+        mirror.apply(EngineEvent::Removed { id: 1 });
+        mirror.publish();
+        assert_eq!(order(&mirror), vec![3, 2]);
     }
 
     #[test]
@@ -320,6 +429,7 @@ mod tests {
             progress: 0.9,
             download_rate: 100,
             upload_rate: 10,
+            queue_position: 0,
         });
         mirror.apply(EngineEvent::StateChanged {
             id: 1,
@@ -388,6 +498,7 @@ mod tests {
             progress: 0.7,
             download_rate: 1,
             upload_rate: 1,
+            queue_position: 0,
         });
         assert_eq!(mirror.take_dirty(), BTreeSet::from([2]));
 
@@ -407,6 +518,7 @@ mod tests {
                 progress: 0.5,
                 download_rate: step,
                 upload_rate: 0,
+                queue_position: 0,
             });
         }
         mirror.publish();

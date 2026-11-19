@@ -105,7 +105,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
     let store = RedbStore::open(data_dir.join("state.redb"))?;
-    let persisted = persist::load_torrents(&store)?;
+    let mut persisted = persist::load_torrents(&store)?;
+    let queue_order = persist::load_queue_order(&store)?;
+    order_for_restore(&mut persisted, &queue_order);
     let restored_count = persisted.len();
 
     #[cfg(feature = "libtorrent")]
@@ -179,7 +181,10 @@ async fn shutdown_signal() -> Result<(), Box<dyn Error>> {
 async fn save_fastresumes(state: Arc<AppState>) {
     let ids: Vec<u64> = state
         .mirror_handle()
-        .query(&TorrentQuery::default())
+        .query(&TorrentQuery {
+            sort: ferrent_daemon::state::TorrentSort::Queue,
+            ..TorrentQuery::default()
+        })
         .into_iter()
         .map(|torrent| torrent.id)
         .collect();
@@ -222,6 +227,25 @@ async fn save_fastresumes(state: Arc<AppState>) {
                 ids.len()
             );
         }
+        if let Err(error) = persist::save_queue_order(&mut **store, &ids) {
+            eprintln!("failed to save queue order: {error}");
+        }
     })
     .await;
+}
+
+/// Restores torrents in the persisted queue order, so libtorrent reassigns the
+/// same positions; ids missing from the record keep their id order at the end.
+fn order_for_restore(torrents: &mut [persist::PersistedTorrent], order: &[u64]) {
+    let rank: std::collections::BTreeMap<u64, usize> = order
+        .iter()
+        .enumerate()
+        .map(|(rank, id)| (*id, rank))
+        .collect();
+    torrents.sort_by_key(|torrent| {
+        (
+            rank.get(&torrent.id).copied().unwrap_or(usize::MAX),
+            torrent.id,
+        )
+    });
 }

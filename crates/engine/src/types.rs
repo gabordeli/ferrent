@@ -49,6 +49,15 @@ pub struct TorrentStatus {
     pub peers: u32,
     /// Estimated seconds to completion; zero when unknown.
     pub eta_seconds: u32,
+    /// Position in the download queue; negative when the engine has none.
+    pub queue_position: i32,
+}
+
+/// Direction of a queue move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueDirection {
+    Up,
+    Down,
 }
 
 /// Where a new torrent comes from.
@@ -96,6 +105,7 @@ pub enum EngineEvent {
         progress: f32,
         download_rate: u64,
         upload_rate: u64,
+        queue_position: i32,
     },
     Removed {
         id: TorrentId,

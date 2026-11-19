@@ -20,8 +20,8 @@ use ferrent_protocol::v1::{SortField, Torrent, TorrentFile, TorrentPeer, Torrent
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    Column as WidgetColumn, button, column, container, horizontal_space, mouse_area, row,
-    scrollable, text, text_input, vertical_space,
+    Column as WidgetColumn, button, checkbox, column, container, horizontal_space, mouse_area, row,
+    scrollable, text, text_input, tooltip, vertical_space,
 };
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, mouse};
 
@@ -138,9 +138,17 @@ enum Message {
         action: TorrentAction,
         errors: Vec<String>,
     },
-    AddPathChanged(String),
     AddSavePathChanged(String),
-    AddTorrent,
+    AddNameChanged(String),
+    AddConfirmed,
+    PickTorrent,
+    TorrentPicked(Option<PathBuf>),
+    OpenRemove,
+    RemoveConfirmed,
+    ToggleRemoveFiles(bool),
+    QueueMove(bool),
+    QueueMoved(Vec<String>),
+    ToggleSearch,
     TorrentAdded(Result<u64, String>),
     FileDropped(PathBuf),
     OpenServers,
@@ -200,6 +208,8 @@ impl DetailsTab {
 enum Modal {
     Servers,
     Settings,
+    AddTorrent,
+    Remove,
 }
 
 impl Modal {
@@ -207,6 +217,8 @@ impl Modal {
         match self {
             Self::Servers => "Servers",
             Self::Settings => "Settings",
+            Self::AddTorrent => "Add torrent",
+            Self::Remove => "Remove torrents",
         }
     }
 
@@ -214,6 +226,8 @@ impl Modal {
         match self {
             Self::Servers => (880.0, 620.0),
             Self::Settings => (560.0, 380.0),
+            Self::AddTorrent => (620.0, 320.0),
+            Self::Remove => (480.0, 260.0),
         }
     }
 }
@@ -248,10 +262,12 @@ struct App {
 
     add_path: String,
     add_save_path: String,
-    add_id: text_input::Id,
+    add_name: String,
     add_in_flight: bool,
     action_in_flight: bool,
     sidebar_collapsed: bool,
+    search_visible: bool,
+    remove_delete_files: bool,
 
     modal: Option<Modal>,
     modal_offset: (f32, f32),
@@ -318,7 +334,7 @@ impl Default for App {
             filter: String::new(),
             filter_id: text_input::Id::new("filter"),
             filter_settle: 0,
-            sort: SortField::Id,
+            sort: SortField::Queue,
             descending: false,
             page: Page::default(),
             page_offset: None,
@@ -332,10 +348,12 @@ impl Default for App {
             pending_select: None,
             add_path: String::new(),
             add_save_path: String::new(),
-            add_id: text_input::Id::new("add-path"),
+            add_name: String::new(),
             add_in_flight: false,
             action_in_flight: false,
             sidebar_collapsed: false,
+            search_visible: false,
+            remove_delete_files: false,
             modal: None,
             modal_offset: (0.0, 0.0),
             modal_drag: None,
@@ -518,15 +536,26 @@ impl App {
                 action,
                 errors,
             } => self.action_finished(*undo, action, errors),
-            Message::AddPathChanged(value) => {
-                self.add_path = value;
-                Task::none()
-            }
             Message::AddSavePathChanged(value) => {
                 self.add_save_path = value;
                 Task::none()
             }
-            Message::AddTorrent => self.add_current_torrent(),
+            Message::AddNameChanged(value) => {
+                self.add_name = value;
+                Task::none()
+            }
+            Message::AddConfirmed => self.confirm_add_torrent(),
+            Message::PickTorrent => self.pick_torrent(),
+            Message::TorrentPicked(path) => self.torrent_picked(path),
+            Message::OpenRemove => self.open_remove_modal(),
+            Message::RemoveConfirmed => self.confirm_remove(),
+            Message::ToggleRemoveFiles(value) => {
+                self.remove_delete_files = value;
+                Task::none()
+            }
+            Message::QueueMove(up) => self.queue_move(up),
+            Message::QueueMoved(errors) => self.queue_moved(errors),
+            Message::ToggleSearch => self.toggle_search(),
             Message::TorrentAdded(result) => self.torrent_added(result),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenServers => self.open_servers(),
@@ -1013,11 +1042,12 @@ impl App {
         if let Some(menu) = self.context {
             if let Some(action) = table::menu_action_at(&menu, point) {
                 self.context = None;
-                return self.start_action(match action {
+                let action = match action {
                     MenuAction::Pause => TorrentAction::Pause,
                     MenuAction::Resume => TorrentAction::Resume,
-                    MenuAction::Remove => TorrentAction::Remove,
-                });
+                    MenuAction::Remove => return self.open_remove_modal(),
+                };
+                return self.start_action(action);
             }
         }
         if point.y < table::HEADER_HEIGHT {
@@ -1216,7 +1246,7 @@ impl App {
                     torrent.upload_rate = 0;
                 }
             }
-            TorrentAction::Remove => {
+            TorrentAction::Remove { .. } => {
                 self.page
                     .torrents
                     .retain(|torrent| !self.selected.contains(&torrent.id));
@@ -1238,7 +1268,7 @@ impl App {
         self.action_in_flight = false;
         if errors.is_empty() {
             self.status = format!("{} ok ({} torrent(s))", action.label(), undo.selected.len());
-            if action == TorrentAction::Remove {
+            if matches!(action, TorrentAction::Remove { .. }) {
                 self.refresh_page()
             } else {
                 Task::none()
@@ -1271,8 +1301,9 @@ impl App {
         self.add_in_flight = true;
         self.status = format!("Adding {path}...");
         let path = PathBuf::from(path);
+        let name = self.add_name.trim().to_owned();
         Task::perform(
-            async move { actions::add(&client, &path, &save_path).await },
+            async move { actions::add(&client, &path, &save_path, &name).await },
             Message::TorrentAdded,
         )
     }
@@ -1305,8 +1336,125 @@ impl App {
             self.status = "Only .torrent files can be dropped".to_owned();
             return Task::none();
         }
+        self.prepare_add(path);
+        Task::none()
+    }
+
+    /// Prefills the add form and opens the confirmation modal.
+    fn prepare_add(&mut self, path: PathBuf) {
+        self.add_name = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
         self.add_path = path.display().to_string();
+        self.open_modal(Modal::AddTorrent);
+    }
+
+    fn pick_torrent(&mut self) -> Task<Message> {
+        if self.client.is_none() {
+            return Task::none();
+        }
+        Task::perform(
+            async {
+                rfd::AsyncFileDialog::new()
+                    .add_filter("BitTorrent", &["torrent"])
+                    .pick_file()
+                    .await
+                    .map(|handle| handle.path().to_path_buf())
+            },
+            Message::TorrentPicked,
+        )
+    }
+
+    fn torrent_picked(&mut self, path: Option<PathBuf>) -> Task<Message> {
+        if let Some(path) = path {
+            self.prepare_add(path);
+        }
+        Task::none()
+    }
+
+    fn confirm_add_torrent(&mut self) -> Task<Message> {
+        self.modal = None;
         self.add_current_torrent()
+    }
+
+    fn open_remove_modal(&mut self) -> Task<Message> {
+        if self.selected.is_empty() {
+            self.status = "Select torrents to remove".to_owned();
+            return Task::none();
+        }
+        self.remove_delete_files = false;
+        self.open_modal(Modal::Remove);
+        Task::none()
+    }
+
+    fn confirm_remove(&mut self) -> Task<Message> {
+        self.modal = None;
+        self.start_action(TorrentAction::Remove {
+            delete_files: self.remove_delete_files,
+        })
+    }
+
+    /// Moves the selected unfinished torrents as a block; completed torrents
+    /// keep their place because the queue has no meaning for them.
+    fn queue_move(&mut self, up: bool) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let mut ids: Vec<(i32, u64)> = self
+            .selected_torrents
+            .values()
+            .filter(|torrent| torrent.state != TorrentState::Seeding as i32)
+            .map(|torrent| (torrent.queue_position, torrent.id))
+            .collect();
+        if ids.is_empty() {
+            self.status = "Only unfinished torrents can be reordered".to_owned();
+            return Task::none();
+        }
+        ids.sort_by_key(|(position, id)| {
+            (if *position < 0 { i32::MAX } else { *position }, *id)
+        });
+        if !up {
+            ids.reverse();
+        }
+        self.sort = SortField::Queue;
+        self.descending = false;
+        Task::perform(
+            async move {
+                let mut errors = Vec::new();
+                for (_, id) in ids {
+                    if let Err(error) = actions::move_in_queue(&client, id, up).await {
+                        errors.push(error);
+                    }
+                }
+                errors
+            },
+            Message::QueueMoved,
+        )
+    }
+
+    fn queue_moved(&mut self, errors: Vec<String>) -> Task<Message> {
+        if errors.is_empty() {
+            self.status = "Queue order updated".to_owned();
+        } else {
+            self.status = format!("Queue move failed: {}", errors.join("; "));
+        }
+        self.reset_page();
+        self.request_page(0)
+    }
+
+    fn toggle_search(&mut self) -> Task<Message> {
+        self.search_visible = !self.search_visible;
+        if self.search_visible {
+            return text_input::focus(self.filter_id.clone());
+        }
+        if self.filter.is_empty() {
+            return Task::none();
+        }
+        self.filter.clear();
+        self.reset_page();
+        self.request_page(0)
     }
 
     fn open_servers(&mut self) -> Task<Message> {
@@ -1456,13 +1604,13 @@ impl App {
                 Key::Character("f") => return text_input::focus(self.filter_id.clone()),
                 Key::Character("r") => return self.refresh_page(),
                 Key::Character("a") => return self.select_all_page(),
-                Key::Character("o") => return text_input::focus(self.add_id.clone()),
+                Key::Character("o") => return self.pick_torrent(),
                 _ => {}
             }
         }
         match key.as_ref() {
             Key::Named(Named::Space) => self.toggle_pause(),
-            Key::Named(Named::Delete) => self.start_action(TorrentAction::Remove),
+            Key::Named(Named::Delete) => self.open_remove_modal(),
             Key::Named(Named::Escape) => {
                 self.context = None;
                 self.clear_selection();
@@ -1564,6 +1712,8 @@ impl App {
         let (panel, size) = match modal {
             Modal::Servers => (self.server_manager_view(), modal.size()),
             Modal::Settings => (self.settings_view(), modal.size()),
+            Modal::AddTorrent => (self.add_torrent_view(), modal.size()),
+            Modal::Remove => (self.remove_view(), modal.size()),
         };
         let overlay = self.modal_overlay(panel, size);
         iced::widget::stack![base, overlay].into()
@@ -1629,6 +1779,62 @@ impl App {
         ]
         .spacing(8);
         modal_panel(Modal::Settings, body.into())
+    }
+
+    fn add_torrent_view(&self) -> Element<'_, Message> {
+        let body = column![
+            detail_row("File", self.add_path.clone(), theme::TEXT_MUTED),
+            text("Name").size(11).color(theme::TEXT_MUTED),
+            text_input("Torrent name", &self.add_name)
+                .on_input(Message::AddNameChanged)
+                .width(Length::Fill),
+            text("Save path").size(11).color(theme::TEXT_MUTED),
+            text_input("Save path (daemon default)", &self.add_save_path)
+                .on_input(Message::AddSavePathChanged)
+                .width(Length::Fill),
+            row![
+                horizontal_space(),
+                action_button("Cancel", Message::CloseModal, true),
+                action_button("Add torrent", Message::AddConfirmed, !self.add_in_flight),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(8);
+        modal_panel(Modal::AddTorrent, body.into())
+    }
+
+    fn remove_view(&self) -> Element<'_, Message> {
+        let count = self.selected.len();
+        let bytes: u64 = self
+            .selected_torrents
+            .values()
+            .map(|torrent| torrent.total_bytes)
+            .sum();
+        let body = column![
+            text(format!(
+                "Remove {count} torrent{}?",
+                if count == 1 { "" } else { "s" }
+            ))
+            .size(13),
+            text(format!(
+                "{} of data on the daemon host.",
+                format_size(bytes)
+            ))
+            .size(11)
+            .color(theme::TEXT_MUTED),
+            checkbox("Include downloaded files", self.remove_delete_files)
+                .on_toggle(Message::ToggleRemoveFiles),
+            row![
+                horizontal_space(),
+                action_button("Cancel", Message::CloseModal, true),
+                action_button("Remove", Message::RemoveConfirmed, true),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(10);
+        modal_panel(Modal::Remove, body.into())
     }
 
     fn server_manager_view(&self) -> Element<'_, Message> {
@@ -2070,41 +2276,65 @@ impl App {
 
     fn toolbar_view(&self) -> Element<'_, Message> {
         let selected = self.selected.len();
-        let search = row![
-            text_input("Search torrents…", &self.filter)
-                .id(self.filter_id.clone())
-                .on_input(Message::FilterChanged)
-                .width(Length::Fill),
-            action_button("Refresh", Message::Refresh, true),
-            action_button("Pause", Message::Action(TorrentAction::Pause), selected > 0),
-            action_button(
-                "Resume",
+        let unfinished = self
+            .selected_torrents
+            .values()
+            .any(|torrent| torrent.state != TorrentState::Seeding as i32);
+        let icons = row![
+            toolbar_icon(glyph::PLUS, "Add torrent", Message::PickTorrent, true),
+            toolbar_icon(glyph::TRASH, "Remove selected", Message::OpenRemove, selected > 0),
+            toolbar_icon(
+                glyph::SEARCH,
+                "Search",
+                Message::ToggleSearch,
+                true
+            ),
+            toolbar_icon(
+                glyph::PAUSE,
+                "Pause selected",
+                Message::Action(TorrentAction::Pause),
+                selected > 0
+            ),
+            toolbar_icon(
+                glyph::PLAY,
+                "Resume selected",
                 Message::Action(TorrentAction::Resume),
                 selected > 0
             ),
-            action_button(
-                "Remove",
-                Message::Action(TorrentAction::Remove),
-                selected > 0
+            toolbar_icon(
+                glyph::ARROW_UP,
+                "Move up in queue",
+                Message::QueueMove(true),
+                unfinished
             ),
+            toolbar_icon(
+                glyph::ARROW_DOWN,
+                "Move down in queue",
+                Message::QueueMove(false),
+                unfinished
+            ),
+            Element::<Message>::from(horizontal_space()),
+            toolbar_icon(glyph::REFRESH, "Refresh", Message::Refresh, true),
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center);
 
-        let add = row![
-            text_input("Path to .torrent", &self.add_path)
-                .id(self.add_id.clone())
-                .on_input(Message::AddPathChanged)
-                .width(Length::Fill),
-            text_input("Save path (daemon default)", &self.add_save_path)
-                .on_input(Message::AddSavePathChanged)
-                .width(Length::Fixed(190.0)),
-            action_button("Add torrent", Message::AddTorrent, !self.add_in_flight),
-        ]
-        .spacing(6)
-        .align_y(iced::Alignment::Center);
+        let search: Element<'_, Message> = if self.search_visible {
+            row![
+                toolbar_icon(glyph::CLOSE, "Close search", Message::ToggleSearch, true),
+                text_input("Search torrents…", &self.filter)
+                    .id(self.filter_id.clone())
+                    .on_input(Message::FilterChanged)
+                    .width(Length::Fill),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            iced::widget::Space::with_height(0).into()
+        };
 
-        container(column![search, add].spacing(6))
+        container(column![icons, search].spacing(6))
             .padding([8, 12])
             .width(Length::Fill)
             .style(|_theme: &iced::Theme| container::Style {
@@ -2669,6 +2899,48 @@ fn nav_padding(expanded: bool) -> iced::Padding {
     } else {
         iced::Padding::from([8, 0])
     }
+}
+
+fn toolbar_icon(
+    icon: char,
+    label: &'static str,
+    message: Message,
+    enabled: bool,
+) -> Element<'static, Message> {
+    let content = text(icon)
+        .font(icons::solid())
+        .size(13.0)
+        .color(if enabled {
+            theme::TEXT_SECONDARY
+        } else {
+            theme::TEXT_MUTED
+        });
+    let labeled = tooltip(
+        content,
+        text(label).size(11),
+        iced::widget::tooltip::Position::Top,
+    )
+    .gap(6);
+    let mut control = button(labeled).padding([7, 10]).style(move |_theme, _status| {
+        button::Style {
+            background: Some(if enabled {
+                theme::BG_SECONDARY
+            } else {
+                theme::BG
+            }
+            .into()),
+            border: iced::Border {
+                color: theme::BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..button::Style::default()
+        }
+    });
+    if enabled {
+        control = control.on_press(message);
+    }
+    control.into()
 }
 
 fn icon_button(icon: char, message: Message) -> Element<'static, Message> {

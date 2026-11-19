@@ -13,6 +13,7 @@ pub fn torrent_json(torrent: &Torrent) -> Value {
         "id": torrent.id,
         "name": torrent.name,
         "save_path": torrent.save_path,
+        "queue_position": torrent.queue_position,
         "state": state_label(torrent.state),
         "progress": torrent.progress,
         "total_bytes": torrent.total_bytes,

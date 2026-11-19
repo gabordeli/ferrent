@@ -17,10 +17,11 @@ use ferrent_protocol::v1::{
     GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
     GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
     GetTorrentTrackersRequest, GetTorrentTrackersResponse, ListTorrentsRequest,
-    ListTorrentsResponse, TorrentFile, TorrentPeer, TorrentTracker,
-    PauseTorrentRequest, PauseTorrentResponse, Progress, RemoveTorrentRequest,
+    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
+    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
     RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SortField,
-    StateChanged, Torrent, TorrentState, WatchRequest, WatchResponse,
+    StateChanged, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker, WatchRequest,
+    WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -265,11 +266,28 @@ impl Ferrent for FerrentService {
         request: Request<RemoveTorrentRequest>,
     ) -> Result<Response<RemoveTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
-        let id = request.into_inner().id;
-        self.with_engine(move |engine| engine.remove(id)).await?;
+        let request = request.into_inner();
+        let id = request.id;
+        let delete_files = request.delete_files;
+        self.with_engine(move |engine| engine.remove(id, delete_files))
+            .await?;
         self.persist(move |store| persist::remove_torrent(store, id))
             .await?;
         Ok(Response::new(RemoveTorrentResponse {}))
+    }
+
+    async fn move_torrent(
+        &self,
+        request: Request<MoveTorrentRequest>,
+    ) -> Result<Response<MoveTorrentResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let id = request.id;
+        let up = direction_from_proto(request.direction) == ferrent_engine::QueueDirection::Up;
+        if !self.state.mirror.move_in_queue(id, up) {
+            return Err(Status::not_found(format!("torrent {id}")));
+        }
+        Ok(Response::new(MoveTorrentResponse {}))
     }
 
     async fn get_torrent(
@@ -486,6 +504,7 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
         peers: status.peers,
         eta_seconds: status.eta_seconds,
         error,
+        queue_position: status.queue_position,
     }
 }
 
@@ -501,11 +520,13 @@ fn to_proto_watch(event: EngineEvent) -> WatchResponse {
             progress,
             download_rate,
             upload_rate,
+            queue_position,
         } => WatchEvent::Progress(Progress {
             id,
             progress,
             download_rate,
             upload_rate,
+            queue_position,
         }),
         EngineEvent::Removed { id } => WatchEvent::Removed(Removed { id }),
     };
@@ -518,7 +539,17 @@ fn sort_from_proto(value: i32) -> TorrentSort {
         SortField::Progress => TorrentSort::Progress,
         SortField::DownloadRate => TorrentSort::DownloadRate,
         SortField::UploadRate => TorrentSort::UploadRate,
+        SortField::Queue => TorrentSort::Queue,
         SortField::Id | SortField::Unspecified => TorrentSort::Id,
+    }
+}
+
+fn direction_from_proto(value: i32) -> ferrent_engine::QueueDirection {
+    match ProtoQueueDirection::try_from(value).unwrap_or(ProtoQueueDirection::Unspecified) {
+        ProtoQueueDirection::Down => ferrent_engine::QueueDirection::Down,
+        ProtoQueueDirection::Up | ProtoQueueDirection::Unspecified => {
+            ferrent_engine::QueueDirection::Up
+        }
     }
 }
 

@@ -130,7 +130,10 @@ async fn tls_auth_and_crud() {
         .await
         .expect("resume");
     client
-        .remove_torrent(RemoveTorrentRequest { id: added.id })
+        .remove_torrent(RemoveTorrentRequest {
+            id: added.id,
+            delete_files: false,
+        })
         .await
         .expect("remove");
     tokio::time::sleep(Duration::from_millis(150)).await;

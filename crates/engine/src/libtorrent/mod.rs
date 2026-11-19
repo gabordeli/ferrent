@@ -57,6 +57,12 @@ enum Command {
     },
     Remove {
         id: TorrentId,
+        delete_files: bool,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    Move {
+        id: TorrentId,
+        up: bool,
         reply: Sender<Result<(), EngineError>>,
     },
     Files {
@@ -165,9 +171,27 @@ impl TorrentEngine for LibtorrentEngine {
         Self::recv(response)
     }
 
-    fn remove(&mut self, id: TorrentId) -> Result<(), EngineError> {
+    fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError> {
         let (reply, response) = mpsc::channel();
-        self.send(Command::Remove { id, reply })?;
+        self.send(Command::Remove {
+            id,
+            delete_files,
+            reply,
+        })?;
+        Self::recv(response)
+    }
+
+    fn move_in_queue(
+        &mut self,
+        id: TorrentId,
+        direction: crate::QueueDirection,
+    ) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::Move {
+            id,
+            up: direction == crate::QueueDirection::Up,
+            reply,
+        })?;
         Self::recv(response)
     }
 
@@ -323,11 +347,23 @@ fn run_worker(
                     Err(EngineError::NotFound { id })
                 });
             }
-            Ok(Command::Remove { id, reply }) => {
-                let ok = session.pin_mut().remove(id);
+            Ok(Command::Remove {
+                id,
+                delete_files,
+                reply,
+            }) => {
+                let ok = session.pin_mut().remove(id, delete_files);
                 if ok {
                     let _ = events.send(EngineEvent::Removed { id });
                 }
+                let _ = reply.send(if ok {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                });
+            }
+            Ok(Command::Move { id, up, reply }) => {
+                let ok = session.pin_mut().move_in_queue(id, up);
                 let _ = reply.send(if ok {
                     Ok(())
                 } else {
@@ -439,6 +475,7 @@ fn convert_status(status: FfiStatus) -> TorrentStatus {
         seeds: status.seeds.max(0).unsigned_abs(),
         peers: status.peers.max(0).unsigned_abs(),
         eta_seconds: u32::try_from(status.eta_seconds.max(0)).unwrap_or(u32::MAX),
+        queue_position: status.queue_position,
     }
 }
 
@@ -453,6 +490,7 @@ fn convert_event(event: FfiEvent) -> Option<EngineEvent> {
             progress: event.progress,
             download_rate: event.download_rate,
             upload_rate: event.upload_rate,
+            queue_position: event.queue_position,
         }),
         3 => Some(EngineEvent::Removed { id: event.id }),
         _ => None,

@@ -4,14 +4,15 @@ use std::path::Path;
 
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest,
+    AddTorrentRequest, MoveTorrentRequest, PauseTorrentRequest, QueueDirection,
+    RemoveTorrentRequest, ResumeTorrentRequest,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TorrentAction {
     Pause,
     Resume,
-    Remove,
+    Remove { delete_files: bool },
 }
 
 impl TorrentAction {
@@ -20,7 +21,7 @@ impl TorrentAction {
         match self {
             Self::Pause => "pause",
             Self::Resume => "resume",
-            Self::Remove => "remove",
+            Self::Remove { .. } => "remove",
         }
     }
 }
@@ -39,8 +40,11 @@ pub async fn apply(client: &AuthClient, action: TorrentAction, ids: &[u64]) -> V
                 .resume_torrent(ResumeTorrentRequest { id: *id })
                 .await
                 .map(|_| ()),
-            TorrentAction::Remove => client
-                .remove_torrent(RemoveTorrentRequest { id: *id })
+            TorrentAction::Remove { delete_files } => client
+                .remove_torrent(RemoveTorrentRequest {
+                    id: *id,
+                    delete_files,
+                })
                 .await
                 .map(|_| ()),
         };
@@ -51,15 +55,41 @@ pub async fn apply(client: &AuthClient, action: TorrentAction, ids: &[u64]) -> V
     errors
 }
 
+/// Moves one torrent up or down in the daemon's download queue.
+pub async fn move_in_queue(client: &AuthClient, id: u64, up: bool) -> Result<(), String> {
+    let mut client = client.clone();
+    let direction = if up {
+        QueueDirection::Up
+    } else {
+        QueueDirection::Down
+    };
+    client
+        .move_torrent(MoveTorrentRequest {
+            id,
+            direction: direction as i32,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|status| format!("{id}: {:?}: {}", status.code(), status.message()))
+}
+
 /// Reads a local `.torrent` and sends its raw metainfo bytes to the daemon.
-pub async fn add(client: &AuthClient, path: &Path, save_path: &str) -> Result<u64, String> {
+pub async fn add(
+    client: &AuthClient,
+    path: &Path,
+    save_path: &str,
+    display_name: &str,
+) -> Result<u64, String> {
     let metainfo =
         std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("torrent")
-        .to_owned();
+    let name = if display_name.trim().is_empty() {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("torrent")
+            .to_owned()
+    } else {
+        display_name.trim().to_owned()
+    };
     let mut client = client.clone();
     let response = client
         .add_torrent(AddTorrentRequest {

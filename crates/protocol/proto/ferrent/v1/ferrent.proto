@@ -26,6 +26,8 @@ service Ferrent {
   rpc GetTorrentTrackers(GetTorrentTrackersRequest) returns (GetTorrentTrackersResponse);
   // Streams torrent deltas to the client.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Moves a torrent up or down in the download queue.
+  rpc MoveTorrent(MoveTorrentRequest) returns (MoveTorrentResponse);
 }
 
 // Request for aggregate daemon status.
@@ -92,10 +94,33 @@ message ResumeTorrentResponse {}
 message RemoveTorrentRequest {
   // Torrent id.
   uint64 id = 1;
+  // Delete the torrent's downloaded files from the save path.
+  bool delete_files = 2;
 }
 
 // Response of a successful removal.
 message RemoveTorrentResponse {}
+
+// Direction of a queue move.
+enum QueueDirection {
+  // Defaults to up.
+  QUEUE_DIRECTION_UNSPECIFIED = 0;
+  // Move the torrent towards the front of the queue.
+  QUEUE_DIRECTION_UP = 1;
+  // Move the torrent towards the back of the queue.
+  QUEUE_DIRECTION_DOWN = 2;
+}
+
+// Request to move a torrent in the download queue.
+message MoveTorrentRequest {
+  // Torrent id.
+  uint64 id = 1;
+  // Which way to move.
+  QueueDirection direction = 2;
+}
+
+// Response of a successful queue move.
+message MoveTorrentResponse {}
 
 // Request for one torrent snapshot.
 message GetTorrentRequest {
@@ -153,6 +178,8 @@ message Torrent {
   uint32 eta_seconds = 11;
   // Directory the torrent's files are written to, as the daemon resolved it.
   string save_path = 12;
+  // Position in the download queue; negative when the engine has none.
+  int32 queue_position = 13;
 }
 
 // Sort key for the torrent list.
@@ -169,6 +196,8 @@ enum SortField {
   SORT_FIELD_DOWNLOAD_RATE = 4;
   // Sort by upload rate.
   SORT_FIELD_UPLOAD_RATE = 5;
+  // Sort by download queue position.
+  SORT_FIELD_QUEUE = 6;
 }
 
 // Request for a filtered, sorted, paginated list.
@@ -231,6 +260,8 @@ message Progress {
   uint64 download_rate = 3;
   // Current upload rate in bytes per second.
   uint64 upload_rate = 4;
+  // Position in the download queue; negative when the engine has none.
+  int32 queue_position = 5;
 }
 
 // Removal delta.

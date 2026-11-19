@@ -14,6 +14,7 @@ pub(crate) mod ffi {
         peers: i32,
         eta_seconds: i64,
         error: String,
+        queue_position: i32,
     }
 
     struct FfiFile {
@@ -45,6 +46,7 @@ pub(crate) mod ffi {
         progress: f32,
         download_rate: u64,
         upload_rate: u64,
+        queue_position: i32,
     }
 
     unsafe extern "C++" {
@@ -74,7 +76,8 @@ pub(crate) mod ffi {
         fn take_resume(self: Pin<&mut Session>, id: u64) -> Vec<u8>;
         fn pause(self: Pin<&mut Session>, id: u64) -> bool;
         fn resume(self: Pin<&mut Session>, id: u64) -> bool;
-        fn remove(self: Pin<&mut Session>, id: u64) -> bool;
+        fn remove(self: Pin<&mut Session>, id: u64, delete_files: bool) -> bool;
+        fn move_in_queue(self: Pin<&mut Session>, id: u64, up: bool) -> bool;
         fn status(self: &Session, id: u64) -> FfiStatus;
         fn list(self: &Session) -> Vec<FfiStatus>;
         fn files(self: &Session, id: u64) -> Vec<FfiFile>;

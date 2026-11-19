@@ -73,6 +73,7 @@ impl MockEngine {
             progress,
             download_rate,
             upload_rate,
+            queue_position: 0,
         });
         Ok(())
     }
@@ -99,6 +100,7 @@ impl TorrentEngine for MockEngine {
             seeds: 0,
             peers: 0,
             eta_seconds: 0,
+            queue_position: 0,
         };
         self.torrents.insert(id, status.clone());
         self.emit(EngineEvent::Added(status));
@@ -123,6 +125,7 @@ impl TorrentEngine for MockEngine {
             seeds: 0,
             peers: 0,
             eta_seconds: 0,
+            queue_position: 0,
         };
         self.next_id = self.next_id.max(id + 1);
         self.torrents.insert(id, status.clone());
@@ -180,11 +183,24 @@ impl TorrentEngine for MockEngine {
         Ok(())
     }
 
-    fn remove(&mut self, id: TorrentId) -> Result<(), EngineError> {
+    fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError> {
+        let _ = delete_files;
         if self.torrents.remove(&id).is_none() {
             return Err(EngineError::NotFound { id });
         }
         self.emit(EngineEvent::Removed { id });
+        Ok(())
+    }
+
+    fn move_in_queue(
+        &mut self,
+        id: TorrentId,
+        direction: crate::QueueDirection,
+    ) -> Result<(), EngineError> {
+        let _ = direction;
+        if !self.torrents.contains_key(&id) {
+            return Err(EngineError::NotFound { id });
+        }
         Ok(())
     }
 
@@ -309,7 +325,7 @@ mod tests {
         let id = add(&mut engine, "remove-me");
         let _ = recv(&mut events);
 
-        engine.remove(id).expect("remove");
+        engine.remove(id, true).expect("remove");
         match recv(&mut events) {
             EngineEvent::Removed { id: event_id } => assert_eq!(event_id, id),
             other => panic!("unexpected event: {other:?}"),
@@ -349,6 +365,7 @@ mod tests {
                 progress,
                 download_rate,
                 upload_rate,
+                ..
             } => {
                 assert_eq!(event_id, id);
                 assert!((progress - 0.5).abs() < 1e-6);

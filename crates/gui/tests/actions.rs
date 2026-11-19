@@ -34,13 +34,13 @@ async fn adds_pages_and_mutates_torrents() {
     let client = connect_to(&server, ca).await;
 
     let save_path = dir.join("downloads").display().to_string();
-    let first = actions::add(&client, &fixture(), &save_path)
+    let first = actions::add(&client, &fixture(), &save_path, "")
         .await
         .expect("add first");
-    let second = actions::add(&client, &fixture(), &save_path)
+    let second = actions::add(&client, &fixture(), &save_path, "")
         .await
         .expect("add second");
-    let third = actions::add(&client, &fixture(), &save_path)
+    let third = actions::add(&client, &fixture(), &save_path, "")
         .await
         .expect("add third");
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -92,14 +92,28 @@ async fn adds_pages_and_mutates_torrents() {
         ferrent_protocol::v1::TorrentState::Downloading as i32
     );
 
-    let errors = actions::apply(&client, TorrentAction::Remove, &[second]).await;
+    let errors = actions::apply(
+        &client,
+        TorrentAction::Remove {
+            delete_files: false,
+        },
+        &[second],
+    )
+    .await;
     assert!(errors.is_empty(), "{errors:?}");
     tokio::time::sleep(Duration::from_millis(150)).await;
     let page = list(&client, &ListQuery::default()).await.expect("removed");
     assert_eq!(page.total, 2);
     assert!(page.torrents.iter().all(|torrent| torrent.id != second));
 
-    let errors = actions::apply(&client, TorrentAction::Remove, &[999]).await;
+    let errors = actions::apply(
+        &client,
+        TorrentAction::Remove {
+            delete_files: false,
+        },
+        &[999],
+    )
+    .await;
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("NotFound") || errors[0].contains("not found"));
 

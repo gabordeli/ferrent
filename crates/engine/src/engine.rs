@@ -3,8 +3,8 @@
 use tokio::sync::broadcast;
 
 use crate::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentFileInfo, TorrentId,
-    TorrentPeerInfo, TorrentStatus, TorrentTrackerInfo,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, QueueDirection, TorrentFileInfo,
+    TorrentId, TorrentPeerInfo, TorrentStatus, TorrentTrackerInfo,
 };
 
 /// Synchronous torrent engine contract.
@@ -32,7 +32,16 @@ pub trait TorrentEngine: Send + 'static {
     fn resume(&mut self, id: TorrentId) -> Result<(), EngineError>;
 
     /// Removes a torrent and its engine state.
-    fn remove(&mut self, id: TorrentId) -> Result<(), EngineError>;
+    ///
+    /// With `delete_files` the torrent's payload is deleted from its save path.
+    fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError>;
+
+    /// Moves a torrent one slot up or down in the download queue.
+    fn move_in_queue(
+        &mut self,
+        id: TorrentId,
+        direction: QueueDirection,
+    ) -> Result<(), EngineError>;
 
     /// Returns a snapshot of every torrent, sorted by id.
     fn list(&self) -> Vec<TorrentStatus>;

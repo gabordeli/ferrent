@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetTorrentRequest, ListTorrentsRequest, PauseTorrentRequest,
-    RemoveTorrentRequest, ResumeTorrentRequest, SortField, WatchRequest,
+    AddTorrentRequest, GetTorrentRequest, ListTorrentsRequest, MoveTorrentRequest,
+    PauseTorrentRequest, QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest, SortField,
+    WatchRequest,
 };
 use serde_json::json;
 
@@ -101,6 +102,17 @@ enum Command {
     Remove {
         /// Torrent id.
         id: u64,
+        /// Also delete the downloaded files from the save path.
+        #[arg(long)]
+        delete_files: bool,
+    },
+    /// Move a torrent in the download queue.
+    Move {
+        /// Torrent id.
+        id: u64,
+        /// Move towards the back of the queue (default: towards the front).
+        #[arg(long)]
+        down: bool,
     },
     /// Stream torrent deltas until Ctrl-C.
     Watch {
@@ -134,7 +146,7 @@ impl SortArg {
 enum Action {
     Pause,
     Resume,
-    Remove,
+    Remove { delete_files: bool },
 }
 
 impl Action {
@@ -142,7 +154,7 @@ impl Action {
         match self {
             Self::Pause => "paused",
             Self::Resume => "resumed",
-            Self::Remove => "removed",
+            Self::Remove { .. } => "removed",
         }
     }
 }
@@ -255,8 +267,26 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Resume { id } => {
             simple_action(&mut client, id, Action::Resume, json).await?;
         }
-        Command::Remove { id } => {
-            simple_action(&mut client, id, Action::Remove, json).await?;
+        Command::Remove { id, delete_files } => {
+            simple_action(&mut client, id, Action::Remove { delete_files }, json).await?;
+        }
+        Command::Move { id, down } => {
+            let direction = if down {
+                QueueDirection::Down
+            } else {
+                QueueDirection::Up
+            };
+            client
+                .move_torrent(MoveTorrentRequest {
+                    id,
+                    direction: direction as i32,
+                })
+                .await?;
+            if json {
+                output::print_json(&json!({ "ok": true, "id": id }));
+            } else {
+                println!("moved {id} {}", if down { "down" } else { "up" });
+            }
         }
         Command::Watch { count } => {
             let mut stream = client.watch(WatchRequest {}).await?.into_inner();
@@ -300,8 +330,10 @@ async fn simple_action(
         Action::Resume => {
             client.resume_torrent(ResumeTorrentRequest { id }).await?;
         }
-        Action::Remove => {
-            client.remove_torrent(RemoveTorrentRequest { id }).await?;
+        Action::Remove { delete_files } => {
+            client
+                .remove_torrent(RemoveTorrentRequest { id, delete_files })
+                .await?;
         }
     }
 
