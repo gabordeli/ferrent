@@ -1,5 +1,9 @@
 [workspace]
 resolver = "3"
+exclude = [
+    "crates/gui/spikes/iced-spike",
+    "crates/gui/spikes/tauri-spike",
+]
 members = [
     "crates/protocol",
     "crates/engine",

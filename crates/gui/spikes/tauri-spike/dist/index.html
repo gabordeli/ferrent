@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ferrent Tauri spike</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #181a1f;
+        --row-a: #1a1d23;
+        --row-b: #20242b;
+        --fg: #d9dee7;
+        --muted: #8b95a7;
+        --accent: #4f8cff;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+      header {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 0 14px;
+        border-bottom: 1px solid #2b303a;
+      }
+      header .title { font-size: 18px; font-weight: 600; }
+      header .meta { color: var(--muted); }
+      #viewport {
+        position: relative;
+        height: calc(100vh - 48px);
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      #spacer { position: relative; }
+      #rows { position: absolute; top: 0; left: 0; right: 0; }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .row:nth-child(odd) { background: var(--row-a); }
+      .row:nth-child(even) { background: var(--row-b); }
+      .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .num {
+        flex: 0 0 128px;
+        width: 128px;
+        text-align: right;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .bar {
+        flex: 0 0 70px;
+        width: 70px;
+        height: 6px;
+        border-radius: 3px;
+        background: #2b303a;
+        overflow: hidden;
+      }
+      .bar > span { display: block; height: 100%; background: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="title">Ferrent Tauri spike</span>
+      <span class="meta" id="row-count"></span>
+    </header>
+    <div id="viewport">
+      <div id="spacer"><div id="rows"></div></div>
+    </div>
+    <script src="main.js"></script>
+  </body>
+</html>

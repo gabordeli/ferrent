@@ -1,3 +1,5 @@
 /target
 /logs/
 /.playwright-mcp/
+/crates/gui/spikes/*/target/
+/crates/gui/spikes/tauri-spike/gen/

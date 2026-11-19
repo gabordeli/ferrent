@@ -199,7 +199,7 @@
 - [ ] `docs/adr/0003-gui-framework.md` rögzíti a döntést számokkal.
 - [ ] A vesztes prototípus nem kerül a release binárisba.
 
-**Files:** `crates/gui/spikes/`, `docs/adr/0003-gui-framework.md`
+**Files:** `crates/gui/spikes/`, `docs/adr/0003-gui-framework.md`, `docs/measurements/m2-gui-spike.md`
 
 ### M2-T2 – GUI shell, kapcsolat, TLS pinning
 

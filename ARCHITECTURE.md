@@ -109,8 +109,10 @@ ferrent/
 
 ### 4.4 `gui` – `ferrent-gui` thin client
 
-- **Technológia:** natív GPU-gyorsított Rust GUI (`iced`) vagy `Tauri`. A végleges döntés az M2 spike mérése után születik.
-- **Követelmény:** virtualizált lista/táblázat (csak a látható ~30–50 sor renderelése), 4 000+ sornál is 60–120 FPS.
+- **Technológia:** natív GPU-gyorsított Rust GUI (`iced` 0.13, ADR 0003). A
+  `Tauri` csak akkor jön újra szóba, ha a WebUI/gRPC-Web válik fontossá.
+- **Követelmény:** virtualizált lista/táblázat (csak a látható ~30–50 sor
+  renderelése), 4 000+ sornál is 60–120 FPS.
 - **RAM:** `iced` ~30–50 MB; `Tauri` ~100–180 MB (WebView).
 - **Kapcsolat:** TLS pinning, mentett szerverprofilok, újracsatlakozás; a daemon oldali szűrés/rendezés használata.
 
@@ -180,7 +182,7 @@ ferrent/
 | 1 | `libtorrent` 1.2.x vagy 2.0.x | M0 | **2.0.11** – ADR 0001, engine-szintű mérés |
 | 2 | gRPC vagy WebSocket + bináris | M1 | Prototípus; ha a `tonic` codegen/streaming súrlódik, váltás |
 | 3 | `redb` vagy SQLite | M1 | **redb 2.6.4** – ADR 0002 |
-| 4 | `iced` vagy `Tauri` | M2 | 4 000 soros spike: RAM, FPS, fejlesztési idő; ADR |
+| 4 | `iced` vagy `Tauri` | M2 | **iced 0.13** – ADR 0003; Tauri ~518 MB RSS vs iced ~99 MB |
 | 5 | Licenc | M0 | MIT/Apache-2.0 dual vs. GPL-3.0; felhasználói döntés |
 | 6 | Minimum Debian verzió | M3 | Debian 12 vs 11 build konténer; statikus link teszt |
 
