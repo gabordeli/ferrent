@@ -9,6 +9,9 @@ use ferrent_protocol::v1::{ListTorrentsRequest, SortField, Torrent};
 
 use crate::config::ServerProfile;
 
+/// Number of rows fetched per server-side page request.
+pub const PAGE_SIZE: u32 = 100;
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub server: String,
@@ -24,6 +27,35 @@ impl From<&ServerProfile> for ServerConfig {
             token: profile.token.clone(),
         }
     }
+}
+
+/// Server-side list query.
+#[derive(Debug, Clone)]
+pub struct ListQuery {
+    pub filter: String,
+    pub sort: SortField,
+    pub descending: bool,
+    pub offset: u32,
+    pub limit: u32,
+}
+
+impl Default for ListQuery {
+    fn default() -> Self {
+        Self {
+            filter: String::new(),
+            sort: SortField::Id,
+            descending: false,
+            offset: 0,
+            limit: PAGE_SIZE,
+        }
+    }
+}
+
+/// One server-side page.
+#[derive(Debug, Clone, Default)]
+pub struct Page {
+    pub torrents: Vec<Torrent>,
+    pub total: u32,
 }
 
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
@@ -43,18 +75,22 @@ pub async fn connect(config: &ServerConfig) -> Result<AuthClient, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Returns the first page of torrents from the daemon.
-pub async fn list(client: &AuthClient) -> Result<Vec<Torrent>, String> {
+/// Fetches one filtered, sorted page from the daemon.
+pub async fn list(client: &AuthClient, query: &ListQuery) -> Result<Page, String> {
     let mut client = client.clone();
     let response = client
         .list_torrents(ListTorrentsRequest {
-            filter: String::new(),
-            sort: SortField::Id as i32,
-            descending: false,
-            offset: 0,
-            limit: 100,
+            filter: query.filter.clone(),
+            sort: query.sort as i32,
+            descending: query.descending,
+            offset: query.offset,
+            limit: query.limit,
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
-    Ok(response.into_inner().torrents)
+    let response = response.into_inner();
+    Ok(Page {
+        torrents: response.torrents,
+        total: response.total,
+    })
 }

@@ -226,7 +226,7 @@
 - [ ] Pause/resume/remove optimista UI + hiba esetén visszaállítás.
 - [ ] Gyakori műveletek billentyűparancsról; dokumentálva.
 
-**Files:** `crates/gui/src/table.rs`, `crates/gui/src/actions.rs`
+**Files:** `crates/gui/src/table.rs`, `crates/gui/src/actions.rs`, `crates/gui/src/main.rs`, `crates/gui/src/connection.rs`, `crates/gui/examples/demo_server.rs`, `docs/gui.md`, `docs/measurements/m2-gui-table.md`
 
 ### M2-T4 – MVP end-to-end acceptance
 
