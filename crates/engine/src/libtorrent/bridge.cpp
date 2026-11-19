@@ -268,6 +268,74 @@ bool Session::remove(uint64_t id) {
     return true;
 }
 
+rust::Vec<FfiFile> Session::files(uint64_t id) const {
+    rust::Vec<FfiFile> out;
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return out;
+    }
+    auto info = it->second.torrent_file();
+    if (!info) {
+        return out;
+    }
+    auto const &storage = info->files();
+    auto priorities = it->second.file_priorities();
+    auto progress = it->second.file_progress();
+    for (lt::file_index_t index{0}; index < storage.end_file(); ++index) {
+        auto const slot = static_cast<std::size_t>(static_cast<int>(index));
+        FfiFile file{};
+        file.path = rust::String(storage.file_path(index));
+        file.size = static_cast<uint64_t>(storage.file_size(index));
+        file.priority = slot < priorities.size()
+                             ? static_cast<int32_t>(priorities[slot])
+                             : 0;
+        auto done = slot < progress.size() ? progress[slot] : 0;
+        file.progress = storage.file_size(index) > 0
+                             ? static_cast<float>(done) / static_cast<float>(storage.file_size(index))
+                             : 0.0f;
+        out.push_back(std::move(file));
+    }
+    return out;
+}
+
+rust::Vec<FfiPeer> Session::peers(uint64_t id) const {
+    rust::Vec<FfiPeer> out;
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return out;
+    }
+    std::vector<lt::peer_info> peers;
+    it->second.get_peer_info(peers);
+    for (auto const &peer : peers) {
+        FfiPeer item{};
+        item.endpoint = rust::String(peer.ip.address().to_string() + ":" +
+                                     std::to_string(peer.ip.port()));
+        item.client = rust::String(peer.client);
+        item.progress = peer.progress;
+        item.download_rate = static_cast<uint64_t>(std::max(peer.down_speed, 0));
+        item.upload_rate = static_cast<uint64_t>(std::max(peer.up_speed, 0));
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
+    rust::Vec<FfiTracker> out;
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return out;
+    }
+    for (auto const &tracker : it->second.trackers()) {
+        FfiTracker item{};
+        item.url = rust::String(tracker.url);
+        item.status = rust::String(tracker.verified ? "working" : "unverified");
+        item.seeds = 0;
+        item.leechers = 0;
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
 FfiStatus Session::status(uint64_t id) const {
     auto it = impl_->handles.find(id);
     if (it == impl_->handles.end()) {

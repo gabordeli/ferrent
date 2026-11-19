@@ -58,6 +58,18 @@ enum Command {
         id: TorrentId,
         reply: Sender<Result<(), EngineError>>,
     },
+    Files {
+        id: TorrentId,
+        reply: Sender<Result<Vec<crate::TorrentFileInfo>, EngineError>>,
+    },
+    Peers {
+        id: TorrentId,
+        reply: Sender<Result<Vec<crate::TorrentPeerInfo>, EngineError>>,
+    },
+    Trackers {
+        id: TorrentId,
+        reply: Sender<Result<Vec<crate::TorrentTrackerInfo>, EngineError>>,
+    },
     List {
         reply: Sender<Vec<TorrentStatus>>,
     },
@@ -169,6 +181,24 @@ impl TorrentEngine for LibtorrentEngine {
     fn status(&self, id: TorrentId) -> Result<TorrentStatus, EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Status { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn files(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentFileInfo>, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::Files { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn peers(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentPeerInfo>, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::Peers { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn trackers(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentTrackerInfo>, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::Trackers { id, reply })?;
         Self::recv(response)
     }
 
@@ -302,6 +332,46 @@ fn run_worker(
                 } else {
                     Err(EngineError::NotFound { id })
                 });
+            }
+            Ok(Command::Files { id, reply }) => {
+                let files = session
+                    .files(id)
+                    .into_iter()
+                    .map(|file| crate::TorrentFileInfo {
+                        path: file.path.to_string(),
+                        size: file.size,
+                        progress: file.progress,
+                        priority: file.priority,
+                    })
+                    .collect();
+                let _ = reply.send(Ok(files));
+            }
+            Ok(Command::Peers { id, reply }) => {
+                let peers = session
+                    .peers(id)
+                    .into_iter()
+                    .map(|peer| crate::TorrentPeerInfo {
+                        endpoint: peer.endpoint.to_string(),
+                        client: peer.client.to_string(),
+                        progress: peer.progress,
+                        download_rate: peer.download_rate,
+                        upload_rate: peer.upload_rate,
+                    })
+                    .collect();
+                let _ = reply.send(Ok(peers));
+            }
+            Ok(Command::Trackers { id, reply }) => {
+                let trackers = session
+                    .trackers(id)
+                    .into_iter()
+                    .map(|tracker| crate::TorrentTrackerInfo {
+                        url: tracker.url.to_string(),
+                        status: tracker.status.to_string(),
+                        seeds: tracker.seeds,
+                        leechers: tracker.leechers,
+                    })
+                    .collect();
+                let _ = reply.send(Ok(trackers));
             }
             Ok(Command::List { reply }) => {
                 let list = session.list().into_iter().map(convert_status).collect();

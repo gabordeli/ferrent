@@ -8,6 +8,9 @@
 
 struct FfiStatus;
 struct FfiEvent;
+struct FfiFile;
+struct FfiPeer;
+struct FfiTracker;
 
 class Session {
   public:
@@ -27,6 +30,9 @@ class Session {
     bool resume(uint64_t id);
     bool remove(uint64_t id);
     FfiStatus status(uint64_t id) const;
+    rust::Vec<FfiFile> files(uint64_t id) const;
+    rust::Vec<FfiPeer> peers(uint64_t id) const;
+    rust::Vec<FfiTracker> trackers(uint64_t id) const;
     rust::Vec<FfiStatus> list() const;
     rust::Vec<FfiEvent> poll_events();
     void request_updates();

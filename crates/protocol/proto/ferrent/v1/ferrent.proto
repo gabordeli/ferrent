@@ -18,6 +18,12 @@ service Ferrent {
   rpc ListTorrents(ListTorrentsRequest) returns (ListTorrentsResponse);
   // Returns aggregate daemon status for the server list.
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // Returns the file list of one torrent.
+  rpc GetTorrentFiles(GetTorrentFilesRequest) returns (GetTorrentFilesResponse);
+  // Returns the connected peers of one torrent.
+  rpc GetTorrentPeers(GetTorrentPeersRequest) returns (GetTorrentPeersResponse);
+  // Returns the trackers of one torrent.
+  rpc GetTorrentTrackers(GetTorrentTrackersRequest) returns (GetTorrentTrackersResponse);
   // Streams torrent deltas to the client.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
 }
@@ -229,4 +235,57 @@ message Progress {
 message Removed {
   // Torrent id.
   uint64 id = 1;
+}
+
+// One file inside a torrent.
+message TorrentFile {
+  // Path relative to the torrent root.
+  string path = 1;
+  // File size in bytes.
+  uint64 size = 2;
+  // Completion ratio in 0.0..=1.0.
+  float progress = 3;
+  // Engine priority: 0 skip, 1 low, 4 normal, 7 high.
+  int32 priority = 4;
+}
+
+message GetTorrentFilesRequest {
+  uint64 id = 1;
+}
+
+message GetTorrentFilesResponse {
+  repeated TorrentFile files = 1;
+}
+
+// One connected peer.
+message TorrentPeer {
+  string endpoint = 1;
+  string client = 2;
+  float progress = 3;
+  uint64 download_rate = 4;
+  uint64 upload_rate = 5;
+}
+
+message GetTorrentPeersRequest {
+  uint64 id = 1;
+}
+
+message GetTorrentPeersResponse {
+  repeated TorrentPeer peers = 1;
+}
+
+// One tracker announce entry.
+message TorrentTracker {
+  string url = 1;
+  string status = 2;
+  uint32 seeds = 3;
+  uint32 leechers = 4;
+}
+
+message GetTorrentTrackersRequest {
+  uint64 id = 1;
+}
+
+message GetTorrentTrackersResponse {
+  repeated TorrentTracker trackers = 1;
 }

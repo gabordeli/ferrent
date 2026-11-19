@@ -15,7 +15,7 @@ use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
 use ferrent_protocol::client::AuthClient;
-use ferrent_protocol::v1::{SortField, Torrent, TorrentState};
+use ferrent_protocol::v1::{SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker};
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
@@ -119,6 +119,8 @@ enum Message {
     SelectCategory(Option<i32>),
     SelectTab(DetailsTab),
     Resized(f32),
+    DetailsLoaded(Box<DetailsPayload>),
+    DetailsFailed(String),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -156,6 +158,13 @@ enum Message {
     KeyPressed(Key, Modifiers),
     KeyReleased(Key, Modifiers),
     Frame(Instant),
+}
+
+#[derive(Debug, Clone)]
+enum DetailsPayload {
+    Files(Vec<TorrentFile>),
+    Peers(Vec<TorrentPeer>),
+    Trackers(Vec<TorrentTracker>),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -223,6 +232,10 @@ struct App {
     state_filter: Option<i32>,
     details_tab: DetailsTab,
     window_width: f32,
+    details_for: Option<u64>,
+    details_payload: Option<DetailsPayload>,
+    details_error: Option<String>,
+    activity: Vec<String>,
 
     modifiers: Modifiers,
     measure: bool,
@@ -297,6 +310,10 @@ impl Default for App {
             state_filter: None,
             details_tab: DetailsTab::General,
             window_width: 1440.0,
+            details_for: None,
+            details_payload: None,
+            details_error: None,
+            activity: Vec::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
             measure_started: None,
@@ -383,10 +400,22 @@ impl App {
             }
             Message::SelectTab(tab) => {
                 self.details_tab = tab;
-                Task::none()
+                self.load_details()
             }
             Message::Resized(width) => {
                 self.window_width = width;
+                Task::none()
+            }
+            Message::DetailsLoaded(payload) => {
+                if self.details_for == self.selected_torrents.keys().next().copied() {
+                    self.details_payload = Some(*payload);
+                    self.details_error = None;
+                }
+                Task::none()
+            }
+            Message::DetailsFailed(error) => {
+                self.details_error = Some(error);
+                self.details_payload = None;
                 Task::none()
             }
             Message::PageLoaded {
@@ -930,7 +959,7 @@ impl App {
         let torrent = self.page.torrents[index - offset].clone();
         self.context = None;
         self.select_torrent(torrent, index);
-        Task::none()
+        self.load_details()
     }
 
     fn select_torrent(&mut self, torrent: Torrent, index: usize) {
@@ -1870,6 +1899,47 @@ impl App {
             .into()
     }
 
+    fn load_details(&mut self) -> Task<Message> {
+        let Some(id) = self.selected_torrents.keys().next().copied() else {
+            self.details_payload = None;
+            return Task::none();
+        };
+        if self.selected.len() != 1 {
+            self.details_payload = None;
+            return Task::none();
+        }
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        self.details_for = Some(id);
+        self.details_payload = None;
+        self.details_error = None;
+        match self.details_tab {
+            DetailsTab::Files => Task::perform(
+                async move { connection::files(&client, id).await.map(DetailsPayload::Files) },
+                |result| match result {
+                    Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
+                    Err(error) => Message::DetailsFailed(error),
+                },
+            ),
+            DetailsTab::Peers => Task::perform(
+                async move { connection::peers(&client, id).await.map(DetailsPayload::Peers) },
+                |result| match result {
+                    Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
+                    Err(error) => Message::DetailsFailed(error),
+                },
+            ),
+            DetailsTab::Trackers => Task::perform(
+                async move { connection::trackers(&client, id).await.map(DetailsPayload::Trackers) },
+                |result| match result {
+                    Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
+                    Err(error) => Message::DetailsFailed(error),
+                },
+            ),
+            DetailsTab::General | DetailsTab::Activity => Task::none(),
+        }
+    }
+
     fn details_body(&self) -> Element<'_, Message> {
         let dim = theme::TEXT_SECONDARY;
         if self.selected.len() > 1 {
@@ -1945,10 +2015,116 @@ impl App {
             ]
             .spacing(8)
             .into(),
-            tab => text(format!("{} view lands with the details RPC slice.", tab.label()))
-                .size(12)
-                .color(dim)
-                .into(),
+            DetailsTab::Files => self.files_body(),
+            DetailsTab::Peers => self.peers_body(),
+            DetailsTab::Trackers => self.trackers_body(),
+            DetailsTab::Activity => self.activity_body(),
+        }
+    }
+
+    fn files_body(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        match &self.details_payload {
+            Some(DetailsPayload::Files(files)) if !files.is_empty() => {
+                let rows = files
+                    .iter()
+                    .map(|file| {
+                        row![
+                            text(&file.path).size(11).width(Length::Fill),
+                            text(format_size(file.size)).size(11).color(dim),
+                            text(format!("{:.0}%", file.progress * 100.0)).size(11).color(dim),
+                            text(format!("prio {}", file.priority)).size(11).color(dim),
+                        ]
+                        .spacing(16)
+                        .into()
+                    })
+                    .collect::<Vec<Element<Message>>>();
+                scrollable(WidgetColumn::with_children(rows).spacing(2))
+                    .height(Length::Fill)
+                    .into()
+            }
+            Some(_) => text("No files reported.").size(12).color(dim).into(),
+            None => self.pending_details(dim),
+        }
+    }
+
+    fn peers_body(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        match &self.details_payload {
+            Some(DetailsPayload::Peers(peers)) if !peers.is_empty() => {
+                let rows = peers
+                    .iter()
+                    .map(|peer| {
+                        row![
+                            text(&peer.endpoint).size(11).width(Length::Fixed(190.0)),
+                            text(&peer.client).size(11).width(Length::Fill),
+                            text(format!("{:.0}%", peer.progress * 100.0)).size(11).color(dim),
+                            text(format!("↓ {}", table::format_rate(peer.download_rate)))
+                                .size(11)
+                                .color(dim),
+                            text(format!("↑ {}", table::format_rate(peer.upload_rate)))
+                                .size(11)
+                                .color(dim),
+                        ]
+                        .spacing(14)
+                        .into()
+                    })
+                    .collect::<Vec<Element<Message>>>();
+                scrollable(WidgetColumn::with_children(rows).spacing(2))
+                    .height(Length::Fill)
+                    .into()
+            }
+            Some(_) => text("No connected peers.").size(12).color(dim).into(),
+            None => self.pending_details(dim),
+        }
+    }
+
+    fn trackers_body(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        match &self.details_payload {
+            Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
+                let rows = trackers
+                    .iter()
+                    .map(|tracker| {
+                        row![
+                            text(&tracker.url).size(11).width(Length::Fill),
+                            text(&tracker.status).size(11).color(dim),
+                        ]
+                        .spacing(16)
+                        .into()
+                    })
+                    .collect::<Vec<Element<Message>>>();
+                scrollable(WidgetColumn::with_children(rows).spacing(2))
+                    .height(Length::Fill)
+                    .into()
+            }
+            Some(_) => text("No trackers reported.").size(12).color(dim).into(),
+            None => self.pending_details(dim),
+        }
+    }
+
+    fn activity_body(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        if self.activity.is_empty() {
+            return text("No events observed yet.").size(12).color(dim).into();
+        }
+        let rows = self
+            .activity
+            .iter()
+            .rev()
+            .take(40)
+            .map(|line| text(line.clone()).size(11).color(dim).into())
+            .collect::<Vec<Element<Message>>>();
+        scrollable(WidgetColumn::with_children(rows).spacing(2))
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn pending_details(&self, dim: Color) -> Element<'_, Message> {
+        if let Some(error) = &self.details_error {
+            text(format!("Load failed: {error}")).size(12).color(theme::ERROR).into()
+        } else {
+            text("Loading…").size(12).color(dim).into()
         }
     }
 

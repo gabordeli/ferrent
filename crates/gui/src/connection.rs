@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
-    GetStatusRequest, ListTorrentsRequest, SortField, Torrent,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
+    GetTorrentTrackersRequest, ListTorrentsRequest, SortField, Torrent, TorrentFile,
+    TorrentPeer, TorrentTracker,
 };
 
 use crate::config::ServerProfile;
@@ -143,4 +145,37 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
 pub async fn probe(config: &ServerConfig) -> Result<ServerStatus, String> {
     let client = connect(config).await?;
     status(&client).await
+}
+
+/// Fetches the file list of one torrent.
+pub async fn files(client: &AuthClient, id: u64) -> Result<Vec<TorrentFile>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_torrent_files(GetTorrentFilesRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.files)
+}
+
+/// Fetches the connected peers of one torrent.
+pub async fn peers(client: &AuthClient, id: u64) -> Result<Vec<TorrentPeer>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_torrent_peers(GetTorrentPeersRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.peers)
+}
+
+/// Fetches the trackers of one torrent.
+pub async fn trackers(client: &AuthClient, id: u64) -> Result<Vec<TorrentTracker>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_torrent_trackers(GetTorrentTrackersRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.trackers)
 }

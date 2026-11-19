@@ -129,3 +129,31 @@ impl fmt::Display for EngineError {
 }
 
 impl std::error::Error for EngineError {}
+
+/// One file inside a torrent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TorrentFileInfo {
+    pub path: String,
+    pub size: u64,
+    pub progress: f32,
+    pub priority: i32,
+}
+
+/// One connected peer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TorrentPeerInfo {
+    pub endpoint: String,
+    pub client: String,
+    pub progress: f32,
+    pub download_rate: u64,
+    pub upload_rate: u64,
+}
+
+/// One tracker announce entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TorrentTrackerInfo {
+    pub url: String,
+    pub status: String,
+    pub seeds: u32,
+    pub leechers: u32,
+}

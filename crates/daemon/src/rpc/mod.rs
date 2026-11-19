@@ -14,7 +14,10 @@ use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTorrentResponse, GetStatusRequest, GetStatusResponse,
-    GetTorrentRequest, GetTorrentResponse, ListTorrentsRequest, ListTorrentsResponse,
+    GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
+    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
+    GetTorrentTrackersRequest, GetTorrentTrackersResponse, ListTorrentsRequest,
+    ListTorrentsResponse, TorrentFile, TorrentPeer, TorrentTracker,
     PauseTorrentRequest, PauseTorrentResponse, Progress, RemoveTorrentRequest,
     RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SortField,
     StateChanged, Torrent, TorrentState, WatchRequest, WatchResponse,
@@ -299,6 +302,73 @@ impl Ferrent for FerrentService {
         Ok(Response::new(ListTorrentsResponse {
             torrents: torrents.into_iter().map(to_proto_torrent).collect(),
             total: total as u32,
+        }))
+    }
+
+    async fn get_torrent_files(
+        &self,
+        request: Request<GetTorrentFilesRequest>,
+    ) -> Result<Response<GetTorrentFilesResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let id = request.into_inner().id;
+        let files = self
+            .with_engine(move |engine| engine.files(id))
+            .await?;
+        Ok(Response::new(GetTorrentFilesResponse {
+            files: files
+                .into_iter()
+                .map(|file| TorrentFile {
+                    path: file.path,
+                    size: file.size,
+                    progress: file.progress,
+                    priority: file.priority,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn get_torrent_peers(
+        &self,
+        request: Request<GetTorrentPeersRequest>,
+    ) -> Result<Response<GetTorrentPeersResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let id = request.into_inner().id;
+        let peers = self
+            .with_engine(move |engine| engine.peers(id))
+            .await?;
+        Ok(Response::new(GetTorrentPeersResponse {
+            peers: peers
+                .into_iter()
+                .map(|peer| TorrentPeer {
+                    endpoint: peer.endpoint,
+                    client: peer.client,
+                    progress: peer.progress,
+                    download_rate: peer.download_rate,
+                    upload_rate: peer.upload_rate,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn get_torrent_trackers(
+        &self,
+        request: Request<GetTorrentTrackersRequest>,
+    ) -> Result<Response<GetTorrentTrackersResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let id = request.into_inner().id;
+        let trackers = self
+            .with_engine(move |engine| engine.trackers(id))
+            .await?;
+        Ok(Response::new(GetTorrentTrackersResponse {
+            trackers: trackers
+                .into_iter()
+                .map(|tracker| TorrentTracker {
+                    url: tracker.url,
+                    status: tracker.status,
+                    seeds: tracker.seeds,
+                    leechers: tracker.leechers,
+                })
+                .collect(),
         }))
     }
 

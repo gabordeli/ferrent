@@ -2,7 +2,10 @@
 
 use tokio::sync::broadcast;
 
-use crate::{AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentStatus};
+use crate::{
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentFileInfo, TorrentId,
+    TorrentPeerInfo, TorrentStatus, TorrentTrackerInfo,
+};
 
 /// Synchronous torrent engine contract.
 ///
@@ -36,6 +39,24 @@ pub trait TorrentEngine: Send + 'static {
 
     /// Returns one torrent snapshot.
     fn status(&self, id: TorrentId) -> Result<TorrentStatus, EngineError>;
+
+    /// Returns the file list of one torrent.
+    fn files(&mut self, id: TorrentId) -> Result<Vec<TorrentFileInfo>, EngineError> {
+        let _ = id;
+        Ok(Vec::new())
+    }
+
+    /// Returns the connected peers of one torrent.
+    fn peers(&mut self, id: TorrentId) -> Result<Vec<TorrentPeerInfo>, EngineError> {
+        let _ = id;
+        Ok(Vec::new())
+    }
+
+    /// Returns the trackers of one torrent.
+    fn trackers(&mut self, id: TorrentId) -> Result<Vec<TorrentTrackerInfo>, EngineError> {
+        let _ = id;
+        Ok(Vec::new())
+    }
 
     /// Returns the current engine settings.
     fn settings(&self) -> EngineSettings;

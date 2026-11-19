@@ -15,6 +15,28 @@ pub(crate) mod ffi {
         error: String,
     }
 
+    struct FfiFile {
+        path: String,
+        size: u64,
+        progress: f32,
+        priority: i32,
+    }
+
+    struct FfiPeer {
+        endpoint: String,
+        client: String,
+        progress: f32,
+        download_rate: u64,
+        upload_rate: u64,
+    }
+
+    struct FfiTracker {
+        url: String,
+        status: String,
+        seeds: u32,
+        leechers: u32,
+    }
+
     struct FfiEvent {
         kind: i32,
         id: u64,
@@ -54,6 +76,9 @@ pub(crate) mod ffi {
         fn remove(self: Pin<&mut Session>, id: u64) -> bool;
         fn status(self: &Session, id: u64) -> FfiStatus;
         fn list(self: &Session) -> Vec<FfiStatus>;
+        fn files(self: &Session, id: u64) -> Vec<FfiFile>;
+        fn peers(self: &Session, id: u64) -> Vec<FfiPeer>;
+        fn trackers(self: &Session, id: u64) -> Vec<FfiTracker>;
         fn poll_events(self: Pin<&mut Session>) -> Vec<FfiEvent>;
         fn request_updates(self: Pin<&mut Session>);
         fn set_settings(self: Pin<&mut Session>, download_rate_limit: u64, upload_rate_limit: u64);

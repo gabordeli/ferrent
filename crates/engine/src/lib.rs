@@ -15,8 +15,8 @@ pub use engine::TorrentEngine;
 pub use libtorrent::{LibtorrentEngine, make_torrent};
 pub use mock::MockEngine;
 pub use types::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentSource, TorrentState,
-    TorrentStatus,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentFileInfo, TorrentId,
+    TorrentPeerInfo, TorrentSource, TorrentState, TorrentStatus, TorrentTrackerInfo,
 };
 
 /// Version of the engine crate, reported in diagnostics.
