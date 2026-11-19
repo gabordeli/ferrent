@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
+use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::theme;
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -157,6 +158,7 @@ enum Message {
     },
     KeyPressed(Key, Modifiers),
     KeyReleased(Key, Modifiers),
+    ToggleSidebar,
     Frame(Instant),
 }
 
@@ -222,6 +224,7 @@ struct App {
     add_id: text_input::Id,
     add_in_flight: bool,
     action_in_flight: bool,
+    sidebar_collapsed: bool,
 
     servers_open: bool,
     server_rows: Vec<ServerRow>,
@@ -301,6 +304,7 @@ impl Default for App {
             add_id: text_input::Id::new("add-path"),
             add_in_flight: false,
             action_in_flight: false,
+            sidebar_collapsed: false,
             servers_open: false,
             server_rows: Vec::new(),
             server_testing: false,
@@ -532,6 +536,10 @@ impl App {
                     Key::Named(Named::Shift) => self.modifiers.remove(Modifiers::SHIFT),
                     _ => {}
                 }
+                Task::none()
+            }
+            Message::ToggleSidebar => {
+                self.sidebar_collapsed = !self.sidebar_collapsed;
                 Task::none()
             }
             Message::Frame(now) => self.frame(now),
@@ -1760,46 +1768,144 @@ impl App {
     fn sidebar_view(&self) -> Element<'_, Message> {
         let status = self.server_status.clone().unwrap_or_default();
         let active = self.state_filter;
+        let expanded = !self.sidebar_collapsed;
+
+        let mark = container(text("").size(1.0))
+            .width(Length::Fixed(4.0))
+            .height(Length::Fixed(18.0))
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(theme::PRIMARY.into()),
+                border: iced::Border {
+                    color: theme::PRIMARY,
+                    width: 0.0,
+                    radius: 2.0.into(),
+                },
+                ..container::Style::default()
+            });
+        let toggle = icon_button(
+            if expanded {
+                glyph::CHEVRON_LEFT
+            } else {
+                glyph::CHEVRON_RIGHT
+            },
+            Message::ToggleSidebar,
+        );
+
+        let header: Element<Message> = if expanded {
+            row![
+                mark,
+                text("Ferrent").size(18).font(theme::semibold()),
+                horizontal_space(),
+                toggle,
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            row![mark, toggle]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
+
+        let nav: Element<Message> = nav_button(
+            expanded,
+            glyph::LIST,
+            theme::TEXT_SECONDARY,
+            "All torrents",
+            status.torrent_count,
+            None,
+            active,
+        );
+        let downloading = TorrentState::Downloading as i32;
+        let seeding = TorrentState::Seeding as i32;
+        let queued = TorrentState::Queued as i32;
+        let paused = TorrentState::Paused as i32;
+        let error = TorrentState::Error as i32;
+
+        let bottom: Element<Message> = WidgetColumn::with_children(vec![
+            icon_nav(
+                expanded,
+                glyph::SERVER,
+                theme::TEXT_SECONDARY,
+                "Servers",
+                Message::OpenServers,
+            ),
+            icon_nav(
+                expanded,
+                glyph::POWER,
+                theme::TEXT_MUTED,
+                "Disconnect",
+                Message::Disconnect,
+            ),
+        ])
+        .spacing(2)
+        .into();
+
         column![
-            container(
-                row![
-                    container(text("").size(1.0))
-                        .width(Length::Fixed(4.0))
-                        .height(Length::Fixed(18.0))
-                        .style(|_theme: &iced::Theme| container::Style {
-                            background: Some(theme::PRIMARY.into()),
-                            border: iced::Border {
-                                color: theme::PRIMARY,
-                                width: 0.0,
-                                radius: 2.0.into(),
-                            },
-                            ..container::Style::default()
-                        }),
-                    text("Ferrent").size(18).font(theme::semibold()),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([16, 14]),
-            nav_button("All torrents", status.torrent_count, None, active),
-            nav_button("Downloading", status.downloading, Some(3), active),
-            nav_button("Seeding", status.seeding, Some(4), active),
-            nav_button("Queued", status.queued, Some(1), active),
-            nav_button("Paused", status.paused, Some(5), active),
-            nav_stat("Active", status.active),
-            nav_button("Error", status.error, Some(6), active),
+            container(header).padding(if expanded {
+                iced::Padding::from([16, 14])
+            } else {
+                iced::Padding::from([16, 8])
+            }),
+            nav,
+            nav_button(
+                expanded,
+                glyph::DOWNLOAD,
+                table::state_color(downloading),
+                "Downloading",
+                status.downloading,
+                Some(downloading),
+                active,
+            ),
+            nav_button(
+                expanded,
+                glyph::UPLOAD,
+                table::state_color(seeding),
+                "Seeding",
+                status.seeding,
+                Some(seeding),
+                active,
+            ),
+            nav_button(
+                expanded,
+                glyph::QUEUED,
+                table::state_color(queued),
+                "Queued",
+                status.queued,
+                Some(queued),
+                active,
+            ),
+            nav_button(
+                expanded,
+                glyph::PAUSED,
+                table::state_color(paused),
+                "Paused",
+                status.paused,
+                Some(paused),
+                active,
+            ),
+            nav_stat(
+                expanded,
+                glyph::ACTIVE,
+                theme::CONNECTING,
+                "Active",
+                status.active,
+            ),
+            nav_button(
+                expanded,
+                glyph::ERROR,
+                table::state_color(error),
+                "Error",
+                status.error,
+                Some(error),
+                active,
+            ),
             horizontal_space(),
-            container(
-                row![
-                    button(text("Servers…").size(12)).on_press(Message::OpenServers),
-                    button(text("Disconnect").size(12)).on_press(Message::Disconnect),
-                ]
-                .spacing(6),
-            )
-            .padding([10, 12]),
+            container(bottom).padding([10, 8]),
         ]
         .spacing(2)
-        .width(Length::Fixed(216.0))
+        .width(Length::Fixed(if expanded { 216.0 } else { 56.0 }))
         .height(Length::Fill)
         .into()
     }
@@ -2175,52 +2281,178 @@ impl App {
 }
 
 fn nav_button(
+    expanded: bool,
+    icon: char,
+    icon_color: Color,
     label: &'static str,
     count: u32,
     filter: Option<i32>,
     active: Option<i32>,
 ) -> Element<'static, Message> {
     let selected = active == filter;
-    button(
+    let content: Element<Message> = if expanded {
         row![
+            text(icon)
+                .font(icons::solid())
+                .size(13.0)
+                .color(icon_color),
             text(label).size(13),
             horizontal_space(),
             text(count.to_string()).size(11).color(theme::TEXT_MUTED),
         ]
-        .align_y(iced::Alignment::Center),
+        .spacing(10)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else {
+        container(
+            text(icon)
+                .font(icons::solid())
+                .size(14.0)
+                .color(icon_color),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    };
+    button(content)
+        .on_press(Message::SelectCategory(filter))
+        .width(Length::Fill)
+        .padding(nav_padding(expanded))
+        .style(move |_theme: &iced::Theme, _status| button::Style {
+            background: Some(if selected {
+                theme::SURFACE
+            } else {
+                theme::BG_SECONDARY
+            }
+            .into()),
+            text_color: if selected {
+                theme::TEXT
+            } else {
+                theme::TEXT_SECONDARY
+            },
+            border: iced::Border {
+                color: if selected {
+                    theme::PRIMARY
+                } else {
+                    theme::BG_SECONDARY
+                },
+                width: 0.0,
+                radius: 3.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
+}
+
+fn nav_stat(
+    expanded: bool,
+    icon: char,
+    icon_color: Color,
+    label: &'static str,
+    count: u32,
+) -> Element<'static, Message> {
+    let content: Element<Message> = if expanded {
+        row![
+            text(icon)
+                .font(icons::solid())
+                .size(13.0)
+                .color(icon_color),
+            text(label).size(13).color(theme::TEXT_SECONDARY),
+            horizontal_space(),
+            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else {
+        container(
+            text(icon)
+                .font(icons::solid())
+                .size(14.0)
+                .color(icon_color),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    };
+    container(content)
+        .padding(nav_padding(expanded))
+        .width(Length::Fill)
+        .into()
+}
+
+fn nav_padding(expanded: bool) -> iced::Padding {
+    if expanded {
+        iced::Padding::from([7, 12])
+    } else {
+        iced::Padding::from([8, 0])
+    }
+}
+
+fn icon_button(icon: char, message: Message) -> Element<'static, Message> {
+    button(
+        text(icon)
+            .font(icons::solid())
+            .size(11.0)
+            .color(theme::TEXT_SECONDARY),
     )
-    .on_press(Message::SelectCategory(filter))
-    .width(Length::Fill)
-    .padding([7, 12])
-    .style(move |_theme: &iced::Theme, _status| button::Style {
-        background: Some(if selected { theme::SURFACE } else { theme::BG_SECONDARY }.into()),
-        text_color: if selected {
-            theme::TEXT
-        } else {
-            theme::TEXT_SECONDARY
-        },
+    .on_press(message)
+    .padding([4, 6])
+    .style(|_theme: &iced::Theme, _status| button::Style {
+        background: Some(theme::BG_SECONDARY.into()),
         border: iced::Border {
-            color: if selected { theme::PRIMARY } else { theme::BG_SECONDARY },
-            width: 0.0,
-            radius: 3.0.into(),
+            color: theme::BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
         },
         ..button::Style::default()
     })
     .into()
 }
 
-fn nav_stat(label: &'static str, count: u32) -> Element<'static, Message> {
-    container(
+fn icon_nav(
+    expanded: bool,
+    icon: char,
+    icon_color: Color,
+    label: &'static str,
+    message: Message,
+) -> Element<'static, Message> {
+    let content: Element<Message> = if expanded {
         row![
+            text(icon)
+                .font(icons::solid())
+                .size(13.0)
+                .color(icon_color),
             text(label).size(13).color(theme::TEXT_SECONDARY),
-            horizontal_space(),
-            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
         ]
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([7, 12])
-    .width(Length::Fill)
-    .into()
+        .spacing(10)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else {
+        container(
+            text(icon)
+                .font(icons::solid())
+                .size(14.0)
+                .color(icon_color),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    };
+    button(content)
+        .on_press(message)
+        .width(Length::Fill)
+        .padding(nav_padding(expanded))
+        .style(|_theme: &iced::Theme, _status| button::Style {
+            background: Some(theme::BG_SECONDARY.into()),
+            border: iced::Border {
+                color: theme::BG_SECONDARY,
+                width: 0.0,
+                radius: 3.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
 }
 
 fn state_style(state: ConnectionState) -> (&'static str, Color) {
@@ -2287,6 +2519,7 @@ fn main() -> iced::Result {
         .font(theme::REGULAR_BYTES)
         .font(theme::MEDIUM_BYTES)
         .font(theme::SEMIBOLD_BYTES)
+        .font(icons::SOLID_BYTES)
         .subscription(App::subscription)
         .window_size(Size::new(1440.0, 900.0));
 
