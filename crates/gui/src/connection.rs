@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
-use ferrent_protocol::v1::{ListTorrentsRequest, SortField, Torrent};
+use ferrent_protocol::v1::{
+    GetStatusRequest, ListTorrentsRequest, SortField, Torrent,
+};
 
 use crate::config::ServerProfile;
 
@@ -58,6 +60,15 @@ pub struct Page {
     pub total: u32,
 }
 
+/// Aggregate status shown by the server manager.
+#[derive(Debug, Clone, Default)]
+pub struct ServerStatus {
+    pub torrent_count: u32,
+    pub download_rate: u64,
+    pub upload_rate: u64,
+    pub free_space_bytes: u64,
+}
+
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
 pub fn fingerprint(config: &ServerConfig) -> Result<String, String> {
     let pem = fs::read_to_string(&config.ca)
@@ -93,4 +104,26 @@ pub async fn list(client: &AuthClient, query: &ListQuery) -> Result<Page, String
         torrents: response.torrents,
         total: response.total,
     })
+}
+
+/// Fetches aggregate status for the server manager.
+pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_status(GetStatusRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(ServerStatus {
+        torrent_count: response.torrent_count,
+        download_rate: response.download_rate,
+        upload_rate: response.upload_rate,
+        free_space_bytes: response.free_space_bytes,
+    })
+}
+
+/// Connects and validates one profile; used by the server manager.
+pub async fn probe(config: &ServerConfig) -> Result<ServerStatus, String> {
+    let client = connect(config).await?;
+    status(&client).await
 }

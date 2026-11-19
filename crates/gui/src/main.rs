@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
-use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig};
+use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, TABLE_HEIGHT, TABLE_WIDTH, Table,
     TableMessage, VISIBLE_ROWS,
@@ -96,6 +96,14 @@ struct ActionUndo {
 }
 
 #[derive(Debug, Clone)]
+struct ServerRow {
+    name: String,
+    server: String,
+    status: Option<ServerStatus>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     SelectProfile(usize),
     Field(Field, String),
@@ -127,6 +135,18 @@ enum Message {
     AddTorrent,
     TorrentAdded(Result<u64, String>),
     FileDropped(PathBuf),
+    OpenServers,
+    CloseServers,
+    ServerStatus(String, Result<ServerStatus, String>),
+    SelectServer(usize),
+    DeleteServer(String),
+    NewServer,
+    TestServer,
+    ServerTested {
+        profile: ServerProfile,
+        fingerprint: String,
+        result: Result<ServerStatus, String>,
+    },
     KeyPressed(Key, Modifiers),
     KeyReleased(Key, Modifiers),
     Frame(Instant),
@@ -165,6 +185,11 @@ struct App {
     add_id: text_input::Id,
     add_in_flight: bool,
     action_in_flight: bool,
+
+    servers_open: bool,
+    server_rows: Vec<ServerRow>,
+    server_testing: bool,
+    server_message: String,
 
     modifiers: Modifiers,
     measure: bool,
@@ -230,6 +255,10 @@ impl Default for App {
             add_id: text_input::Id::new("add-path"),
             add_in_flight: false,
             action_in_flight: false,
+            servers_open: false,
+            server_rows: Vec::new(),
+            server_testing: false,
+            server_message: String::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
             measure_started: None,
@@ -358,6 +387,53 @@ impl App {
             Message::AddTorrent => self.add_current_torrent(),
             Message::TorrentAdded(result) => self.torrent_added(result),
             Message::FileDropped(path) => self.file_dropped(path),
+            Message::OpenServers => self.open_servers(),
+            Message::CloseServers => {
+                self.servers_open = false;
+                Task::none()
+            }
+            Message::ServerStatus(name, result) => {
+                if let Some(row) = self.server_rows.iter_mut().find(|row| row.name == name) {
+                    match result {
+                        Ok(status) => {
+                            row.status = Some(status);
+                            row.error = None;
+                        }
+                        Err(error) => {
+                            row.status = None;
+                            row.error = Some(error);
+                        }
+                    }
+                }
+                if self
+                    .server_rows
+                    .iter()
+                    .all(|row| row.status.is_some() || row.error.is_some())
+                {
+                    self.server_message.clear();
+                }
+                Task::none()
+            }
+            Message::SelectServer(index) => {
+                if let Some(profile) = self.config.profiles.get(index) {
+                    self.fields = Fields::from_profile(profile);
+                    self.server_message = format!("Editing {}", profile.name);
+                }
+                Task::none()
+            }
+            Message::DeleteServer(name) => self.delete_server(&name),
+            Message::NewServer => {
+                self.fields = Fields::default();
+                self.fields.name = "new".to_owned();
+                self.server_message = "New profile".to_owned();
+                Task::none()
+            }
+            Message::TestServer => self.test_server(),
+            Message::ServerTested {
+                profile,
+                fingerprint,
+                result,
+            } => self.server_tested(profile, fingerprint, result),
             Message::KeyPressed(key, modifiers) => self.key_pressed(key, modifiers),
             Message::KeyReleased(key, modifiers) => {
                 self.modifiers = modifiers;
@@ -1030,12 +1106,143 @@ impl App {
         self.add_current_torrent()
     }
 
+    fn open_servers(&mut self) -> Task<Message> {
+        self.servers_open = true;
+        self.server_rows = self
+            .config
+            .profiles
+            .iter()
+            .map(|profile| ServerRow {
+                name: profile.name.clone(),
+                server: profile.server.clone(),
+                status: None,
+                error: None,
+            })
+            .collect();
+        self.server_message = "Checking servers...".to_owned();
+        let profiles = self.config.profiles.clone();
+        Task::batch(profiles.into_iter().map(|profile| {
+            let name = profile.name.clone();
+            let config = ServerConfig::from(&profile);
+            Task::perform(
+                async move { (name, connection::probe(&config).await) },
+                |(name, result)| Message::ServerStatus(name, result),
+            )
+        }))
+    }
+
+    fn delete_server(&mut self, name: &str) -> Task<Message> {
+        self.config.profiles.retain(|profile| profile.name != name);
+        if self.config.active.as_deref() == Some(name) {
+            self.config.active = None;
+        }
+        if let Err(error) = self.config.save(&self.config_path) {
+            self.server_message = format!("Cannot save config: {error}");
+        } else {
+            self.server_message = format!("Deleted {name}");
+        }
+        self.server_rows.retain(|row| row.name != name);
+        Task::none()
+    }
+
+    fn test_server(&mut self) -> Task<Message> {
+        if self.fields.token.trim().is_empty() {
+            self.server_message = "API token is required".to_owned();
+            return Task::none();
+        }
+        let profile = self.current_profile();
+        if profile.server.is_empty() || profile.ca.as_os_str().is_empty() {
+            self.server_message = "Server URL and CA path are required".to_owned();
+            return Task::none();
+        }
+        let config = ServerConfig::from(&profile);
+        let fingerprint = match connection::fingerprint(&config) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.server_message = error;
+                return Task::none();
+            }
+        };
+        self.server_testing = true;
+        self.server_message = format!("Testing {}...", profile.server);
+        Task::perform(
+            async move { (profile, fingerprint, connection::probe(&config).await) },
+            |(profile, fingerprint, result)| Message::ServerTested {
+                profile,
+                fingerprint,
+                result,
+            },
+        )
+    }
+
+    fn server_tested(
+        &mut self,
+        mut profile: ServerProfile,
+        fingerprint: String,
+        result: Result<ServerStatus, String>,
+    ) -> Task<Message> {
+        self.server_testing = false;
+        match result {
+            Ok(status) => {
+                if profile
+                    .fingerprint
+                    .as_deref()
+                    .is_some_and(|expected| expected != fingerprint)
+                {
+                    self.server_message =
+                        "Certificate changed; the pinned fingerprint differs".to_owned();
+                    return Task::none();
+                }
+                profile.fingerprint = Some(fingerprint);
+                self.config.upsert(profile.clone());
+                if let Err(error) = self.config.save(&self.config_path) {
+                    self.server_message = format!("Cannot save config: {error}");
+                    return Task::none();
+                }
+                if let Some(row) = self
+                    .server_rows
+                    .iter_mut()
+                    .find(|row| row.name == profile.name)
+                {
+                    row.status = Some(status);
+                    row.error = None;
+                } else {
+                    self.server_rows.push(ServerRow {
+                        name: profile.name.clone(),
+                        server: profile.server.clone(),
+                        status: Some(status),
+                        error: None,
+                    });
+                }
+                self.server_message = format!("Saved and connected to {}", profile.name);
+            }
+            Err(error) => {
+                self.server_message = format!("Test failed: {error}");
+                if let Some(row) = self
+                    .server_rows
+                    .iter_mut()
+                    .find(|row| row.name == profile.name)
+                {
+                    row.status = None;
+                    row.error = Some(error);
+                }
+            }
+        }
+        Task::none()
+    }
+
     fn key_pressed(&mut self, key: Key, modifiers: Modifiers) -> Task<Message> {
         self.modifiers = modifiers;
         match key.as_ref() {
             Key::Named(Named::Control) => self.modifiers.insert(Modifiers::CTRL),
             Key::Named(Named::Shift) => self.modifiers.insert(Modifiers::SHIFT),
             _ => {}
+        }
+        if self.servers_open {
+            if matches!(key.as_ref(), Key::Named(Named::Escape)) {
+                self.servers_open = false;
+            }
+            return Task::none();
         }
         if self.client.is_none() {
             return Task::none();
@@ -1146,7 +1353,110 @@ impl App {
         } else {
             self.connect_view()
         };
-        column![content, self.status_bar()].into()
+        let base: Element<Message> = column![content, self.status_bar()].into();
+        if self.servers_open {
+            let modal = container(self.server_manager_view())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(|_theme: &iced::Theme| container::Style {
+                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                    ..container::Style::default()
+                });
+            iced::widget::stack![base, modal].into()
+        } else {
+            base
+        }
+    }
+
+    fn server_manager_view(&self) -> Element<'_, Message> {
+        let rows: Vec<Element<Message>> = self
+            .server_rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let (state, detail) = match (&row.status, &row.error) {
+                    (Some(status), _) => (
+                        "available".to_owned(),
+                        format!(
+                            "{} torrents · ↓ {} · ↑ {} · {} free",
+                            status.torrent_count,
+                            table::format_rate(status.download_rate),
+                            table::format_rate(status.upload_rate),
+                            format_size(status.free_space_bytes)
+                        ),
+                    ),
+                    (None, Some(error)) => ("error".to_owned(), error.clone()),
+                    (None, None) => ("checking...".to_owned(), String::new()),
+                };
+                row![
+                    column![text(row.name.clone()).size(14), text(row.server.clone()).size(11)]
+                        .width(Length::Fixed(250.0))
+                        .spacing(2),
+                    column![text(state).size(12), text(detail).size(12)]
+                        .width(Length::Fill)
+                        .spacing(2),
+                    button("Edit").on_press(Message::SelectServer(index)),
+                    button("Delete").on_press(Message::DeleteServer(row.name.clone())),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+            })
+            .collect();
+
+        let form = column![
+            text("Add / edit server").size(18),
+            text_input("Name", &self.fields.name)
+                .on_input(|value| Message::Field(Field::Name, value))
+                .width(Length::Fill),
+            text_input("Server URL", &self.fields.server)
+                .on_input(|value| Message::Field(Field::Server, value))
+                .width(Length::Fill),
+            text_input("CA certificate (PEM path)", &self.fields.ca)
+                .on_input(|value| Message::Field(Field::Ca, value))
+                .width(Length::Fill),
+            text_input("API token", &self.fields.token)
+                .secure(true)
+                .on_input(|value| Message::Field(Field::Token, value))
+                .width(Length::Fill),
+            row![
+                button("Test & save").on_press(Message::TestServer),
+                button("New").on_press(Message::NewServer),
+                button("Refresh").on_press(Message::OpenServers),
+                button("Close").on_press(Message::CloseServers),
+            ]
+            .spacing(8),
+        ]
+        .spacing(8);
+
+        container(
+            column![
+                text("Servers").size(24),
+                scrollable(WidgetColumn::with_children(rows).spacing(4))
+                    .height(Length::Fill),
+                form,
+                text(&self.server_message).size(12),
+            ]
+            .spacing(10),
+        )
+        .padding(16)
+        .width(Length::Fixed(880.0))
+        .height(Length::Fixed(620.0))
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.base.color.into()),
+                border: iced::Border {
+                    color: palette.background.strong.color,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..container::Style::default()
+            }
+        })
+        .into()
     }
 
     fn connect_view(&self) -> Element<'_, Message> {
@@ -1264,6 +1574,7 @@ impl App {
         let header = row![
             text("Ferrent").size(24),
             text(server),
+            button("Servers").on_press(Message::OpenServers),
             button("Disconnect").on_press(Message::Disconnect),
         ]
         .spacing(16);

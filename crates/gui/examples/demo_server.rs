@@ -72,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         watch,
         Box::new(MemoryStore::new()),
         "secret",
+        data_dir.clone(),
     ));
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;

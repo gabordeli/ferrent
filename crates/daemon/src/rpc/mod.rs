@@ -13,11 +13,11 @@ use ferrent_engine::{
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTorrentResponse, GetTorrentRequest, GetTorrentResponse,
-    ListTorrentsRequest, ListTorrentsResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
-    RemoveTorrentRequest, RemoveTorrentResponse, Removed, ResumeTorrentRequest,
-    ResumeTorrentResponse, SortField, StateChanged, Torrent, TorrentState, WatchRequest,
-    WatchResponse,
+    AddTorrentRequest, AddTorrentResponse, GetStatusRequest, GetStatusResponse,
+    GetTorrentRequest, GetTorrentResponse, ListTorrentsRequest, ListTorrentsResponse,
+    PauseTorrentRequest, PauseTorrentResponse, Progress, RemoveTorrentRequest,
+    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SortField,
+    StateChanged, Torrent, TorrentState, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -71,6 +71,7 @@ pub struct AppState {
     watch: broadcast::Sender<EngineEvent>,
     store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
+    data_dir: PathBuf,
 }
 
 impl AppState {
@@ -81,6 +82,7 @@ impl AppState {
         watch: broadcast::Sender<EngineEvent>,
         store: Box<dyn StateStore>,
         token: impl Into<String>,
+        data_dir: PathBuf,
     ) -> Self {
         Self {
             engine: Arc::new(Mutex::new(engine)),
@@ -88,7 +90,19 @@ impl AppState {
             watch,
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
+            data_dir,
         }
+    }
+
+    #[must_use]
+    pub fn aggregate_status(&self) -> (u32, u64, u64, u64) {
+        let torrents = self.mirror.query(&TorrentQuery::default());
+        let download_rate = torrents.iter().map(|torrent| torrent.download_rate).sum();
+        let upload_rate = torrents.iter().map(|torrent| torrent.upload_rate).sum();
+        let free_space = rustix::fs::statvfs(&self.data_dir)
+            .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize))
+            .unwrap_or(0);
+        (torrents.len() as u32, download_rate, upload_rate, free_space)
     }
 
     #[must_use]
@@ -250,6 +264,21 @@ impl Ferrent for FerrentService {
         Ok(Response::new(ListTorrentsResponse {
             torrents: torrents.into_iter().map(to_proto_torrent).collect(),
             total: total as u32,
+        }))
+    }
+
+    async fn get_status(
+        &self,
+        request: Request<GetStatusRequest>,
+    ) -> Result<Response<GetStatusResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let (torrent_count, download_rate, upload_rate, free_space_bytes) =
+            self.state.aggregate_status();
+        Ok(Response::new(GetStatusResponse {
+            torrent_count,
+            download_rate,
+            upload_rate,
+            free_space_bytes,
         }))
     }
 

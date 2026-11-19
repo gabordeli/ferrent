@@ -33,7 +33,14 @@ pub async fn start_server(port: u16, tls: TlsMaterial) -> TestServer {
     let (watch, _) = broadcast::channel(64);
     let mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
     let store = Box::new(MemoryStore::new());
-    let state = Arc::new(AppState::new(engine, mirror, watch, store, "secret"));
+    let state = Arc::new(AppState::new(
+        engine,
+        mirror,
+        watch,
+        store,
+        "secret",
+        PathBuf::from("."),
+    ));
 
     let listener = TcpListener::bind(("127.0.0.1", port))
         .await

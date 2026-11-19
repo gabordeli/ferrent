@@ -58,6 +58,7 @@ ferrent-telemetry = { path = "../telemetry" }
 rcgen = "0.14"
 redb = "2"
 rustls-pemfile = "2"
+rustix = { version = "1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 subtle = "2"

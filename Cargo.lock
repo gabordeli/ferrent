@@ -1404,6 +1404,7 @@ dependencies = [
  "ferrent-telemetry",
  "rcgen",
  "redb",
+ "rustix 1.1.6",
  "rustls-pemfile",
  "serde",
  "sha2",

@@ -44,7 +44,14 @@ async fn start_server(token: &str) -> TestServer {
     let (watch, _) = broadcast::channel(64);
     let mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
     let store: Box<dyn StateStore> = Box::new(MemoryStore::new());
-    let state = Arc::new(AppState::new(engine, mirror, watch, store, token));
+    let state = Arc::new(AppState::new(
+        engine,
+        mirror,
+        watch,
+        store,
+        token,
+        std::path::PathBuf::from("."),
+    ));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");
     let listener = TcpListener::bind("127.0.0.1:0")

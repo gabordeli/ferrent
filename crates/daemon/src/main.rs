@@ -119,7 +119,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let store: Box<dyn StateStore> = Box::new(store);
-    let state = Arc::new(AppState::new(engine, mirror, watch, store, token));
+    let state = Arc::new(AppState::new(
+        engine,
+        mirror,
+        watch,
+        store,
+        token,
+        data_dir.clone(),
+    ));
 
     let listener = TcpListener::bind(&bind).await?;
     let local = listener.local_addr()?;

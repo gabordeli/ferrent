@@ -59,7 +59,14 @@ async fn start_server() -> TestServer {
     let (watch, _) = broadcast::channel(64);
     let mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
     let store: Box<dyn StateStore> = Box::new(MemoryStore::new());
-    let state = Arc::new(AppState::new(engine, mirror, watch, store, "secret"));
+    let state = Arc::new(AppState::new(
+        engine,
+        mirror,
+        watch,
+        store,
+        "secret",
+        PathBuf::from("."),
+    ));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");
     let dir = std::env::temp_dir().join(format!(

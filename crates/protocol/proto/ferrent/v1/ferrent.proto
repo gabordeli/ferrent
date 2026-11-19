@@ -16,8 +16,25 @@ service Ferrent {
   rpc GetTorrent(GetTorrentRequest) returns (GetTorrentResponse);
   // Returns a filtered, sorted, paginated torrent list.
   rpc ListTorrents(ListTorrentsRequest) returns (ListTorrentsResponse);
+  // Returns aggregate daemon status for the server list.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   // Streams torrent deltas to the client.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// Request for aggregate daemon status.
+message GetStatusRequest {}
+
+// Aggregate daemon status.
+message GetStatusResponse {
+  // Number of torrents in the mirror.
+  uint32 torrent_count = 1;
+  // Sum of current download rates in bytes per second.
+  uint64 download_rate = 2;
+  // Sum of current upload rates in bytes per second.
+  uint64 upload_rate = 3;
+  // Free bytes on the daemon data directory.
+  uint64 free_space_bytes = 4;
 }
 
 // Request to add a torrent.
