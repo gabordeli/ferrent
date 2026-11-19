@@ -38,6 +38,23 @@ A `libtorrent` backend kapuja:
 ./ci/check-libtorrent.sh
 ```
 
+## Store (M1-T1)
+
+```bash
+cargo test -p ferrent-daemon
+```
+
+A store tesztek redb felett futnak; a `crash_recovery` teszt a
+`crash_writer` bin segítségével SIGKILL-t küld egy nyitott write tranzakcióra,
+majd ellenőrzi, hogy az adatbázis újranyitható és a korábbi commit megvan.
+A 100 ms-os batch-cél a release buildre vonatkozik:
+
+```bash
+cargo test -p ferrent-daemon --release -- --nocapture
+```
+
+A `crash_recovery` csak Unixon fut (SIGKILL).
+
 ## Load harness (M0-T4)
 
 ```bash

@@ -120,7 +120,7 @@
 - [ ] 4 000 rekord betöltése ≤ 2 s; batch write ≤ 100 ms (célérték).
 - [ ] `docs/adr/0002-persistence.md`: redb vs SQLite döntés méréssel.
 
-**Files:** `crates/daemon/src/store/`, `docs/adr/0002-persistence.md`
+**Files:** `crates/daemon/src/store/`, `crates/daemon/tests/crash_recovery.rs`, `crates/daemon/src/bin/crash_writer.rs`, `docs/adr/0002-persistence.md`
 
 ### M1-T2 – State mirror + alert-loop
 

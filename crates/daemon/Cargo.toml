@@ -14,4 +14,9 @@ workspace = true
 name = "ferrentd"
 path = "src/main.rs"
 
+[[bin]]
+name = "crash_writer"
+path = "src/bin/crash_writer.rs"
+
 [dependencies]
+redb = "2"
