@@ -1,0 +1,25 @@
+[Unit]
+Description=Ferrent BitTorrent daemon
+Documentation=https://cirice-gitlab.ddns.net/gabor/ferrent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ferrent
+Group=ferrent
+Environment=FERRENT_CONFIG=/etc/ferrent/config.toml
+ExecStart=/usr/bin/ferrentd
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=120
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=ferrent
+ReadWritePaths=/var/lib/ferrent
+
+[Install]
+WantedBy=multi-user.target

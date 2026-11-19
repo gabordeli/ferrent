@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::error::Error;
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use ferrent_engine::MockEngine;
 use ferrent_engine::TorrentEngine;
 #[cfg(feature = "libtorrent")]
 use ferrent_engine::{EngineSettings, LibtorrentEngine};
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -30,14 +32,68 @@ async fn main() -> Result<(), Box<dyn Error>> {
     result
 }
 
-async fn run() -> Result<(), Box<dyn Error>> {
-    let started = Instant::now();
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+    data_dir: Option<PathBuf>,
+    bind: Option<String>,
+    token_file: Option<PathBuf>,
+}
+
+struct Config {
+    data_dir: PathBuf,
+    bind: String,
+    token: String,
+}
+
+fn load_config() -> Result<Config, Box<dyn Error>> {
+    let path = env::var_os("FERRENT_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/etc/ferrent/config.toml"));
+    let file: FileConfig = if path.is_file() {
+        toml::from_str(&fs::read_to_string(&path)?)?
+    } else {
+        FileConfig::default()
+    };
     let data_dir = env::var_os("FERRENT_DATA_DIR")
         .map(PathBuf::from)
+        .or(file.data_dir)
         .unwrap_or_else(|| PathBuf::from("./ferrent-data"));
-    let token = env::var("FERRENT_TOKEN")
-        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "FERRENT_TOKEN is required"))?;
-    let bind = env::var("FERRENT_BIND").unwrap_or_else(|_| "127.0.0.1:50051".to_owned());
+    let bind = env::var("FERRENT_BIND")
+        .ok()
+        .or(file.bind)
+        .unwrap_or_else(|| "127.0.0.1:50051".to_owned());
+    let token = if let Ok(token) = env::var("FERRENT_TOKEN") {
+        token
+    } else {
+        let token_path = file
+            .token_file
+            .unwrap_or_else(|| PathBuf::from("/etc/ferrent/token"));
+        fs::read_to_string(&token_path)
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("cannot read token file {}: {error}", token_path.display()),
+                )
+            })?
+            .trim()
+            .to_owned()
+    };
+    if token.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "empty API token").into());
+    }
+    Ok(Config {
+        data_dir,
+        bind,
+        token,
+    })
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    let started = Instant::now();
+    let config = load_config()?;
+    let data_dir = config.data_dir;
+    let token = config.token;
+    let bind = config.bind;
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
     let store = RedbStore::open(data_dir.join("state.redb"))?;

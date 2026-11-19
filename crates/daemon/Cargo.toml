@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+description = "Headless Ferrent BitTorrent daemon"
 
 [lints]
 workspace = true
@@ -31,6 +32,24 @@ required-features = ["libtorrent"]
 name = "rpc_bench"
 path = "examples/rpc_bench.rs"
 
+[package.metadata.deb]
+name = "ferrentd"
+maintainer = "Gabor Deli <gabor.deli@gmail.com>"
+copyright = "2026, Gabor Deli"
+license-file = ["../../LICENSE", "0"]
+extended-description = "Headless Ferrent BitTorrent daemon with TLS gRPC, redb state and fastresume restart."
+section = "net"
+priority = "optional"
+depends = "$auto, adduser, init-system-helpers"
+maintainer-scripts = "../../packaging/debian"
+conf-files = ["/etc/ferrent/config.toml"]
+assets = [
+    ["target/release/ferrentd", "usr/bin/", "755"],
+    ["../../packaging/debian/ferrentd.service", "lib/systemd/system/", "644"],
+    ["../../packaging/debian/config.toml", "etc/ferrent/", "640"],
+    ["../../packaging/debian/ferrentd.1", "usr/share/man/man1/", "644"],
+]
+
 [dependencies]
 arc-swap = "1"
 ferrent-engine = { path = "../engine" }
@@ -39,8 +58,10 @@ ferrent-telemetry = { path = "../telemetry" }
 rcgen = "0.14"
 redb = "2"
 rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 subtle = "2"
 tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net", "sync"] }
+toml = "0.8"
 tonic = { version = "0.14", features = ["tls-ring"] }

@@ -1405,10 +1405,12 @@ dependencies = [
  "rcgen",
  "redb",
  "rustls-pemfile",
+ "serde",
  "sha2",
  "subtle",
  "tokio",
  "tokio-stream",
+ "toml",
  "tonic",
 ]
 

@@ -1,0 +1,50 @@
+.TH FERRENTD 1 "2026-11-19" "ferrentd 0.1.0" "Ferrent"
+.SH NAME
+ferrentd \- Ferrent BitTorrent daemon
+.SH SYNOPSIS
+.B ferrentd
+.SH DESCRIPTION
+.B ferrentd
+is the headless BitTorrent daemon. It listens on a TLS gRPC socket, keeps the
+torrent state in a redb database and restores fastresume data after a restart.
+.SH CONFIGURATION
+The daemon reads
+.I /etc/ferrent/config.toml
+by default. The file contains:
+.PP
+.nf
+data_dir = "/var/lib/ferrent"
+bind = "127.0.0.1:50051"
+token_file = "/etc/ferrent/token"
+.fi
+.PP
+The token file must be readable by the
+.B ferrent
+user (mode 0640, owner root:ferrent). The TLS certificate is created on first
+start in
+.IR data_dir .
+.PP
+Environment variables
+.BR FERRENT_DATA_DIR ,
+.BR FERRENT_BIND ,
+.BR FERRENT_TOKEN
+and
+.B FERRENT_CONFIG
+override the file values.
+.SH SERVICE
+.B systemctl start ferrentd
+starts the daemon. The unit waits up to 120 seconds for a clean shutdown so
+that fastresume data can be saved.
+.SH FILES
+.TP
+.I /etc/ferrent/config.toml
+configuration
+.TP
+.I /etc/ferrent/token
+API token (generated on first install)
+.TP
+.I /var/lib/ferrent
+state.redb, TLS material and torrent data
+.SH SEE ALSO
+.BR ferrent-cli (1),
+.BR ferrent-gui (1)
