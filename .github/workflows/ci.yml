@@ -141,6 +141,7 @@ jobs:
           sudo apt-get install -y libtorrent-rasterbar-dev libboost-dev
       - run: cargo clippy -p ferrent-engine --features libtorrent --all-targets -- -D warnings
       - run: cargo test -p ferrent-engine --features libtorrent
+      - run: cargo build -p ferrent-daemon --features libtorrent
 
   test-daemon:
     needs: changes

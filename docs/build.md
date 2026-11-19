@@ -73,6 +73,29 @@ cargo test -p ferrent-daemon --test rpc_tls
   docker run --rm -v "$PWD:/workspace" -w /workspace bufbuild/buf:latest lint
   ```
 
+## CLI és daemon (M1-T4)
+
+```bash
+cargo run -p ferrent-cli -- --help
+cargo test -p ferrent-cli
+```
+
+A CLI teszt in-process daemont indít, így nincs szükség külön szerverre.
+A futtatható daemon:
+
+```bash
+FERRENT_TOKEN=secret FERRENT_DATA_DIR=./ferrent-data \
+cargo run -p ferrent-daemon
+```
+
+Valódi torrent motorral:
+
+```bash
+cargo run -p ferrent-daemon --features libtorrent
+```
+
+A részletes CLI/konfig/JSON/exit-code leírás: `docs/cli.md`.
+
 ## Load harness (M0-T4)
 
 ```bash

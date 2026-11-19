@@ -10,6 +10,10 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+libtorrent = ["ferrent-engine/libtorrent"]
+
 [[bin]]
 name = "ferrentd"
 path = "src/main.rs"
@@ -27,6 +31,6 @@ redb = "2"
 rustls-pemfile = "2"
 sha2 = "0.10"
 subtle = "2"
-tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net", "sync"] }
 tonic = { version = "0.14", features = ["tls-ring"] }

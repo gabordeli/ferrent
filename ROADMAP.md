@@ -162,7 +162,7 @@
 - [ ] Integrációs teszt in-process daemon ellen.
 - [ ] Súgó és exit code-ok dokumentálva.
 
-**Files:** `crates/cli/src/main.rs`, `crates/cli/src/commands/`, `crates/cli/tests/`
+**Files:** `crates/cli/src/main.rs`, `crates/cli/src/config.rs`, `crates/cli/src/output.rs`, `crates/cli/src/error.rs`, `crates/cli/tests/cli.rs`, `crates/daemon/src/main.rs`, `docs/cli.md`
 
 ---
 
