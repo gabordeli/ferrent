@@ -29,11 +29,38 @@ const BG_SELECTED: Color = Color::from_rgb(0.84, 0.89, 1.0);
 const BG_HOVER: Color = Color::from_rgb(0.93, 0.95, 1.0);
 const TEXT: Color = Color::from_rgb(0.12, 0.14, 0.18);
 const TEXT_DIM: Color = Color::from_rgb(0.42, 0.46, 0.52);
+const TEXT_HEADER: Color = Color::from_rgb(0.28, 0.32, 0.38);
 const TEXT_ERROR: Color = Color::from_rgb(0.65, 0.12, 0.12);
+const BAR_TRACK: Color = Color::from_rgb(0.88, 0.90, 0.93);
 const TRACK: Color = Color::from_rgb(0.87, 0.89, 0.92);
 const THUMB: Color = Color::from_rgb(0.58, 0.62, 0.69);
 const MENU_BG: Color = Color::from_rgb(0.98, 0.99, 1.0);
 const MENU_BORDER: Color = Color::from_rgb(0.68, 0.72, 0.78);
+
+const COL_ID_RIGHT: f32 = 50.0;
+const COL_NAME_X: f32 = 60.0;
+const COL_STATE_DOT_X: f32 = 338.0;
+const COL_STATE_X: f32 = 348.0;
+const COL_PROGRESS_X: f32 = 432.0;
+const BAR_WIDTH: f32 = 64.0;
+const BAR_HEIGHT: f32 = 8.0;
+const COL_PCT_X: f32 = 502.0;
+const COL_DOWN_RIGHT: f32 = 618.0;
+const COL_UP_RIGHT: f32 = 706.0;
+
+/// Accent colour per torrent state; used for the state dot and the bar.
+#[must_use]
+pub fn state_color(state: i32) -> Color {
+    match TorrentState::try_from(state).unwrap_or(TorrentState::Unspecified) {
+        TorrentState::Seeding => Color::from_rgb(0.13, 0.55, 0.28),
+        TorrentState::Downloading => Color::from_rgb(0.13, 0.42, 0.78),
+        TorrentState::Checking => Color::from_rgb(0.80, 0.52, 0.06),
+        TorrentState::Queued => Color::from_rgb(0.45, 0.36, 0.66),
+        TorrentState::Paused => Color::from_rgb(0.48, 0.52, 0.58),
+        TorrentState::Error => TEXT_ERROR,
+        TorrentState::Unspecified => TEXT_DIM,
+    }
+}
 
 /// One table column. `State` is displayed but not server-sortable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +261,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             Size::new(bounds.width, HEADER_HEIGHT),
             BG_HEADER,
         );
-        frame.fill_text(header_text(self.sort, self.descending));
+        self.draw_header(&mut frame);
 
         let range = visible_range(self.scroll, self.total);
         let page_end = self.page_offset + self.rows.len();
@@ -259,24 +286,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             );
 
             match torrent {
-                Some(torrent) => {
-                    let color = if torrent.state == TorrentState::Error as i32 {
-                        TEXT_ERROR
-                    } else {
-                        TEXT
-                    };
-                    frame.fill_text(Text {
-                        content: row_text(torrent),
-                        position: Point::new(10.0, y + 4.0),
-                        color,
-                        size: Pixels(13.0),
-                        line_height: LineHeight::default(),
-                        font: Font::MONOSPACE,
-                        horizontal_alignment: alignment::Horizontal::Left,
-                        vertical_alignment: alignment::Vertical::Top,
-                        shaping: Shaping::Basic,
-                    });
-                }
+                Some(torrent) => draw_row(&mut frame, torrent, y),
                 None => {
                     frame.fill_text(Text {
                         content: "loading…".to_owned(),
@@ -317,6 +327,61 @@ impl canvas::Program<TableMessage> for Table<'_> {
 }
 
 impl Table<'_> {
+    fn draw_header(&self, frame: &mut Frame) {
+        let marker = |field: SortField| {
+            if self.sort == field {
+                if self.descending { " v" } else { " ^" }
+            } else {
+                ""
+            }
+        };
+        let cells = [
+            (
+                format!("ID{}", marker(SortField::Id)),
+                COL_ID_RIGHT,
+                alignment::Horizontal::Right,
+            ),
+            (
+                format!("NAME{}", marker(SortField::Name)),
+                COL_NAME_X,
+                alignment::Horizontal::Left,
+            ),
+            (
+                "STATE".to_owned(),
+                COL_STATE_X,
+                alignment::Horizontal::Left,
+            ),
+            (
+                format!("PROGRESS{}", marker(SortField::Progress)),
+                COL_PROGRESS_X,
+                alignment::Horizontal::Left,
+            ),
+            (
+                format!("DOWN{}", marker(SortField::DownloadRate)),
+                COL_DOWN_RIGHT,
+                alignment::Horizontal::Right,
+            ),
+            (
+                format!("UP{}", marker(SortField::UploadRate)),
+                COL_UP_RIGHT,
+                alignment::Horizontal::Right,
+            ),
+        ];
+        for (content, x, horizontal) in cells {
+            frame.fill_text(Text {
+                content,
+                position: Point::new(x, 8.0),
+                color: TEXT_HEADER,
+                size: Pixels(12.0),
+                line_height: LineHeight::default(),
+                font: Font::MONOSPACE,
+                horizontal_alignment: horizontal,
+                vertical_alignment: alignment::Vertical::Top,
+                shaping: Shaping::Basic,
+            });
+        }
+    }
+
     fn draw_scrollbar(&self, frame: &mut Frame, bounds: Rectangle) {
         if self.total == 0 {
             return;
@@ -382,49 +447,115 @@ impl Table<'_> {
     }
 }
 
-fn header_text(sort: SortField, descending: bool) -> Text {
-    let marker = |field: SortField| {
-        if sort == field {
-            if descending { "v" } else { "^" }
-        } else {
-            ""
-        }
-    };
-    let content = format!(
-        "{:>5}  {:<32}  {:<11}  {:<12}  {:>10}  {:>10}",
-        format!("ID{}", marker(SortField::Id)),
-        format!("NAME{}", marker(SortField::Name)),
-        "STATE",
-        format!("PROGRESS{}", marker(SortField::Progress)),
-        format!("DOWN{}", marker(SortField::DownloadRate)),
-        format!("UP{}", marker(SortField::UploadRate)),
+fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32) {
+    let accent = state_color(torrent.state);
+    let text_y = y + 5.0;
+
+    cell(
+        frame,
+        torrent.id.to_string(),
+        COL_ID_RIGHT,
+        text_y,
+        TEXT_DIM,
+        12.0,
+        alignment::Horizontal::Right,
+        Font::MONOSPACE,
     );
-    Text {
-        content,
-        position: Point::new(10.0, 7.0),
-        color: TEXT,
-        size: Pixels(13.0),
-        line_height: LineHeight::default(),
-        font: Font::MONOSPACE,
-        horizontal_alignment: alignment::Horizontal::Left,
-        vertical_alignment: alignment::Vertical::Top,
-        shaping: Shaping::Basic,
+    cell(
+        frame,
+        short_name(&torrent.name),
+        COL_NAME_X,
+        text_y,
+        TEXT,
+        13.0,
+        alignment::Horizontal::Left,
+        Font::default(),
+    );
+    frame.fill_rectangle(
+        Point::new(COL_STATE_DOT_X, y + 9.0),
+        Size::new(6.0, 6.0),
+        accent,
+    );
+    cell(
+        frame,
+        state_label(torrent.state).to_owned(),
+        COL_STATE_X,
+        text_y,
+        accent,
+        12.0,
+        alignment::Horizontal::Left,
+        Font::default(),
+    );
+
+    let progress = torrent.progress.clamp(0.0, 1.0);
+    let bar_y = y + (ROW_HEIGHT - BAR_HEIGHT) / 2.0;
+    frame.fill_rectangle(
+        Point::new(COL_PROGRESS_X, bar_y),
+        Size::new(BAR_WIDTH, BAR_HEIGHT),
+        BAR_TRACK,
+    );
+    let filled = (BAR_WIDTH * progress).round();
+    if filled > 0.0 {
+        frame.fill_rectangle(
+            Point::new(COL_PROGRESS_X, bar_y),
+            Size::new(filled, BAR_HEIGHT),
+            accent,
+        );
     }
+    cell(
+        frame,
+        format!("{}%", (progress * 100.0).round() as u32),
+        COL_PCT_X,
+        text_y,
+        TEXT_DIM,
+        12.0,
+        alignment::Horizontal::Left,
+        Font::MONOSPACE,
+    );
+    cell(
+        frame,
+        format_rate(torrent.download_rate),
+        COL_DOWN_RIGHT,
+        text_y,
+        TEXT,
+        12.0,
+        alignment::Horizontal::Right,
+        Font::MONOSPACE,
+    );
+    cell(
+        frame,
+        format_rate(torrent.upload_rate),
+        COL_UP_RIGHT,
+        text_y,
+        TEXT,
+        12.0,
+        alignment::Horizontal::Right,
+        Font::MONOSPACE,
+    );
 }
 
-fn row_text(torrent: &Torrent) -> String {
-    let progress = torrent.progress.clamp(0.0, 1.0);
-    let filled = (progress * 10.0).round() as usize;
-    let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(10 - filled));
-    format!(
-        "{:>5}  {:<32}  {:<11}  {:<12}  {:>10}  {:>10}",
-        torrent.id,
-        short_name(&torrent.name),
-        state_label(torrent.state),
-        bar,
-        format_rate(torrent.download_rate),
-        format_rate(torrent.upload_rate),
-    )
+#[allow(clippy::too_many_arguments)]
+fn cell(
+    frame: &mut Frame,
+    content: String,
+    x: f32,
+    y: f32,
+    color: Color,
+    size: f32,
+    horizontal: alignment::Horizontal,
+    font: Font,
+) {
+    frame.fill_text(Text {
+        content,
+        position: Point::new(x, y),
+        color,
+        size: Pixels(size),
+        line_height: LineHeight::default(),
+        font,
+        horizontal_alignment: horizontal,
+        vertical_alignment: alignment::Vertical::Top,
+        shaping: Shaping::Basic,
+    });
 }
 
 fn short_name(name: &str) -> String {

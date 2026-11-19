@@ -19,9 +19,10 @@ use ferrent_protocol::v1::{SortField, Torrent, TorrentState};
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    Column as WidgetColumn, button, column, container, row, scrollable, text, text_input,
+    Column as WidgetColumn, button, column, container, horizontal_space, row, scrollable, text,
+    text_input,
 };
-use iced::{Element, Length, Point, Size, Subscription, Task};
+use iced::{Color, Element, Length, Point, Size, Subscription, Task};
 
 #[derive(Debug, Clone)]
 struct Fields {
@@ -114,6 +115,7 @@ enum Message {
     CancelFingerprint,
     Connected(u64, Result<ClientHandle, String>),
     Poll(u64),
+    StatusPolled(Result<ServerStatus, String>),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -191,6 +193,8 @@ struct App {
     server_rows: Vec<ServerRow>,
     server_testing: bool,
     server_message: String,
+    server_status: Option<ServerStatus>,
+    poll_tick: u32,
 
     modifiers: Modifiers,
     measure: bool,
@@ -260,6 +264,8 @@ impl Default for App {
             server_rows: Vec::new(),
             server_testing: false,
             server_message: String::new(),
+            server_status: None,
+            poll_tick: 0,
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
             measure_started: None,
@@ -330,6 +336,12 @@ impl App {
             }
             Message::Connected(generation, result) => self.connected(generation, result),
             Message::Poll(generation) => self.poll(generation),
+            Message::StatusPolled(result) => {
+                if let Ok(status) = result {
+                    self.server_status = Some(status);
+                }
+                Task::none()
+            }
             Message::PageLoaded {
                 request,
                 offset,
@@ -658,7 +670,18 @@ impl App {
         } else {
             self.refresh_page()
         };
-        Task::batch([refresh, self.schedule_poll()])
+        self.poll_tick = self.poll_tick.wrapping_add(1);
+        let status = match (&self.client, self.poll_tick % 5) {
+            (Some(client), 0) => {
+                let client = client.clone();
+                Task::perform(
+                    async move { connection::status(&client).await },
+                    Message::StatusPolled,
+                )
+            }
+            _ => Task::none(),
+        };
+        Task::batch([refresh, status, self.schedule_poll()])
     }
 
     fn page_loaded(
@@ -1423,39 +1446,66 @@ impl App {
                 } else {
                     row.name.clone()
                 };
-                row![
-                    column![text(title).size(14), text(row.server.clone()).size(11)]
-                        .width(Length::Fixed(250.0))
-                        .spacing(2),
-                    column![text(state).size(12), text(detail).size(12)]
-                        .width(Length::Fill)
-                        .spacing(2),
-                    button(if is_active { "Reconnect" } else { "Connect" })
-                        .on_press(Message::ConnectServer(row.name.clone())),
-                    button("Edit").on_press(Message::SelectServer(index)),
-                    button("Delete").on_press(Message::DeleteServer(row.name.clone())),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
+                let background = if is_active {
+                    Color::from_rgb(0.89, 0.94, 1.0)
+                } else {
+                    Color::from_rgb(0.98, 0.98, 0.99)
+                };
+                container(
+                    row![
+                        column![text(title).size(14), text(row.server.clone()).size(11)]
+                            .width(Length::Fixed(250.0))
+                            .spacing(2),
+                        column![text(state).size(12), text(detail).size(12)]
+                            .width(Length::Fill)
+                            .spacing(2),
+                        button(if is_active { "Reconnect" } else { "Connect" })
+                            .on_press(Message::ConnectServer(row.name.clone())),
+                        button("Edit").on_press(Message::SelectServer(index)),
+                        button("Delete").on_press(Message::DeleteServer(row.name.clone())),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([6, 8])
+                .width(Length::Fill)
+                .style(move |theme: &iced::Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                        background: Some(background.into()),
+                        border: iced::Border {
+                            color: palette.background.strong.color,
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..container::Style::default()
+                    }
+                })
                 .into()
             })
             .collect();
 
         let form = column![
-            text("Add / edit server").size(18),
-            text_input("Name", &self.fields.name)
-                .on_input(|value| Message::Field(Field::Name, value))
-                .width(Length::Fill),
-            text_input("Server URL", &self.fields.server)
-                .on_input(|value| Message::Field(Field::Server, value))
-                .width(Length::Fill),
-            text_input("CA certificate (PEM path)", &self.fields.ca)
-                .on_input(|value| Message::Field(Field::Ca, value))
-                .width(Length::Fill),
-            text_input("API token", &self.fields.token)
-                .secure(true)
-                .on_input(|value| Message::Field(Field::Token, value))
-                .width(Length::Fill),
+            text("Add / edit server").size(16),
+            row![
+                text_input("Name", &self.fields.name)
+                    .on_input(|value| Message::Field(Field::Name, value))
+                    .width(Length::Fixed(220.0)),
+                text_input("Server URL", &self.fields.server)
+                    .on_input(|value| Message::Field(Field::Server, value))
+                    .width(Length::Fill),
+            ]
+            .spacing(8),
+            row![
+                text_input("CA certificate (PEM path)", &self.fields.ca)
+                    .on_input(|value| Message::Field(Field::Ca, value))
+                    .width(Length::Fill),
+                text_input("API token", &self.fields.token)
+                    .secure(true)
+                    .on_input(|value| Message::Field(Field::Token, value))
+                    .width(Length::Fixed(220.0)),
+            ]
+            .spacing(8),
             row![
                 button("Test & save").on_press(Message::TestServer),
                 button("New").on_press(Message::NewServer),
@@ -1606,13 +1656,19 @@ impl App {
             .last_config
             .as_ref()
             .map_or("", |config| config.server.as_str());
-        let header = row![
-            text("Ferrent").size(24),
-            text(server),
-            button("Servers").on_press(Message::OpenServers),
-            button("Disconnect").on_press(Message::Disconnect),
-        ]
-        .spacing(16);
+        let header = container(
+            row![
+                text("Ferrent").size(20),
+                connection_pill(self.state, server),
+                horizontal_space(),
+                button("Servers").on_press(Message::OpenServers),
+                button("Disconnect").on_press(Message::Disconnect),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([6, 4])
+        .width(Length::Fill);
 
         let selected_count = self.selected.len();
         let toolbar = row![
@@ -1676,57 +1732,53 @@ impl App {
     }
 
     fn details_view(&self) -> Element<'_, Message> {
+        let dim = Color::from_rgb(0.45, 0.49, 0.55);
         let content: Element<Message> = if self.selected.is_empty() {
             column![
-                text("Details").size(18),
-                text("Click a row to select it. Right-click for actions.").size(12),
-                text("Space: pause/resume  Delete: remove").size(11),
-                text("Ctrl+F: filter  Ctrl+R: refresh  Ctrl+A: select page").size(11),
+                text("Details").size(16),
+                text("Nothing selected").size(12).color(dim),
+                text("Click a row to select it.").size(11).color(dim),
+                text("Space pause/resume · Delete remove").size(11).color(dim),
+                text("Ctrl+F filter · Ctrl+R refresh · Ctrl+A page").size(11).color(dim),
             ]
-            .spacing(8)
+            .spacing(6)
             .into()
         } else if self.selected.len() == 1 {
             let torrent = self.selected_torrents.values().next();
             match torrent {
                 Some(torrent) => column![
-                    text("Details").size(18),
-                    text(&torrent.name).size(15),
-                    row![text("ID").size(12), text(torrent.id.to_string())].spacing(8),
-                    row![
-                        text("State").size(12),
-                        text(table::state_label(torrent.state))
-                    ]
-                    .spacing(8),
-                    row![
-                        text("Progress").size(12),
-                        text(format!("{:.1}%", torrent.progress * 100.0))
-                    ]
-                    .spacing(8),
-                    row![
-                        text("Size").size(12),
-                        text(format_size(torrent.total_bytes))
-                    ]
-                    .spacing(8),
-                    row![
-                        text("Down").size(12),
-                        text(table::format_rate(torrent.download_rate))
-                    ]
-                    .spacing(8),
-                    row![
-                        text("Up").size(12),
-                        text(table::format_rate(torrent.upload_rate))
-                    ]
-                    .spacing(8),
+                    text("Details").size(16),
+                    text(&torrent.name).size(13),
+                    detail_section("TORRENT", dim),
+                    detail_row("State", table::state_label(torrent.state).to_owned(), dim),
+                    detail_row(
+                        "Progress",
+                        format!("{:.1}%", torrent.progress * 100.0),
+                        dim
+                    ),
+                    detail_row("Size", format_size(torrent.total_bytes), dim),
+                    detail_row("Torrent ID", torrent.id.to_string(), dim),
+                    detail_section("TRANSFER", dim),
+                    detail_row(
+                        "Down",
+                        table::format_rate(torrent.download_rate),
+                        dim
+                    ),
+                    detail_row("Up", table::format_rate(torrent.upload_rate), dim),
                     if torrent.error.is_empty() {
                         Element::<Message>::from(text(""))
                     } else {
-                        Element::<Message>::from(text(format!("Error: {}", torrent.error)).size(12))
+                        Element::<Message>::from(
+                            text(format!("Error: {}", torrent.error))
+                                .size(12)
+                                .color(Color::from_rgb(0.65, 0.12, 0.12)),
+                        )
                     },
                 ]
-                .spacing(7)
+                .spacing(6)
                 .into(),
-                None => column![text("Details").size(18), text("Loading...").size(12)]
-                    .spacing(8)
+                None => column![text("Details").size(16), text("Loading...").size(12)]
+                    .spacing(6)
                     .into(),
             }
         } else {
@@ -1741,12 +1793,12 @@ impl App {
                 })
                 .collect::<Vec<Element<Message>>>();
             column![
-                text("Details").size(18),
+                text("Details").size(16),
                 text(format!("{} torrents selected", self.selected.len())).size(13),
-                text("Space: pause/resume  Delete: remove").size(11),
+                text("Space pause/resume · Delete remove").size(11).color(dim),
                 scrollable(WidgetColumn::with_children(names).spacing(3)).height(Length::Fill),
             ]
-            .spacing(8)
+            .spacing(6)
             .into()
         };
 
@@ -1758,17 +1810,115 @@ impl App {
     }
 
     fn status_bar(&self) -> Element<'_, Message> {
-        let state = match self.state {
-            ConnectionState::Idle => "idle",
-            ConnectionState::Connecting => "connecting",
-            ConnectionState::Connected => "connected",
-            ConnectionState::Reconnecting => "reconnecting",
-        };
-        container(text(format!("{state}  |  {}", self.status)).size(12))
-            .padding(8)
-            .width(Length::Fill)
-            .into()
+        let (label, color) = state_style(self.state);
+        let selected = self.selected.len();
+        let rates = self
+            .server_status
+            .as_ref()
+            .map(|status| {
+                format!(
+                    "↓ {}   ↑ {}",
+                    table::format_rate(status.download_rate),
+                    table::format_rate(status.upload_rate)
+                )
+            })
+            .unwrap_or_default();
+        container(
+            row![
+                text(label).size(11).color(color),
+                text("·").size(11).color(color),
+                text(&self.status).size(11),
+                horizontal_space(),
+                text(rates).size(11),
+                text(format!("{} torrents", self.page.total)).size(11),
+                if selected > 0 {
+                    text(format!("{selected} selected")).size(11)
+                } else {
+                    text("").size(11)
+                },
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([6, 12])
+        .width(Length::Fill)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.weak.color.into()),
+                border: iced::Border {
+                    color: palette.background.strong.color,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..container::Style::default()
+            }
+        })
+        .into()
     }
+}
+
+fn state_style(state: ConnectionState) -> (&'static str, Color) {
+    match state {
+        ConnectionState::Idle => ("idle", Color::from_rgb(0.52, 0.56, 0.62)),
+        ConnectionState::Connecting => ("connecting", Color::from_rgb(0.82, 0.58, 0.10)),
+        ConnectionState::Connected => ("connected", Color::from_rgb(0.13, 0.60, 0.31)),
+        ConnectionState::Reconnecting => ("reconnecting", Color::from_rgb(0.82, 0.58, 0.10)),
+    }
+}
+
+fn connection_pill(state: ConnectionState, server: &str) -> Element<'_, Message> {
+    let (label, color) = state_style(state);
+    container(
+        row![
+            container(text("").size(1.0))
+                .width(Length::Fixed(8.0))
+                .height(Length::Fixed(8.0))
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(color.into()),
+                    border: iced::Border {
+                        color,
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                }),
+            text(server).size(12),
+            text(label).size(11).color(color),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([5, 10])
+    .style(|theme: &iced::Theme| {
+        let palette = theme.extended_palette();
+        container::Style {
+            background: Some(palette.background.weak.color.into()),
+            border: iced::Border {
+                color: palette.background.strong.color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        }
+    })
+    .into()
+}
+
+fn detail_section<'a>(title: &'a str, dim: Color) -> Element<'a, Message> {
+    text(title).size(10).color(dim).into()
+}
+
+fn detail_row<'a>(label: &'a str, value: String, dim: Color) -> Element<'a, Message> {
+    row![
+        text(label)
+            .size(11)
+            .width(Length::Fixed(84.0))
+            .color(dim),
+        text(value).size(12),
+    ]
+    .spacing(8)
+    .into()
 }
 
 fn action_button<'a>(label: &'a str, message: Message, enabled: bool) -> Element<'a, Message> {
