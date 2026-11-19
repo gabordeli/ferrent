@@ -15,3 +15,4 @@ default = []
 libtorrent = []
 
 [dependencies]
+tokio = { version = "1", default-features = false, features = ["sync"] }
