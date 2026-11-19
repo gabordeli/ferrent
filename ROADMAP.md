@@ -134,7 +134,7 @@
 - [ ] A delta-feldolgozás memóriája korlátos; nincs eseményenkénti allokációs szivárgás.
 - [ ] Leállításkor a mirror draineli az alert-eket és kiírja a dirty állapotot.
 
-**Files:** `crates/daemon/src/state/`, `crates/daemon/src/runtime.rs`
+**Files:** `crates/daemon/src/state.rs`, `docs/measurements/m1-mirror.md`
 
 ### M1-T3 – gRPC protokoll, TLS, auth ⚠️
 
