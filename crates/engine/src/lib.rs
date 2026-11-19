@@ -4,10 +4,15 @@
 //! `ferrent-cli` and `ferrent-gui` can build without a C++ toolchain.
 
 mod engine;
+#[cfg(feature = "libtorrent")]
+#[allow(unsafe_code)]
+mod libtorrent;
 mod mock;
 mod types;
 
 pub use engine::TorrentEngine;
+#[cfg(feature = "libtorrent")]
+pub use libtorrent::LibtorrentEngine;
 pub use mock::MockEngine;
 pub use types::{
     AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentSource, TorrentState,

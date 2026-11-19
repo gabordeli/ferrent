@@ -1,0 +1,40 @@
+#[cxx::bridge]
+pub(crate) mod ffi {
+    struct FfiStatus {
+        found: bool,
+        id: u64,
+        name: String,
+        total_bytes: u64,
+        state: i32,
+        progress: f32,
+        download_rate: u64,
+        upload_rate: u64,
+        error: String,
+    }
+
+    struct FfiEvent {
+        kind: i32,
+        id: u64,
+        state: i32,
+        progress: f32,
+        download_rate: u64,
+        upload_rate: u64,
+    }
+
+    unsafe extern "C++" {
+        include!("ferrent-engine/src/libtorrent/bridge.h");
+
+        type Session;
+
+        fn new_session(download_rate_limit: u64, upload_rate_limit: u64) -> UniquePtr<Session>;
+        fn add_torrent(self: Pin<&mut Session>, metainfo: &[u8], save_path: &str) -> u64;
+        fn pause(self: Pin<&mut Session>, id: u64) -> bool;
+        fn resume(self: Pin<&mut Session>, id: u64) -> bool;
+        fn remove(self: Pin<&mut Session>, id: u64) -> bool;
+        fn status(self: &Session, id: u64) -> FfiStatus;
+        fn list(self: &Session) -> Vec<FfiStatus>;
+        fn poll_events(self: Pin<&mut Session>) -> Vec<FfiEvent>;
+        fn set_settings(self: Pin<&mut Session>, download_rate_limit: u64, upload_rate_limit: u64);
+        fn last_error(self: &Session) -> String;
+    }
+}

@@ -101,6 +101,9 @@ pub enum EngineError {
         from: TorrentState,
         action: &'static str,
     },
+    Rejected {
+        reason: String,
+    },
 }
 
 impl fmt::Display for EngineError {
@@ -110,6 +113,7 @@ impl fmt::Display for EngineError {
             Self::InvalidTransition { id, from, action } => {
                 write!(f, "cannot {action} torrent {id} while it is {from}")
             }
+            Self::Rejected { reason } => f.write_str(reason),
         }
     }
 }
