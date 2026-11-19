@@ -12,7 +12,7 @@ mod types;
 
 pub use engine::TorrentEngine;
 #[cfg(feature = "libtorrent")]
-pub use libtorrent::LibtorrentEngine;
+pub use libtorrent::{LibtorrentEngine, make_torrent};
 pub use mock::MockEngine;
 pub use types::{
     AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentSource, TorrentState,

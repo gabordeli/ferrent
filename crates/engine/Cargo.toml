@@ -14,9 +14,14 @@ workspace = true
 default = []
 libtorrent = ["dep:cxx"]
 
+[[example]]
+name = "loadtest"
+required-features = ["libtorrent"]
+
 [dependencies]
 tokio = { version = "1", default-features = false, features = ["sync"] }
 cxx = { version = "1", optional = true }
 
 [build-dependencies]
 cxx-build = "1"
+pkg-config = "0.3"

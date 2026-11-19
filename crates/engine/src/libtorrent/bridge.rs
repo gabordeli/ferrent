@@ -34,7 +34,10 @@ pub(crate) mod ffi {
         fn status(self: &Session, id: u64) -> FfiStatus;
         fn list(self: &Session) -> Vec<FfiStatus>;
         fn poll_events(self: Pin<&mut Session>) -> Vec<FfiEvent>;
+        fn request_updates(self: Pin<&mut Session>);
         fn set_settings(self: Pin<&mut Session>, download_rate_limit: u64, upload_rate_limit: u64);
         fn last_error(self: &Session) -> String;
+
+        fn make_torrent(name: &str, payload: &[u8]) -> Vec<u8>;
     }
 }

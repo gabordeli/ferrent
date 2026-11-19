@@ -1,0 +1,17 @@
+{
+  "torrents": 4000,
+  "mode": "seed",
+  "payload_bytes": 256,
+  "add_phase_secs": 1.729,
+  "rss_kb_after_add": 36304,
+  "rss_kb_after_settle": 41388,
+  "rss_mb_after_settle": 40.4,
+  "fd_after_add": 81,
+  "fd_after_settle": 82,
+  "cpu_active_pct": 393.85,
+  "cpu_idle_pct": 4.70,
+  "shutdown_secs": 0.254,
+  "events": 8001,
+  "events_per_sec": 4627.3,
+  "update_interval_ms": 2000
+}

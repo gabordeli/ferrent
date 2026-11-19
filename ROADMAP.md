@@ -90,13 +90,13 @@
 
 **Acceptance**
 
-- [ ] `cargo run -p ferrent-engine --example loadtest -- --torrents 4000 --mode seed`.
+- [ ] `cargo run -p ferrent-engine --example loadtest --features libtorrent -- --torrents 4000 --mode seed`.
 - [ ] Méri és JSON-ban írja: RSS, idle/aktív CPU, indulási és leállási idő, nyitott fd, alert/sec.
 - [ ] Markdown összefoglaló `docs/measurements/m0-loadtest.md`-be kerül.
 - [ ] Az eredmény összevetve az ARCHITECTURE §6 büdzsével; eltérés indoklással.
 - [ ] A harness újrafuttatható (seed, fix paraméterek) és a baseline rögzítve.
 
-**Files:** `crates/engine/examples/loadtest.rs`, `docs/measurements/m0-loadtest.md`
+**Files:** `crates/engine/examples/loadtest.rs`, `docs/measurements/m0-loadtest.md`, `docs/measurements/m0-loadtest.json`
 
 ---
 

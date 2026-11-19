@@ -2,7 +2,6 @@
 //! the Rust side talks to it over a command channel and receives deltas on a
 //! broadcast channel.
 
-use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -19,9 +18,15 @@ use self::bridge::ffi::{FfiEvent, FfiStatus, new_session};
 
 mod bridge;
 
-const EVENT_BUFFER: usize = 1024;
+/// Builds a single-file v1 metainfo blob; used by the M0 load harness.
+#[must_use]
+pub fn make_torrent(name: &str, payload: &[u8]) -> Vec<u8> {
+    bridge::ffi::make_torrent(name, payload)
+}
+
+const EVENT_BUFFER: usize = 8192;
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
-const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
 enum Command {
     Add {
@@ -168,7 +173,6 @@ fn run_worker(
     settings: EngineSettings,
 ) {
     let mut session = new_session(settings.download_rate_limit, settings.upload_rate_limit);
-    let mut snapshot: BTreeMap<TorrentId, TorrentStatus> = BTreeMap::new();
     let mut last_progress = Instant::now();
 
     loop {
@@ -193,7 +197,6 @@ fn run_worker(
                     continue;
                 }
                 let status = convert_status(session.status(id));
-                snapshot.insert(id, status.clone());
                 let _ = events.send(EngineEvent::Added(status));
                 let _ = reply.send(Ok(id));
             }
@@ -216,7 +219,6 @@ fn run_worker(
             Ok(Command::Remove { id, reply }) => {
                 let ok = session.pin_mut().remove(id);
                 if ok {
-                    snapshot.remove(&id);
                     let _ = events.send(EngineEvent::Removed { id });
                 }
                 let _ = reply.send(if ok {
@@ -256,24 +258,7 @@ fn run_worker(
 
         if last_progress.elapsed() >= PROGRESS_INTERVAL {
             last_progress = Instant::now();
-            for ffi_status in session.list() {
-                let status = convert_status(ffi_status);
-                let changed = snapshot.get(&status.id).is_none_or(|previous| {
-                    previous.progress != status.progress
-                        || previous.download_rate != status.download_rate
-                        || previous.upload_rate != status.upload_rate
-                        || previous.state != status.state
-                });
-                if changed {
-                    let _ = events.send(EngineEvent::Progress {
-                        id: status.id,
-                        progress: status.progress,
-                        download_rate: status.download_rate,
-                        upload_rate: status.upload_rate,
-                    });
-                }
-                snapshot.insert(status.id, status);
-            }
+            session.pin_mut().request_updates();
         }
     }
 }
@@ -311,6 +296,12 @@ fn convert_event(event: FfiEvent) -> Option<EngineEvent> {
         1 => Some(EngineEvent::StateChanged {
             id: event.id,
             state: state_from_code(event.state, String::new()),
+        }),
+        2 => Some(EngineEvent::Progress {
+            id: event.id,
+            progress: event.progress,
+            download_rate: event.download_rate,
+            upload_rate: event.upload_rate,
         }),
         3 => Some(EngineEvent::Removed { id: event.id }),
         _ => None,

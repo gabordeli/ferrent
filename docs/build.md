@@ -38,6 +38,19 @@ A `libtorrent` backend kapuja:
 ./ci/check-libtorrent.sh
 ```
 
+## Load harness (M0-T4)
+
+```bash
+cargo run -p ferrent-engine --example loadtest --features libtorrent -- \
+    --torrents 4000 --mode seed
+```
+
+A riport a `docs/measurements/m0-loadtest.json` és
+`docs/measurements/m0-loadtest.md` fájlokba kerül. A harness 4 000 egyedi,
+256 bájtos torrentet hoz létre a libtorrent saját encoderével, seed módban,
+10 s settle és 10 s idle mérés mellett. A harness nem része a gyors CI
+kapunak; kézzel futtatandó.
+
 ## Megjegyzések
 
 - A `libtorrent-rasterbar-dev` a fejléceket és a linkelhető libraryt adja; a

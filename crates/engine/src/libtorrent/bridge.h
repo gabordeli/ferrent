@@ -23,6 +23,7 @@ class Session {
     FfiStatus status(uint64_t id) const;
     rust::Vec<FfiStatus> list() const;
     rust::Vec<FfiEvent> poll_events();
+    void request_updates();
     void set_settings(uint64_t download_rate_limit, uint64_t upload_rate_limit);
     rust::String last_error() const;
 
@@ -32,3 +33,5 @@ class Session {
 };
 
 std::unique_ptr<Session> new_session(uint64_t download_rate_limit, uint64_t upload_rate_limit);
+
+rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload);

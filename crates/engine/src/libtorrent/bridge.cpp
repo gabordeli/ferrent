@@ -5,7 +5,11 @@
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/alert.hpp>
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/bencode.hpp>
+#include <libtorrent/create_torrent.hpp>
 #include <libtorrent/error_code.hpp>
+#include <libtorrent/file_storage.hpp>
+#include <libtorrent/hasher.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/sha1_hash.hpp>
@@ -15,6 +19,7 @@
 #include <libtorrent/torrent_status.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -35,6 +40,7 @@ constexpr int32_t kPaused = 4;
 constexpr int32_t kError = 5;
 
 constexpr int32_t kEventStateChanged = 1;
+constexpr int32_t kEventProgress = 2;
 constexpr int32_t kEventRemoved = 3;
 
 int clamp_rate(uint64_t value) {
@@ -227,9 +233,22 @@ rust::Vec<FfiEvent> Session::poll_events() {
                 events.push_back(
                     FfiEvent{kEventRemoved, *id, kQueued, 0.0f, 0, 0});
             }
+        } else if (auto *updates = lt::alert_cast<lt::state_update_alert>(alert)) {
+            for (auto const &status : updates->status) {
+                if (auto id = impl_->id_for(status.handle)) {
+                    events.push_back(FfiEvent{
+                        kEventProgress, *id, map_status(status), status.progress,
+                        static_cast<uint64_t>(std::max(status.download_rate, 0)),
+                        static_cast<uint64_t>(std::max(status.upload_rate, 0))});
+                }
+            }
         }
     }
     return events;
+}
+
+void Session::request_updates() {
+    impl_->session.post_torrent_updates(lt::torrent_handle::status_flags_t{});
 }
 
 void Session::set_settings(uint64_t download_rate_limit, uint64_t upload_rate_limit) {
@@ -246,4 +265,25 @@ rust::String Session::last_error() const {
 std::unique_ptr<Session> new_session(uint64_t download_rate_limit,
                                      uint64_t upload_rate_limit) {
     return std::make_unique<Session>(download_rate_limit, upload_rate_limit);
+}
+
+rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload) {
+    lt::file_storage files;
+    files.add_file(static_cast<std::string>(name), static_cast<std::int64_t>(payload.size()));
+
+    lt::create_torrent torrent(files, 16 * 1024);
+    lt::hasher hasher;
+    hasher.update(reinterpret_cast<char const *>(payload.data()),
+                  static_cast<int>(payload.size()));
+    torrent.set_hash(lt::piece_index_t(0), hasher.final());
+
+    std::vector<char> encoded;
+    lt::bencode(std::back_inserter(encoded), torrent.generate());
+
+    rust::Vec<uint8_t> out;
+    out.reserve(encoded.size());
+    for (char byte : encoded) {
+        out.push_back(static_cast<uint8_t>(byte));
+    }
+    return out;
 }

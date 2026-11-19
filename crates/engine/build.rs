@@ -7,10 +7,28 @@ fn main() {
         return;
     }
 
-    cxx_build::bridge("src/libtorrent/bridge.rs")
-        .file("src/libtorrent/bridge.cpp")
-        .std("c++17")
-        .compile("ferrent_engine_bridge");
+    // The Debian package is built with OpenSSL, so the public headers need
+    // TORRENT_USE_OPENSSL / TORRENT_USE_LIBCRYPTO to select the same hasher
+    // implementation as the shared library.
+    let libtorrent = pkg_config::Config::new()
+        .atleast_version("2.0")
+        .probe("libtorrent-rasterbar")
+        .expect("libtorrent-rasterbar not found (install libtorrent-rasterbar-dev)");
 
-    println!("cargo:rustc-link-lib=torrent-rasterbar");
+    let mut build = cxx_build::bridge("src/libtorrent/bridge.rs");
+    build.file("src/libtorrent/bridge.cpp").std("c++17");
+    for path in &libtorrent.include_paths {
+        build.include(path);
+    }
+    for (name, value) in &libtorrent.defines {
+        match value {
+            Some(value) => {
+                build.define(name, Some(value.as_str()));
+            }
+            None => {
+                build.define(name, None);
+            }
+        }
+    }
+    build.compile("ferrent_engine_bridge");
 }

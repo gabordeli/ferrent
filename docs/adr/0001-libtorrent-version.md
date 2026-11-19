@@ -1,8 +1,8 @@
 # ADR 0001 – libtorrent verzió
 
-- **Státusz:** elfogadva (provisional)
+- **Státusz:** elfogadva (engine-szinten; daemon-szintű újraellenőrzés M2-T4)
 - **Dátum:** 2026-11-19
-- **Kontextus:** M0-T3, R1 (4 000+ torrent), ARCHITECTURE §9 / 1. döntés
+- **Kontextus:** M0-T3, M0-T4, R1 (4 000+ torrent), ARCHITECTURE §9 / 1. döntés
 
 ## Döntés
 
@@ -23,19 +23,21 @@ Debian 13-on **2.0.11**. Az 1.2-est nem építjük forrásból az M0-hoz.
 
 | Metrika | Érték | Megjegyzés |
 |---|---|---|
-| `cargo test -p ferrent-engine --features libtorrent` | 8 teszt, 0.15 s | mock + valódi `.torrent` roundtrip |
+| `cargo test -p ferrent-engine --features libtorrent` | 8 teszt, 0.13 s | mock + valódi `.torrent` roundtrip |
 | Teszt-bináris csúcs RSS | 17 456 KB (~17 MB) | test harness + egy libtorrent session + egy torrent |
 | Valódi `.torrent` add/pause/resume/remove | PASS | `hello.torrent`, 14 KiB payload, hálózat nélkül |
-| 4 000 torrent RSS / CPU / indulás | **M0-T4** | a load harness méri |
+| **4 000 torrent (seed)** | **40.4 MB RSS**, **1.73 s betöltés**, **4.70% idle CPU**, **0.25 s leállás** | M0-T4, minden budget PASS |
+| 1 Hz-es teljes update | 9.2% idle CPU (5 s settle) | ez indokolta a 2 s-os cadence-et |
 
 Az 1.2 vs 2.0 teljes összehasonlítás nem készült el, mert az 1.2 nincs a
-disztróban; a döntést a 4 000 torrentes mérés (M0-T4) fogja véglegesíteni.
+disztróban; a 4 000 torrentes mérés a 2.0.11-et igazolta.
 
 ## Következmények
 
-- Az M0-T4 load harness az ARCHITECTURE §6 büdzsét méri; ha a 2.0.11 nem hozza,
-  újranyitjuk ezt az ADR-t (1.2 forrásbuild vagy 2.0 tuning: `file_pool_size`,
-  mmap, cache).
+- A progress update **2 s**-onként fut; a state-változások alertből azonnal
+  érkeznek. Az aktív torrentek 1 Hz-es frissítése M1/M2 optimalizáció
+  (per-torrent update), a 2 s a 4 000 torrentes idle CPU miatt marad.
+- A daemon-szintű büdzsét (RPC + state mirror) az M2-T4 méri újra.
 - A CI Ubuntu image egy kicsit eltérő 2.0.x-et adhat; a használt API a 2.0
   sorozaton belül stabil.
 - Az M0 dinamikusan linkeli a `libtorrent`-et; a statikus linkelés az M3-T2
