@@ -1,8 +1,29 @@
-/target
-/logs/
-/.playwright-mcp/
-/crates/gui/spikes/*/target/
+# build output
+target/
 /crates/gui/spikes/tauri-spike/gen/
+
+# runtime output
+/logs/
+
+# local tool state
+/.qwen/
+/.playwright-mcp/
 /.sonar/
 /clippy.json
 /sonar-issues.json
+
+# local daemon state and TLS material
+*.redb
+tls-cert.pem
+tls-key.pem
+tls-fingerprint.txt
+
+# ad-hoc torrents added from the repo root (test fixtures are tracked)
+/*.torrent
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
