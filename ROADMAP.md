@@ -212,7 +212,7 @@
 - [ ] A token biztonságosan tárolva (keyring vagy 0600 config), nem kerül logba.
 - [ ] Hibák a UI-ban jelennek meg, nem panic.
 
-**Files:** `crates/gui/src/app.rs`, `crates/gui/src/connection.rs`
+**Files:** `crates/gui/src/main.rs`, `crates/gui/src/config.rs`, `crates/gui/src/connection.rs`, `crates/protocol/src/tls.rs`, `docs/measurements/m2-gui-shell.md`
 
 ### M2-T3 – Virtualizált torrent tábla + műveletek
 

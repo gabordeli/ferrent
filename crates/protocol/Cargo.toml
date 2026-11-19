@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 prost = "0.14"
+rustls-pemfile = "2"
+sha2 = "0.10"
 tonic = { version = "0.14", features = ["tls-ring"] }
 tonic-prost = "0.14"
 

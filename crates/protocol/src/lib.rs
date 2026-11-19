@@ -1,6 +1,7 @@
 //! Wire protocol shared by `ferrentd`, `ferrent-cli`, and `ferrent-gui`.
 
 pub mod client;
+pub mod tls;
 
 pub mod v1 {
     //! Generated protobuf and gRPC types.
