@@ -9,6 +9,9 @@ pub(crate) mod ffi {
         progress: f32,
         download_rate: u64,
         upload_rate: u64,
+        seeds: i32,
+        peers: i32,
+        eta_seconds: i64,
         error: String,
     }
 

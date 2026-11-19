@@ -130,6 +130,13 @@ struct Session::Impl {
         out.progress = status.progress;
         out.download_rate = static_cast<uint64_t>(std::max(status.download_rate, 0));
         out.upload_rate = static_cast<uint64_t>(std::max(status.upload_rate, 0));
+        out.seeds = status.num_seeds;
+        out.peers = status.num_peers;
+        // libtorrent 2.0 no longer exposes eta; derive it from the wanted bytes.
+        auto const remaining = status.total_wanted - status.total_wanted_done;
+        out.eta_seconds = (remaining > 0 && status.download_payload_rate > 0)
+                              ? remaining / status.download_payload_rate
+                              : -1;
         out.error = status.errc ? rust::String(status.errc.message()) : rust::String();
         return out;
     }

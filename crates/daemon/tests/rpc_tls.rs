@@ -78,6 +78,7 @@ fn list_request() -> ListTorrentsRequest {
         descending: false,
         offset: 0,
         limit: 10,
+        state_filter: 0,
     }
 }
 

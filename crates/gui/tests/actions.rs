@@ -49,6 +49,7 @@ async fn adds_pages_and_mutates_torrents() {
         &client,
         &ListQuery {
             filter: "hello".to_owned(),
+            state: None,
             sort: SortField::Id,
             descending: false,
             offset: 1,

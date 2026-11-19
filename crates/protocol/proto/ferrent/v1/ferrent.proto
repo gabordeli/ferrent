@@ -35,6 +35,15 @@ message GetStatusResponse {
   uint64 upload_rate = 3;
   // Free bytes on the daemon data directory.
   uint64 free_space_bytes = 4;
+  // Torrents per lifecycle state, for the GUI sidebar counters.
+  uint32 downloading_count = 5;
+  uint32 seeding_count = 6;
+  uint32 queued_count = 7;
+  uint32 paused_count = 8;
+  uint32 error_count = 9;
+  uint32 checking_count = 10;
+  // Torrents with a non-zero transfer rate.
+  uint32 active_count = 11;
 }
 
 // Request to add a torrent.
@@ -130,6 +139,12 @@ message Torrent {
   uint64 upload_rate = 7;
   // Error message when the state is TORRENT_STATE_ERROR.
   string error = 8;
+  // Connected seeds reported by the engine.
+  uint32 seeds = 9;
+  // Connected peers reported by the engine.
+  uint32 peers = 10;
+  // Estimated seconds to completion; zero when unknown.
+  uint32 eta_seconds = 11;
 }
 
 // Sort key for the torrent list.
@@ -160,6 +175,8 @@ message ListTorrentsRequest {
   uint32 offset = 4;
   // Page size; zero means no limit.
   uint32 limit = 5;
+  // Restrict the page to one lifecycle state; unspecified means all states.
+  TorrentState state_filter = 6;
 }
 
 // One page of torrents plus the total match count.

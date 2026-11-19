@@ -30,7 +30,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 use crate::persist::{self, PersistedTorrent};
-use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror};
+use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror, state_code};
 use crate::store::StateStore;
 
 pub use tls::TlsMaterial;
@@ -64,6 +64,22 @@ impl Auth {
     }
 }
 
+/// Snapshot of the mirror used by `GetStatus`.
+#[derive(Debug, Default)]
+pub struct AggregateStatus {
+    pub torrent_count: u32,
+    pub download_rate: u64,
+    pub upload_rate: u64,
+    pub free_space: u64,
+    pub downloading: u32,
+    pub seeding: u32,
+    pub queued: u32,
+    pub paused: u32,
+    pub error: u32,
+    pub checking: u32,
+    pub active: u32,
+}
+
 /// Shared daemon state used by the RPC service.
 pub struct AppState {
     engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
@@ -95,14 +111,32 @@ impl AppState {
     }
 
     #[must_use]
-    pub fn aggregate_status(&self) -> (u32, u64, u64, u64) {
+    pub fn aggregate_status(&self) -> AggregateStatus {
         let torrents = self.mirror.query(&TorrentQuery::default());
-        let download_rate = torrents.iter().map(|torrent| torrent.download_rate).sum();
-        let upload_rate = torrents.iter().map(|torrent| torrent.upload_rate).sum();
-        let free_space = rustix::fs::statvfs(&self.data_dir)
-            .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize))
-            .unwrap_or(0);
-        (torrents.len() as u32, download_rate, upload_rate, free_space)
+        let mut status = AggregateStatus {
+            torrent_count: torrents.len() as u32,
+            free_space: rustix::fs::statvfs(&self.data_dir)
+                .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize))
+                .unwrap_or(0),
+            ..AggregateStatus::default()
+        };
+        for torrent in &torrents {
+            status.download_rate = status.download_rate.saturating_add(torrent.download_rate);
+            status.upload_rate = status.upload_rate.saturating_add(torrent.upload_rate);
+            if torrent.download_rate > 0 || torrent.upload_rate > 0 {
+                status.active = status.active.saturating_add(1);
+            }
+            match state_code(&torrent.state) {
+                1 => status.queued += 1,
+                2 => status.checking += 1,
+                3 => status.downloading += 1,
+                4 => status.seeding += 1,
+                5 => status.paused += 1,
+                6 => status.error += 1,
+                _ => {}
+            }
+        }
+        status
     }
 
     #[must_use]
@@ -255,6 +289,7 @@ impl Ferrent for FerrentService {
         let request = request.into_inner();
         let query = TorrentQuery {
             filter: (!request.filter.is_empty()).then_some(request.filter),
+            state: (request.state_filter != 0).then_some(request.state_filter),
             sort: sort_from_proto(request.sort),
             descending: request.descending,
             offset: request.offset as usize,
@@ -272,13 +307,19 @@ impl Ferrent for FerrentService {
         request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
         self.state.auth.check(request.metadata())?;
-        let (torrent_count, download_rate, upload_rate, free_space_bytes) =
-            self.state.aggregate_status();
+        let status = self.state.aggregate_status();
         Ok(Response::new(GetStatusResponse {
-            torrent_count,
-            download_rate,
-            upload_rate,
-            free_space_bytes,
+            torrent_count: status.torrent_count,
+            download_rate: status.download_rate,
+            upload_rate: status.upload_rate,
+            free_space_bytes: status.free_space,
+            downloading_count: status.downloading,
+            seeding_count: status.seeding,
+            queued_count: status.queued,
+            paused_count: status.paused,
+            error_count: status.error,
+            checking_count: status.checking,
+            active_count: status.active,
         }))
     }
 
@@ -348,6 +389,9 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
         progress: status.progress,
         download_rate: status.download_rate,
         upload_rate: status.upload_rate,
+        seeds: status.seeds,
+        peers: status.peers,
+        eta_seconds: status.eta_seconds,
         error,
     }
 }

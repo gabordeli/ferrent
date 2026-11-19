@@ -15,50 +15,81 @@ pub const TABLE_WIDTH: f32 = 746.0;
 pub const TABLE_HEIGHT: f32 = 460.0;
 pub const HEADER_HEIGHT: f32 = 30.0;
 pub const ROW_HEIGHT: f32 = 24.0;
-pub const VISIBLE_ROWS: usize = ((TABLE_HEIGHT - HEADER_HEIGHT) / ROW_HEIGHT) as usize + 3;
+pub const VISIBLE_ROWS: usize = 64;
 
 const MENU_WIDTH: f32 = 160.0;
 const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
 const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 2.0;
 
-const BG_HEADER: Color = Color::from_rgb(0.90, 0.91, 0.94);
-const BG_ROW: Color = Color::from_rgb(1.0, 1.0, 1.0);
-const BG_ROW_ALT: Color = Color::from_rgb(0.965, 0.97, 0.98);
-const BG_SELECTED: Color = Color::from_rgb(0.84, 0.89, 1.0);
-const BG_HOVER: Color = Color::from_rgb(0.93, 0.95, 1.0);
-const TEXT: Color = Color::from_rgb(0.12, 0.14, 0.18);
-const TEXT_DIM: Color = Color::from_rgb(0.42, 0.46, 0.52);
-const TEXT_HEADER: Color = Color::from_rgb(0.28, 0.32, 0.38);
-const TEXT_ERROR: Color = Color::from_rgb(0.65, 0.12, 0.12);
-const BAR_TRACK: Color = Color::from_rgb(0.88, 0.90, 0.93);
-const TRACK: Color = Color::from_rgb(0.87, 0.89, 0.92);
-const THUMB: Color = Color::from_rgb(0.58, 0.62, 0.69);
-const MENU_BG: Color = Color::from_rgb(0.98, 0.99, 1.0);
-const MENU_BORDER: Color = Color::from_rgb(0.68, 0.72, 0.78);
+const BG_HEADER: Color = crate::theme::BG_SECONDARY;
+const BG_ROW: Color = crate::theme::BG;
+const BG_ROW_ALT: Color = Color::from_rgb(0.055, 0.090, 0.153);
+const BG_SELECTED: Color = crate::theme::DEEP;
+const BG_HOVER: Color = crate::theme::SURFACE;
+const TEXT: Color = crate::theme::TEXT;
+const TEXT_DIM: Color = crate::theme::TEXT_SECONDARY;
+const TEXT_HEADER: Color = crate::theme::TEXT_MUTED;
+const BAR_TRACK: Color = crate::theme::SURFACE;
+const TRACK: Color = crate::theme::SURFACE;
+const THUMB: Color = crate::theme::BORDER;
+const MENU_BG: Color = crate::theme::SURFACE;
+const MENU_BORDER: Color = crate::theme::BORDER;
 
-const COL_ID_RIGHT: f32 = 50.0;
-const COL_NAME_X: f32 = 60.0;
-const COL_STATE_DOT_X: f32 = 338.0;
-const COL_STATE_X: f32 = 348.0;
-const COL_PROGRESS_X: f32 = 432.0;
-const BAR_WIDTH: f32 = 64.0;
+const BAR_WIDTH: f32 = 72.0;
 const BAR_HEIGHT: f32 = 8.0;
-const COL_PCT_X: f32 = 502.0;
-const COL_DOWN_RIGHT: f32 = 618.0;
-const COL_UP_RIGHT: f32 = 706.0;
 
-/// Accent colour per torrent state; used for the state dot and the bar.
+/// Column geometry, derived from the canvas width so the table fills the
+/// window at any size.
+pub struct Columns {
+    pub id_right: f32,
+    pub name_x: f32,
+    pub name_end: f32,
+    pub size_right: f32,
+    pub dot_x: f32,
+    pub state_x: f32,
+    pub bar_x: f32,
+    pub pct_x: f32,
+    pub down_right: f32,
+    pub up_right: f32,
+    pub seeds_right: f32,
+    pub peers_right: f32,
+    pub eta_right: f32,
+}
+
+impl Columns {
+    #[must_use]
+    pub fn new(width: f32) -> Self {
+        Self {
+            id_right: 44.0,
+            name_x: 56.0,
+            name_end: width - 620.0,
+            size_right: width - 566.0,
+            dot_x: width - 552.0,
+            state_x: width - 540.0,
+            bar_x: width - 424.0,
+            pct_x: width - 340.0,
+            down_right: width - 250.0,
+            up_right: width - 180.0,
+            seeds_right: width - 108.0,
+            peers_right: width - 58.0,
+            eta_right: width - 8.0,
+        }
+    }
+}
+
+/// Accent colour per torrent state; used for the state marker and the bar.
 #[must_use]
 pub fn state_color(state: i32) -> Color {
+    use crate::theme;
     match TorrentState::try_from(state).unwrap_or(TorrentState::Unspecified) {
-        TorrentState::Seeding => Color::from_rgb(0.13, 0.55, 0.28),
-        TorrentState::Downloading => Color::from_rgb(0.13, 0.42, 0.78),
-        TorrentState::Checking => Color::from_rgb(0.80, 0.52, 0.06),
-        TorrentState::Queued => Color::from_rgb(0.45, 0.36, 0.66),
-        TorrentState::Paused => Color::from_rgb(0.48, 0.52, 0.58),
-        TorrentState::Error => TEXT_ERROR,
-        TorrentState::Unspecified => TEXT_DIM,
+        TorrentState::Downloading => theme::DOWNLOADING,
+        TorrentState::Seeding => theme::SEEDING,
+        TorrentState::Queued => theme::QUEUED,
+        TorrentState::Checking => theme::CHECKING,
+        TorrentState::Paused => theme::PAUSED,
+        TorrentState::Error => theme::ERROR,
+        TorrentState::Unspecified => theme::TEXT_MUTED,
     }
 }
 
@@ -89,18 +120,19 @@ impl Column {
 
 /// Returns the column under a header x coordinate.
 #[must_use]
-pub fn column_at(x: f32) -> Option<Column> {
-    if (10.0..55.0).contains(&x) {
+pub fn column_at(x: f32, width: f32) -> Option<Column> {
+    let columns = Columns::new(width);
+    if x < 52.0 {
         Some(Column::Id)
-    } else if (60.0..330.0).contains(&x) {
+    } else if x < columns.name_end {
         Some(Column::Name)
-    } else if (330.0..430.0).contains(&x) {
+    } else if x < columns.bar_x {
         Some(Column::State)
-    } else if (430.0..525.0).contains(&x) {
+    } else if x < columns.down_right - 70.0 {
         Some(Column::Progress)
-    } else if (525.0..625.0).contains(&x) {
+    } else if x < columns.up_right - 60.0 {
         Some(Column::Download)
-    } else if (625.0..746.0).contains(&x) {
+    } else if x < columns.seeds_right - 60.0 {
         Some(Column::Upload)
     } else {
         None
@@ -261,7 +293,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             Size::new(bounds.width, HEADER_HEIGHT),
             BG_HEADER,
         );
-        self.draw_header(&mut frame);
+        self.draw_header(&mut frame, bounds.width);
 
         let range = visible_range(self.scroll, self.total);
         let page_end = self.page_offset + self.rows.len();
@@ -286,7 +318,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             );
 
             match torrent {
-                Some(torrent) => draw_row(&mut frame, torrent, y),
+                Some(torrent) => draw_row(&mut frame, torrent, y, bounds.width),
                 None => {
                     frame.fill_text(Text {
                         content: "loading…".to_owned(),
@@ -327,7 +359,8 @@ impl canvas::Program<TableMessage> for Table<'_> {
 }
 
 impl Table<'_> {
-    fn draw_header(&self, frame: &mut Frame) {
+    fn draw_header(&self, frame: &mut Frame, width: f32) {
+        let c = Columns::new(width);
         let marker = |field: SortField| {
             if self.sort == field {
                 if self.descending { " v" } else { " ^" }
@@ -336,45 +369,25 @@ impl Table<'_> {
             }
         };
         let cells = [
-            (
-                format!("ID{}", marker(SortField::Id)),
-                COL_ID_RIGHT,
-                alignment::Horizontal::Right,
-            ),
-            (
-                format!("NAME{}", marker(SortField::Name)),
-                COL_NAME_X,
-                alignment::Horizontal::Left,
-            ),
-            (
-                "STATE".to_owned(),
-                COL_STATE_X,
-                alignment::Horizontal::Left,
-            ),
-            (
-                format!("PROGRESS{}", marker(SortField::Progress)),
-                COL_PROGRESS_X,
-                alignment::Horizontal::Left,
-            ),
-            (
-                format!("DOWN{}", marker(SortField::DownloadRate)),
-                COL_DOWN_RIGHT,
-                alignment::Horizontal::Right,
-            ),
-            (
-                format!("UP{}", marker(SortField::UploadRate)),
-                COL_UP_RIGHT,
-                alignment::Horizontal::Right,
-            ),
+            (format!("ID{}", marker(SortField::Id)), c.id_right, alignment::Horizontal::Right),
+            (format!("NAME{}", marker(SortField::Name)), c.name_x, alignment::Horizontal::Left),
+            ("SIZE".to_owned(), c.size_right, alignment::Horizontal::Right),
+            ("STATUS".to_owned(), c.state_x, alignment::Horizontal::Left),
+            (format!("PROGRESS{}", marker(SortField::Progress)), c.bar_x, alignment::Horizontal::Left),
+            (format!("DOWN{}", marker(SortField::DownloadRate)), c.down_right, alignment::Horizontal::Right),
+            (format!("UP{}", marker(SortField::UploadRate)), c.up_right, alignment::Horizontal::Right),
+            ("SEEDS".to_owned(), c.seeds_right, alignment::Horizontal::Right),
+            ("PEERS".to_owned(), c.peers_right, alignment::Horizontal::Right),
+            ("ETA".to_owned(), c.eta_right, alignment::Horizontal::Right),
         ];
         for (content, x, horizontal) in cells {
             frame.fill_text(Text {
                 content,
                 position: Point::new(x, 8.0),
                 color: TEXT_HEADER,
-                size: Pixels(12.0),
+                size: Pixels(11.0),
                 line_height: LineHeight::default(),
-                font: Font::MONOSPACE,
+                font: crate::theme::semibold(),
                 horizontal_alignment: horizontal,
                 vertical_alignment: alignment::Vertical::Top,
                 shaping: Shaping::Basic,
@@ -447,91 +460,59 @@ impl Table<'_> {
     }
 }
 
-fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32) {
+fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32, width: f32) {
+    let c = Columns::new(width);
     let accent = state_color(torrent.state);
     let text_y = y + 5.0;
+    let regular = crate::theme::regular();
+    let mono = Font::MONOSPACE;
 
-    cell(
-        frame,
-        torrent.id.to_string(),
-        COL_ID_RIGHT,
-        text_y,
-        TEXT_DIM,
-        12.0,
-        alignment::Horizontal::Right,
-        Font::MONOSPACE,
-    );
-    cell(
-        frame,
-        short_name(&torrent.name),
-        COL_NAME_X,
-        text_y,
-        TEXT,
-        13.0,
-        alignment::Horizontal::Left,
-        Font::default(),
-    );
-    frame.fill_rectangle(
-        Point::new(COL_STATE_DOT_X, y + 9.0),
-        Size::new(6.0, 6.0),
-        accent,
-    );
-    cell(
-        frame,
-        state_label(torrent.state).to_owned(),
-        COL_STATE_X,
-        text_y,
-        accent,
-        12.0,
-        alignment::Horizontal::Left,
-        Font::default(),
-    );
+    cell(frame, torrent.id.to_string(), c.id_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+    cell(frame, short_name(&torrent.name), c.name_x, text_y, TEXT, 12.0, alignment::Horizontal::Left, regular);
+    cell(frame, format_size(torrent.total_bytes), c.size_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+
+    frame.fill_rectangle(Point::new(c.dot_x, y + 9.0), Size::new(6.0, 6.0), accent);
+    cell(frame, state_label(torrent.state).to_owned(), c.state_x, text_y, accent, 11.0, alignment::Horizontal::Left, regular);
 
     let progress = torrent.progress.clamp(0.0, 1.0);
     let bar_y = y + (ROW_HEIGHT - BAR_HEIGHT) / 2.0;
-    frame.fill_rectangle(
-        Point::new(COL_PROGRESS_X, bar_y),
-        Size::new(BAR_WIDTH, BAR_HEIGHT),
-        BAR_TRACK,
-    );
+    frame.fill_rectangle(Point::new(c.bar_x, bar_y), Size::new(BAR_WIDTH, BAR_HEIGHT), BAR_TRACK);
     let filled = (BAR_WIDTH * progress).round();
     if filled > 0.0 {
-        frame.fill_rectangle(
-            Point::new(COL_PROGRESS_X, bar_y),
-            Size::new(filled, BAR_HEIGHT),
-            accent,
-        );
+        frame.fill_rectangle(Point::new(c.bar_x, bar_y), Size::new(filled, BAR_HEIGHT), accent);
     }
-    cell(
-        frame,
-        format!("{}%", (progress * 100.0).round() as u32),
-        COL_PCT_X,
-        text_y,
-        TEXT_DIM,
-        12.0,
-        alignment::Horizontal::Left,
-        Font::MONOSPACE,
-    );
-    cell(
-        frame,
-        format_rate(torrent.download_rate),
-        COL_DOWN_RIGHT,
-        text_y,
-        TEXT,
-        12.0,
-        alignment::Horizontal::Right,
-        Font::MONOSPACE,
-    );
-    cell(
-        frame,
-        format_rate(torrent.upload_rate),
-        COL_UP_RIGHT,
-        text_y,
-        TEXT,
-        12.0,
-        alignment::Horizontal::Right,
-        Font::MONOSPACE,
-    );
+    cell(frame, format!("{}%", (progress * 100.0).round() as u32), c.pct_x, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Left, mono);
+    cell(frame, format_rate(torrent.download_rate), c.down_right, text_y, TEXT, 11.0, alignment::Horizontal::Right, mono);
+    cell(frame, format_rate(torrent.upload_rate), c.up_right, text_y, TEXT, 11.0, alignment::Horizontal::Right, mono);
+    cell(frame, torrent.seeds.to_string(), c.seeds_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+    cell(frame, torrent.peers.to_string(), c.peers_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+    cell(frame, format_eta(torrent.eta_seconds), c.eta_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+}
+
+fn format_eta(seconds: u32) -> String {
+    if seconds == 0 {
+        "-".to_owned()
+    } else if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h", seconds / 3600)
+    } else {
+        format!("{}d", seconds / 86_400)
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -618,11 +599,11 @@ mod tests {
             Some(3)
         );
         assert_eq!(row_at(Point::new(20.0, 2.0), 0.0, 10), None);
-        assert_eq!(column_at(12.0), Some(Column::Id));
-        assert_eq!(column_at(100.0), Some(Column::Name));
-        assert_eq!(column_at(700.0), Some(Column::Upload));
+        assert_eq!(column_at(12.0, 746.0), Some(Column::Id));
+        assert_eq!(column_at(100.0, 746.0), Some(Column::Name));
+        assert_eq!(column_at(520.0, 746.0), Some(Column::Upload));
         assert_eq!(
-            column_at(80.0).and_then(Column::sort_field),
+            column_at(80.0, 746.0).and_then(Column::sort_field),
             Some(SortField::Name)
         );
     }

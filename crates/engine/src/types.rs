@@ -41,6 +41,12 @@ pub struct TorrentStatus {
     pub progress: f32,
     pub download_rate: u64,
     pub upload_rate: u64,
+    /// Connected seeds reported by the engine.
+    pub seeds: u32,
+    /// Connected peers reported by the engine.
+    pub peers: u32,
+    /// Estimated seconds to completion; zero when unknown.
+    pub eta_seconds: u32,
 }
 
 /// Where a new torrent comes from.

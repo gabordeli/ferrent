@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use ferrent_engine::{EngineEvent, TorrentId, TorrentStatus};
+use ferrent_engine::{EngineEvent, TorrentId, TorrentState, TorrentStatus};
 use tokio::sync::broadcast;
 
 /// How often the writer publishes a new snapshot to readers.
@@ -29,10 +29,25 @@ pub enum TorrentSort {
 pub struct TorrentQuery {
     /// Case-insensitive substring match on the torrent name.
     pub filter: Option<String>,
+    /// Restrict to one lifecycle state, using the proto enum code.
+    pub state: Option<i32>,
     pub sort: TorrentSort,
     pub descending: bool,
     pub offset: usize,
     pub limit: usize,
+}
+
+/// Proto `TorrentState` code for a status, so the query and the GUI agree.
+#[must_use]
+pub fn state_code(state: &TorrentState) -> i32 {
+    match state {
+        TorrentState::Queued => 1,
+        TorrentState::Checking => 2,
+        TorrentState::Downloading => 3,
+        TorrentState::Seeding => 4,
+        TorrentState::Paused => 5,
+        TorrentState::Error(_) => 6,
+    }
 }
 
 #[derive(Debug)]
@@ -187,6 +202,9 @@ impl StateMirror {
                 needle
                     .as_ref()
                     .is_none_or(|needle| status.name.to_lowercase().contains(needle))
+                    && query
+                        .state
+                        .is_none_or(|state| state_code(&status.state) == state)
             })
             .collect();
 
@@ -270,6 +288,9 @@ mod tests {
             progress: 0.5,
             download_rate: 0,
             upload_rate: 0,
+            seeds: 0,
+            peers: 0,
+            eta_seconds: 0,
         }
     }
 
@@ -397,6 +418,7 @@ mod tests {
 
         let query = TorrentQuery {
             filter: Some("torrent-1".to_owned()),
+            state: None,
             sort: TorrentSort::DownloadRate,
             descending: true,
             offset: 0,

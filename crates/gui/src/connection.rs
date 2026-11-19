@@ -35,6 +35,7 @@ impl From<&ServerProfile> for ServerConfig {
 #[derive(Debug, Clone)]
 pub struct ListQuery {
     pub filter: String,
+    pub state: Option<i32>,
     pub sort: SortField,
     pub descending: bool,
     pub offset: u32,
@@ -45,6 +46,7 @@ impl Default for ListQuery {
     fn default() -> Self {
         Self {
             filter: String::new(),
+            state: None,
             sort: SortField::Id,
             descending: false,
             offset: 0,
@@ -60,13 +62,20 @@ pub struct Page {
     pub total: u32,
 }
 
-/// Aggregate status shown by the server manager.
+/// Aggregate status shown by the server manager and the sidebar counters.
 #[derive(Debug, Clone, Default)]
 pub struct ServerStatus {
     pub torrent_count: u32,
     pub download_rate: u64,
     pub upload_rate: u64,
     pub free_space_bytes: u64,
+    pub downloading: u32,
+    pub seeding: u32,
+    pub queued: u32,
+    pub paused: u32,
+    pub error: u32,
+    pub checking: u32,
+    pub active: u32,
 }
 
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
@@ -96,6 +105,7 @@ pub async fn list(client: &AuthClient, query: &ListQuery) -> Result<Page, String
             descending: query.descending,
             offset: query.offset,
             limit: query.limit,
+            state_filter: query.state.unwrap_or(0),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
@@ -119,6 +129,13 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
         download_rate: response.download_rate,
         upload_rate: response.upload_rate,
         free_space_bytes: response.free_space_bytes,
+        downloading: response.downloading_count,
+        seeding: response.seeding_count,
+        queued: response.queued_count,
+        paused: response.paused_count,
+        error: response.error_count,
+        checking: response.checking_count,
+        active: response.active_count,
     })
 }
 

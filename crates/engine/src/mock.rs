@@ -95,6 +95,9 @@ impl TorrentEngine for MockEngine {
             progress: 0.0,
             download_rate: 0,
             upload_rate: 0,
+            seeds: 0,
+            peers: 0,
+            eta_seconds: 0,
         };
         self.torrents.insert(id, status.clone());
         self.emit(EngineEvent::Added(status));
@@ -115,6 +118,9 @@ impl TorrentEngine for MockEngine {
             progress: 0.0,
             download_rate: 0,
             upload_rate: 0,
+            seeds: 0,
+            peers: 0,
+            eta_seconds: 0,
         };
         self.next_id = self.next_id.max(id + 1);
         self.torrents.insert(id, status.clone());

@@ -81,6 +81,7 @@ async fn query(
             descending: false,
             offset: 0,
             limit,
+            state_filter: 0,
         })
         .await?;
     let response = response.into_inner();

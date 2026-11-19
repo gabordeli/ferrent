@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
+use ferrent_gui::theme;
 use ferrent_gui::table::{
-    self, Column, ContextMenu, MenuAction, ROW_HEIGHT, TABLE_HEIGHT, TABLE_WIDTH, Table,
-    TableMessage, VISIBLE_ROWS,
+    self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{SortField, Torrent, TorrentState};
@@ -116,6 +116,9 @@ enum Message {
     Connected(u64, Result<ClientHandle, String>),
     Poll(u64),
     StatusPolled(Result<ServerStatus, String>),
+    SelectCategory(Option<i32>),
+    SelectTab(DetailsTab),
+    Resized(f32),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -153,6 +156,28 @@ enum Message {
     KeyPressed(Key, Modifiers),
     KeyReleased(Key, Modifiers),
     Frame(Instant),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum DetailsTab {
+    #[default]
+    General,
+    Files,
+    Peers,
+    Trackers,
+    Activity,
+}
+
+impl DetailsTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Files => "Files",
+            Self::Peers => "Peers",
+            Self::Trackers => "Trackers",
+            Self::Activity => "Activity",
+        }
+    }
 }
 
 struct App {
@@ -195,6 +220,9 @@ struct App {
     server_message: String,
     server_status: Option<ServerStatus>,
     poll_tick: u32,
+    state_filter: Option<i32>,
+    details_tab: DetailsTab,
+    window_width: f32,
 
     modifiers: Modifiers,
     measure: bool,
@@ -266,6 +294,9 @@ impl Default for App {
             server_message: String::new(),
             server_status: None,
             poll_tick: 0,
+            state_filter: None,
+            details_tab: DetailsTab::General,
+            window_width: 1440.0,
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
             measure_started: None,
@@ -291,6 +322,9 @@ impl App {
                 _ => None,
             }),
         ];
+        subscriptions.push(
+            iced::window::resize_events().map(|(_id, size)| Message::Resized(size.width)),
+        );
         if self.measure {
             subscriptions.push(iced::window::frames().map(Message::Frame));
         }
@@ -340,6 +374,19 @@ impl App {
                 if let Ok(status) = result {
                     self.server_status = Some(status);
                 }
+                Task::none()
+            }
+            Message::SelectCategory(filter) => {
+                self.state_filter = filter;
+                self.scroll = 0.0;
+                self.refresh_page()
+            }
+            Message::SelectTab(tab) => {
+                self.details_tab = tab;
+                Task::none()
+            }
+            Message::Resized(width) => {
+                self.window_width = width;
                 Task::none()
             }
             Message::PageLoaded {
@@ -756,6 +803,7 @@ impl App {
         self.page_in_flight = true;
         let query = ListQuery {
             filter: self.filter.clone(),
+            state: self.state_filter,
             sort: self.sort,
             descending: self.descending,
             offset: u32::try_from(offset).unwrap_or(u32::MAX),
@@ -863,7 +911,7 @@ impl App {
             }
         }
         if point.y < table::HEADER_HEIGHT {
-            if let Some(column) = table::column_at(point.x) {
+            if let Some(column) = table::column_at(point.x, self.window_width - 232.0) {
                 return self.sort_column(column);
             }
             self.context = None;
@@ -1652,62 +1700,18 @@ impl App {
     }
 
     fn main_view(&self) -> Element<'_, Message> {
-        let server = self
-            .last_config
-            .as_ref()
-            .map_or("", |config| config.server.as_str());
-        let header = container(
-            row![
-                text("Ferrent").size(20),
-                connection_pill(self.state, server),
-                horizontal_space(),
-                button("Servers").on_press(Message::OpenServers),
-                button("Disconnect").on_press(Message::Disconnect),
-            ]
-            .spacing(12)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([6, 4])
-        .width(Length::Fill);
-
-        let selected_count = self.selected.len();
-        let toolbar = row![
-            text_input("Filter torrents...", &self.filter)
-                .id(self.filter_id.clone())
-                .on_input(Message::FilterChanged)
-                .width(Length::Fill),
-            button("Refresh").on_press(Message::Refresh),
-            action_button(
-                "Pause",
-                Message::Action(TorrentAction::Pause),
-                selected_count > 0
-            ),
-            action_button(
-                "Resume",
-                Message::Action(TorrentAction::Resume),
-                selected_count > 0
-            ),
-            action_button(
-                "Remove",
-                Message::Action(TorrentAction::Remove),
-                selected_count > 0
-            ),
-            text(format!("{selected_count} selected")).size(12),
+        row![
+            self.sidebar_view(),
+            column![self.toolbar_view(), self.table_view(), self.details_panel()]
+                .width(Length::Fill)
+                .height(Length::Fill),
         ]
-        .spacing(8);
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
 
-        let add_row = row![
-            text_input("Path to .torrent", &self.add_path)
-                .id(self.add_id.clone())
-                .on_input(Message::AddPathChanged)
-                .width(Length::Fill),
-            text_input("Save path on daemon", &self.add_save_path)
-                .on_input(Message::AddSavePathChanged)
-                .width(Length::Fixed(220.0)),
-            action_button("Add .torrent", Message::AddTorrent, !self.add_in_flight),
-        ]
-        .spacing(8);
-
+    fn table_view(&self) -> Element<'_, Message> {
         let table: Element<TableMessage> = iced::widget::canvas::Canvas::new(Table {
             rows: &self.page.torrents,
             page_offset: self.page_offset.unwrap_or(0),
@@ -1718,70 +1722,157 @@ impl App {
             descending: self.descending,
             context: self.context,
         })
-        .width(Length::Fixed(TABLE_WIDTH))
-        .height(Length::Fixed(TABLE_HEIGHT))
+        .width(Length::Fill)
+        .height(Length::Fill)
         .into();
-        let table = table.map(Message::Table);
+        table.map(Message::Table)
+    }
 
-        let body = row![table, self.details_view()].spacing(10);
-        column![header, toolbar, add_row, body]
-            .spacing(8)
-            .padding(12)
-            .height(Length::Fill)
+    fn sidebar_view(&self) -> Element<'_, Message> {
+        let status = self.server_status.clone().unwrap_or_default();
+        let active = self.state_filter;
+        column![
+            container(
+                row![
+                    container(text("").size(1.0))
+                        .width(Length::Fixed(4.0))
+                        .height(Length::Fixed(18.0))
+                        .style(|_theme: &iced::Theme| container::Style {
+                            background: Some(theme::PRIMARY.into()),
+                            border: iced::Border {
+                                color: theme::PRIMARY,
+                                width: 0.0,
+                                radius: 2.0.into(),
+                            },
+                            ..container::Style::default()
+                        }),
+                    text("Ferrent").size(18).font(theme::semibold()),
+                ]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([16, 14]),
+            nav_button("All torrents", status.torrent_count, None, active),
+            nav_button("Downloading", status.downloading, Some(3), active),
+            nav_button("Seeding", status.seeding, Some(4), active),
+            nav_button("Queued", status.queued, Some(1), active),
+            nav_button("Paused", status.paused, Some(5), active),
+            nav_stat("Active", status.active),
+            nav_button("Error", status.error, Some(6), active),
+            horizontal_space(),
+            container(
+                row![
+                    button(text("Servers…").size(12)).on_press(Message::OpenServers),
+                    button(text("Disconnect").size(12)).on_press(Message::Disconnect),
+                ]
+                .spacing(6),
+            )
+            .padding([10, 12]),
+        ]
+        .spacing(2)
+        .width(Length::Fixed(216.0))
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn toolbar_view(&self) -> Element<'_, Message> {
+        let selected = self.selected.len();
+        let search = row![
+            text_input("Search torrents…", &self.filter)
+                .id(self.filter_id.clone())
+                .on_input(Message::FilterChanged)
+                .width(Length::Fill),
+            action_button("Refresh", Message::Refresh, true),
+            action_button("Pause", Message::Action(TorrentAction::Pause), selected > 0),
+            action_button(
+                "Resume",
+                Message::Action(TorrentAction::Resume),
+                selected > 0
+            ),
+            action_button(
+                "Remove",
+                Message::Action(TorrentAction::Remove),
+                selected > 0
+            ),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+
+        let add = row![
+            text_input("Path to .torrent", &self.add_path)
+                .id(self.add_id.clone())
+                .on_input(Message::AddPathChanged)
+                .width(Length::Fill),
+            text_input("Save path", &self.add_save_path)
+                .on_input(Message::AddSavePathChanged)
+                .width(Length::Fixed(190.0)),
+            action_button("Add torrent", Message::AddTorrent, !self.add_in_flight),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+
+        container(column![search, add].spacing(6))
+            .padding([8, 12])
+            .width(Length::Fill)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(theme::BG_SECONDARY.into()),
+                ..container::Style::default()
+            })
             .into()
     }
 
-    fn details_view(&self) -> Element<'_, Message> {
-        let dim = Color::from_rgb(0.45, 0.49, 0.55);
-        let content: Element<Message> = if self.selected.is_empty() {
-            column![
-                text("Details").size(16),
-                text("Nothing selected").size(12).color(dim),
-                text("Click a row to select it.").size(11).color(dim),
-                text("Space pause/resume · Delete remove").size(11).color(dim),
-                text("Ctrl+F filter · Ctrl+R refresh · Ctrl+A page").size(11).color(dim),
-            ]
-            .spacing(6)
-            .into()
-        } else if self.selected.len() == 1 {
-            let torrent = self.selected_torrents.values().next();
-            match torrent {
-                Some(torrent) => column![
-                    text("Details").size(16),
-                    text(&torrent.name).size(13),
-                    detail_section("TORRENT", dim),
-                    detail_row("State", table::state_label(torrent.state).to_owned(), dim),
-                    detail_row(
-                        "Progress",
-                        format!("{:.1}%", torrent.progress * 100.0),
-                        dim
-                    ),
-                    detail_row("Size", format_size(torrent.total_bytes), dim),
-                    detail_row("Torrent ID", torrent.id.to_string(), dim),
-                    detail_section("TRANSFER", dim),
-                    detail_row(
-                        "Down",
-                        table::format_rate(torrent.download_rate),
-                        dim
-                    ),
-                    detail_row("Up", table::format_rate(torrent.upload_rate), dim),
-                    if torrent.error.is_empty() {
-                        Element::<Message>::from(text(""))
+    fn details_panel(&self) -> Element<'_, Message> {
+        let current = self.details_tab;
+        let tabs = [
+            DetailsTab::General,
+            DetailsTab::Files,
+            DetailsTab::Peers,
+            DetailsTab::Trackers,
+            DetailsTab::Activity,
+        ]
+        .into_iter()
+        .map(|tab| {
+            let active = tab == current;
+            button(text(tab.label()).size(12).font(theme::medium()))
+                .on_press(Message::SelectTab(tab))
+                .padding([4, 10])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(if active { theme::SURFACE } else { theme::BG }.into()),
+                    text_color: if active {
+                        theme::BRIGHT
                     } else {
-                        Element::<Message>::from(
-                            text(format!("Error: {}", torrent.error))
-                                .size(12)
-                                .color(Color::from_rgb(0.65, 0.12, 0.12)),
-                        )
+                        theme::TEXT_SECONDARY
                     },
-                ]
-                .spacing(6)
-                .into(),
-                None => column![text("Details").size(16), text("Loading...").size(12)]
-                    .spacing(6)
-                    .into(),
-            }
-        } else {
+                    border: iced::Border {
+                        color: if active { theme::PRIMARY } else { theme::BG },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+        })
+        .collect::<Vec<Element<Message>>>();
+
+        container(column![row(tabs).spacing(4), self.details_body()].spacing(8))
+            .padding(10)
+            .width(Length::Fill)
+            .height(Length::Fixed(220.0))
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(theme::BG_SECONDARY.into()),
+                border: iced::Border {
+                    color: theme::BORDER,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn details_body(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        if self.selected.len() > 1 {
             let names = self
                 .selected_torrents
                 .values()
@@ -1792,121 +1883,177 @@ impl App {
                         .into()
                 })
                 .collect::<Vec<Element<Message>>>();
-            column![
-                text("Details").size(16),
+            return column![
                 text(format!("{} torrents selected", self.selected.len())).size(13),
-                text("Space pause/resume · Delete remove").size(11).color(dim),
                 scrollable(WidgetColumn::with_children(names).spacing(3)).height(Length::Fill),
             ]
             .spacing(6)
-            .into()
+            .into();
+        }
+        let Some(torrent) = self.selected_torrents.values().next() else {
+            return column![
+                text("Nothing selected").size(12).color(dim),
+                text("Click a row to inspect it. Space pause/resume · Delete remove")
+                    .size(11)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .spacing(4)
+            .into();
         };
-
-        container(content)
-            .padding(12)
-            .width(Length::Fixed(320.0))
-            .height(Length::Fixed(TABLE_HEIGHT))
-            .into()
+        match self.details_tab {
+            DetailsTab::General => column![
+                row![
+                    text(&torrent.name).size(13).font(theme::medium()).width(Length::Fill),
+                    text(table::state_label(torrent.state))
+                        .size(11)
+                        .color(table::state_color(torrent.state)),
+                ]
+                .spacing(12),
+                row![
+                    detail_row("Size", format_size(torrent.total_bytes), dim),
+                    detail_row(
+                        "Progress",
+                        format!("{:.1}%", torrent.progress * 100.0),
+                        dim
+                    ),
+                    detail_row("Down", table::format_rate(torrent.download_rate), dim),
+                    detail_row("Up", table::format_rate(torrent.upload_rate), dim),
+                ]
+                .spacing(24),
+                row![
+                    detail_row("Seeds", torrent.seeds.to_string(), dim),
+                    detail_row("Peers", torrent.peers.to_string(), dim),
+                    detail_row("Torrent ID", torrent.id.to_string(), dim),
+                    detail_row(
+                        "Save",
+                        self.last_config
+                            .as_ref()
+                            .map_or("-".to_owned(), |_| "./downloads".to_owned()),
+                        dim
+                    ),
+                ]
+                .spacing(24),
+                if torrent.error.is_empty() {
+                    Element::<Message>::from(text(""))
+                } else {
+                    Element::<Message>::from(
+                        text(format!("Error: {}", torrent.error))
+                            .size(12)
+                            .color(theme::ERROR),
+                    )
+                },
+            ]
+            .spacing(8)
+            .into(),
+            tab => text(format!("{} view lands with the details RPC slice.", tab.label()))
+                .size(12)
+                .color(dim)
+                .into(),
+        }
     }
 
     fn status_bar(&self) -> Element<'_, Message> {
         let (label, color) = state_style(self.state);
-        let selected = self.selected.len();
-        let rates = self
-            .server_status
+        let server = self
+            .last_config
             .as_ref()
-            .map(|status| {
-                format!(
-                    "↓ {}   ↑ {}",
-                    table::format_rate(status.download_rate),
-                    table::format_rate(status.upload_rate)
+            .map_or("", |config| config.server.as_str());
+        let (down, up, active, total) = self.server_status.as_ref().map_or(
+            (0, 0, 0, self.page.total),
+            |status| {
+                (
+                    status.download_rate,
+                    status.upload_rate,
+                    status.active,
+                    status.torrent_count,
                 )
-            })
-            .unwrap_or_default();
+            },
+        );
         container(
             row![
+                text("●").size(9).color(color),
                 text(label).size(11).color(color),
-                text("·").size(11).color(color),
-                text(&self.status).size(11),
+                text(server).size(11).color(theme::TEXT_SECONDARY),
                 horizontal_space(),
-                text(rates).size(11),
-                text(format!("{} torrents", self.page.total)).size(11),
-                if selected > 0 {
-                    text(format!("{selected} selected")).size(11)
-                } else {
-                    text("").size(11)
-                },
+                text(format!("↓ {}", table::format_rate(down))).size(11),
+                text(format!("↑ {}", table::format_rate(up))).size(11),
+                text(format!("{active} active")).size(11).color(theme::TEXT_SECONDARY),
+                text(format!("{total} torrents")).size(11).color(theme::TEXT_SECONDARY),
             ]
-            .spacing(10)
+            .spacing(14)
             .align_y(iced::Alignment::Center),
         )
-        .padding([6, 12])
+        .padding([5, 12])
         .width(Length::Fill)
-        .style(|theme: &iced::Theme| {
-            let palette = theme.extended_palette();
-            container::Style {
-                background: Some(palette.background.weak.color.into()),
-                border: iced::Border {
-                    color: palette.background.strong.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..container::Style::default()
-            }
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::BG_SECONDARY.into()),
+            border: iced::Border {
+                color: theme::BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..container::Style::default()
         })
         .into()
     }
 }
 
-fn state_style(state: ConnectionState) -> (&'static str, Color) {
-    match state {
-        ConnectionState::Idle => ("idle", Color::from_rgb(0.52, 0.56, 0.62)),
-        ConnectionState::Connecting => ("connecting", Color::from_rgb(0.82, 0.58, 0.10)),
-        ConnectionState::Connected => ("connected", Color::from_rgb(0.13, 0.60, 0.31)),
-        ConnectionState::Reconnecting => ("reconnecting", Color::from_rgb(0.82, 0.58, 0.10)),
-    }
-}
-
-fn connection_pill(state: ConnectionState, server: &str) -> Element<'_, Message> {
-    let (label, color) = state_style(state);
-    container(
+fn nav_button(
+    label: &'static str,
+    count: u32,
+    filter: Option<i32>,
+    active: Option<i32>,
+) -> Element<'static, Message> {
+    let selected = active == filter;
+    button(
         row![
-            container(text("").size(1.0))
-                .width(Length::Fixed(8.0))
-                .height(Length::Fixed(8.0))
-                .style(move |_theme: &iced::Theme| container::Style {
-                    background: Some(color.into()),
-                    border: iced::Border {
-                        color,
-                        width: 0.0,
-                        radius: 4.0.into(),
-                    },
-                    ..container::Style::default()
-                }),
-            text(server).size(12),
-            text(label).size(11).color(color),
+            text(label).size(13),
+            horizontal_space(),
+            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
         ]
-        .spacing(8)
         .align_y(iced::Alignment::Center),
     )
-    .padding([5, 10])
-    .style(|theme: &iced::Theme| {
-        let palette = theme.extended_palette();
-        container::Style {
-            background: Some(palette.background.weak.color.into()),
-            border: iced::Border {
-                color: palette.background.strong.color,
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..container::Style::default()
-        }
+    .on_press(Message::SelectCategory(filter))
+    .width(Length::Fill)
+    .padding([7, 12])
+    .style(move |_theme: &iced::Theme, _status| button::Style {
+        background: Some(if selected { theme::SURFACE } else { theme::BG_SECONDARY }.into()),
+        text_color: if selected {
+            theme::TEXT
+        } else {
+            theme::TEXT_SECONDARY
+        },
+        border: iced::Border {
+            color: if selected { theme::PRIMARY } else { theme::BG_SECONDARY },
+            width: 0.0,
+            radius: 3.0.into(),
+        },
+        ..button::Style::default()
     })
     .into()
 }
 
-fn detail_section<'a>(title: &'a str, dim: Color) -> Element<'a, Message> {
-    text(title).size(10).color(dim).into()
+fn nav_stat(label: &'static str, count: u32) -> Element<'static, Message> {
+    container(
+        row![
+            text(label).size(13).color(theme::TEXT_SECONDARY),
+            horizontal_space(),
+            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([7, 12])
+    .width(Length::Fill)
+    .into()
+}
+
+fn state_style(state: ConnectionState) -> (&'static str, Color) {
+    match state {
+        ConnectionState::Idle => ("idle", theme::TEXT_MUTED),
+        ConnectionState::Connecting => ("connecting", theme::CONNECTING),
+        ConnectionState::Connected => ("connected", theme::DOWNLOADING),
+        ConnectionState::Reconnecting => ("reconnecting", theme::CONNECTING),
+    }
 }
 
 fn detail_row<'a>(label: &'a str, value: String, dim: Color) -> Element<'a, Message> {
@@ -1959,8 +2106,13 @@ fn read_rss_kb() -> u64 {
 fn main() -> iced::Result {
     let _telemetry = ferrent_telemetry::init("ferrent-gui");
     let app = iced::application("Ferrent", App::update, App::view)
+        .theme(|_state| theme::iced_theme())
+        .default_font(theme::regular())
+        .font(theme::REGULAR_BYTES)
+        .font(theme::MEDIUM_BYTES)
+        .font(theme::SEMIBOLD_BYTES)
         .subscription(App::subscription)
-        .window_size(Size::new(1100.0, 700.0));
+        .window_size(Size::new(1440.0, 900.0));
 
     let result =
         if std::env::args().any(|argument| argument == "--connect" || argument == "--measure") {
