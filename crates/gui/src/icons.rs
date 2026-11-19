@@ -30,6 +30,8 @@ pub mod glyph {
     pub const PAUSED: char = '\u{f28b}';
     pub const ERROR: char = '\u{f071}';
     pub const ACTIVE: char = '\u{f0e7}';
+    pub const CHECK: char = '\u{f058}';
+    pub const HOURGLASS: char = '\u{f252}';
 
     // Navigation and chrome.
     pub const CHEVRON_LEFT: char = '\u{f053}';

@@ -11,19 +11,19 @@ use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
-use ferrent_gui::theme;
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
+use ferrent_gui::theme;
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker};
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    Column as WidgetColumn, button, column, container, horizontal_space, row, scrollable, text,
-    text_input,
+    Column as WidgetColumn, button, column, container, horizontal_space, mouse_area, row,
+    scrollable, text, text_input, vertical_space,
 };
-use iced::{Color, Element, Length, Point, Size, Subscription, Task};
+use iced::{Color, Element, Length, Point, Size, Subscription, Task, mouse};
 
 #[derive(Debug, Clone)]
 struct Fields {
@@ -119,7 +119,7 @@ enum Message {
     StatusPolled(Result<ServerStatus, String>),
     SelectCategory(Option<i32>),
     SelectTab(DetailsTab),
-    Resized(f32),
+    Resized(f32, f32),
     DetailsLoaded(Box<DetailsPayload>),
     DetailsFailed(String),
     PageLoaded {
@@ -144,7 +144,12 @@ enum Message {
     TorrentAdded(Result<u64, String>),
     FileDropped(PathBuf),
     OpenServers,
-    CloseServers,
+    OpenSettings,
+    CloseModal,
+    ModalDragStart,
+    CursorMoved(Point),
+    ModalDragEnd,
+    ModalBackdrop,
     ServerStatus(String, Result<ServerStatus, String>),
     SelectServer(usize),
     ConnectServer(String),
@@ -191,6 +196,28 @@ impl DetailsTab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Modal {
+    Servers,
+    Settings,
+}
+
+impl Modal {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Servers => "Servers",
+            Self::Settings => "Settings",
+        }
+    }
+
+    fn size(self) -> (f32, f32) {
+        match self {
+            Self::Servers => (880.0, 620.0),
+            Self::Settings => (560.0, 380.0),
+        }
+    }
+}
+
 struct App {
     config: GuiConfig,
     config_path: PathBuf,
@@ -226,7 +253,10 @@ struct App {
     action_in_flight: bool,
     sidebar_collapsed: bool,
 
-    servers_open: bool,
+    modal: Option<Modal>,
+    modal_offset: (f32, f32),
+    modal_drag: Option<(Point, (f32, f32))>,
+    cursor: Point,
     server_rows: Vec<ServerRow>,
     server_testing: bool,
     server_message: String,
@@ -235,6 +265,7 @@ struct App {
     state_filter: Option<i32>,
     details_tab: DetailsTab,
     window_width: f32,
+    window_height: f32,
     details_for: Option<u64>,
     details_payload: Option<DetailsPayload>,
     details_error: Option<String>,
@@ -305,7 +336,10 @@ impl Default for App {
             add_in_flight: false,
             action_in_flight: false,
             sidebar_collapsed: false,
-            servers_open: false,
+            modal: None,
+            modal_offset: (0.0, 0.0),
+            modal_drag: None,
+            cursor: Point::ORIGIN,
             server_rows: Vec::new(),
             server_testing: false,
             server_message: String::new(),
@@ -314,6 +348,7 @@ impl Default for App {
             state_filter: None,
             details_tab: DetailsTab::General,
             window_width: 1440.0,
+            window_height: 900.0,
             details_for: None,
             details_payload: None,
             details_error: None,
@@ -344,8 +379,20 @@ impl App {
             }),
         ];
         subscriptions.push(
-            iced::window::resize_events().map(|(_id, size)| Message::Resized(size.width)),
+            iced::window::resize_events()
+                .map(|(_id, size)| Message::Resized(size.width, size.height)),
         );
+        subscriptions.push(iced::event::listen_with(
+            |event, _status, _window| match event {
+                iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::CursorMoved(position))
+                }
+                iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::ModalDragEnd)
+                }
+                _ => None,
+            },
+        ));
         if self.measure {
             subscriptions.push(iced::window::frames().map(Message::Frame));
         }
@@ -406,8 +453,10 @@ impl App {
                 self.details_tab = tab;
                 self.load_details()
             }
-            Message::Resized(width) => {
+            Message::Resized(width, height) => {
                 self.window_width = width;
+                self.window_height = height;
+                self.clamp_modal_offset();
                 Task::none()
             }
             Message::DetailsLoaded(payload) => {
@@ -481,10 +530,34 @@ impl App {
             Message::TorrentAdded(result) => self.torrent_added(result),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenServers => self.open_servers(),
-            Message::CloseServers => {
-                self.servers_open = false;
+            Message::OpenSettings => {
+                self.open_modal(Modal::Settings);
                 Task::none()
             }
+            Message::CloseModal => {
+                self.modal = None;
+                self.modal_drag = None;
+                Task::none()
+            }
+            Message::ModalDragStart => {
+                if self.modal.is_some() {
+                    self.modal_drag = Some((self.cursor, self.modal_offset));
+                }
+                Task::none()
+            }
+            Message::CursorMoved(point) => {
+                self.cursor = point;
+                if let Some((from, base)) = self.modal_drag {
+                    self.modal_offset = (base.0 + point.x - from.x, base.1 + point.y - from.y);
+                    self.clamp_modal_offset();
+                }
+                Task::none()
+            }
+            Message::ModalDragEnd => {
+                self.modal_drag = None;
+                Task::none()
+            }
+            Message::ModalBackdrop => Task::none(),
             Message::ServerStatus(name, result) => {
                 if let Some(row) = self.server_rows.iter_mut().find(|row| row.name == name) {
                     match result {
@@ -616,7 +689,7 @@ impl App {
         if let Err(error) = self.config.save(&self.config_path) {
             self.server_message = format!("Cannot save config: {error}");
         }
-        self.servers_open = false;
+        self.modal = None;
         self.fields = Fields::from_profile(&profile);
         self.start_profile_connection(profile)
     }
@@ -1241,7 +1314,7 @@ impl App {
     }
 
     fn open_servers(&mut self) -> Task<Message> {
-        self.servers_open = true;
+        self.open_modal(Modal::Servers);
         self.server_rows = self
             .config
             .profiles
@@ -1372,9 +1445,10 @@ impl App {
             Key::Named(Named::Shift) => self.modifiers.insert(Modifiers::SHIFT),
             _ => {}
         }
-        if self.servers_open {
+        if self.modal.is_some() {
             if matches!(key.as_ref(), Key::Named(Named::Escape)) {
-                self.servers_open = false;
+                self.modal = None;
+                self.modal_drag = None;
             }
             return Task::none();
         }
@@ -1488,20 +1562,76 @@ impl App {
             self.connect_view()
         };
         let base: Element<Message> = column![content, self.status_bar()].into();
-        if self.servers_open {
-            let modal = container(self.server_manager_view())
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(|_theme: &iced::Theme| container::Style {
-                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                    ..container::Style::default()
-                });
-            iced::widget::stack![base, modal].into()
-        } else {
-            base
-        }
+        let Some(modal) = self.modal else {
+            return base;
+        };
+        let (panel, size) = match modal {
+            Modal::Servers => (self.server_manager_view(), modal.size()),
+            Modal::Settings => (self.settings_view(), modal.size()),
+        };
+        let overlay = self.modal_overlay(panel, size);
+        iced::widget::stack![base, overlay].into()
+    }
+
+    fn open_modal(&mut self, modal: Modal) {
+        self.modal = Some(modal);
+        self.modal_offset = (0.0, 0.0);
+        self.modal_drag = None;
+    }
+
+    fn clamp_modal_offset(&mut self) {
+        let Some(modal) = self.modal else {
+            return;
+        };
+        let (width, height) = modal.size();
+        let limit_x = ((self.window_width - width) / 2.0).max(0.0);
+        let limit_y = ((self.window_height - height) / 2.0).max(0.0);
+        self.modal_offset.0 = self.modal_offset.0.clamp(-limit_x, limit_x);
+        self.modal_offset.1 = self.modal_offset.1.clamp(-limit_y, limit_y);
+    }
+
+    fn modal_overlay<'a>(
+        &self,
+        panel: Element<'a, Message>,
+        size: (f32, f32),
+    ) -> Element<'a, Message> {
+        let (width, height) = size;
+        let max_x = (self.window_width - width).max(0.0);
+        let max_y = (self.window_height - height).max(0.0);
+        let x = ((max_x / 2.0) + self.modal_offset.0).clamp(0.0, max_x);
+        let y = ((max_y / 2.0) + self.modal_offset.1).clamp(0.0, max_y);
+        let layer = container(
+            column![
+                vertical_space().height(y),
+                row![horizontal_space().width(x), panel],
+            ]
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+            ..container::Style::default()
+        });
+        mouse_area(layer).on_press(Message::ModalBackdrop).into()
+    }
+
+    fn settings_view(&self) -> Element<'_, Message> {
+        let active = self.config.active.clone().unwrap_or_else(|| "—".to_owned());
+        let body = column![
+            text("Connection").size(12).font(theme::semibold()),
+            detail_row("Profile", active, theme::TEXT_MUTED),
+            detail_row(
+                "Config",
+                self.config_path.display().to_string(),
+                theme::TEXT_MUTED,
+            ),
+            text("More options land here as we build them out.")
+                .size(12)
+                .color(theme::TEXT_MUTED),
+        ]
+        .spacing(8);
+        modal_panel(Modal::Settings, body.into())
     }
 
     fn server_manager_view(&self) -> Element<'_, Message> {
@@ -1511,9 +1641,11 @@ impl App {
             .iter()
             .enumerate()
             .map(|(index, row)| {
-                let (state, detail) = match (&row.status, &row.error) {
+                let (icon, color, state, detail) = match (&row.status, &row.error) {
                     (Some(status), _) => (
-                        "available".to_owned(),
+                        glyph::CHECK,
+                        theme::DOWNLOADING,
+                        "available",
                         format!(
                             "{} torrents · ↓ {} · ↑ {} · {} free",
                             status.torrent_count,
@@ -1522,111 +1654,133 @@ impl App {
                             format_size(status.free_space_bytes)
                         ),
                     ),
-                    (None, Some(error)) => ("error".to_owned(), error.clone()),
-                    (None, None) => ("checking...".to_owned(), String::new()),
+                    (None, Some(error)) => (glyph::ERROR, theme::ERROR, "error", error.clone()),
+                    (None, None) => (
+                        glyph::HOURGLASS,
+                        theme::QUEUED,
+                        "checking",
+                        "querying the daemon…".to_owned(),
+                    ),
                 };
                 let is_active = active.as_deref() == Some(row.name.as_str());
-                let title = if is_active {
-                    format!("{} · active", row.name)
-                } else {
-                    row.name.clone()
-                };
                 let background = if is_active {
-                    Color::from_rgb(0.89, 0.94, 1.0)
+                    theme::SURFACE
                 } else {
-                    Color::from_rgb(0.98, 0.98, 0.99)
+                    theme::BG_SECONDARY
+                };
+                let border = if is_active {
+                    theme::PRIMARY
+                } else {
+                    theme::BORDER
                 };
                 container(
                     row![
-                        column![text(title).size(14), text(row.server.clone()).size(11)]
-                            .width(Length::Fixed(250.0))
-                            .spacing(2),
-                        column![text(state).size(12), text(detail).size(12)]
-                            .width(Length::Fill)
-                            .spacing(2),
-                        button(if is_active { "Reconnect" } else { "Connect" })
-                            .on_press(Message::ConnectServer(row.name.clone())),
-                        button("Edit").on_press(Message::SelectServer(index)),
-                        button("Delete").on_press(Message::DeleteServer(row.name.clone())),
+                        text(icon).font(icons::solid()).size(12.0).color(color),
+                        column![
+                            row![
+                                text(row.name.clone()).size(13).font(theme::medium()),
+                                text(row.server.clone()).size(11).color(theme::TEXT_MUTED),
+                            ]
+                            .spacing(8)
+                            .align_y(iced::Alignment::Center),
+                            row![
+                                text(state).size(11).color(color),
+                                text(detail).size(11).color(theme::TEXT_SECONDARY),
+                            ]
+                            .spacing(8),
+                        ]
+                        .width(Length::Fill)
+                        .spacing(2),
+                        small_action(
+                            glyph::PLAY,
+                            if is_active { "Reconnect" } else { "Connect" },
+                            Message::ConnectServer(row.name.clone()),
+                        ),
+                        small_action(glyph::EDIT, "Edit", Message::SelectServer(index),),
+                        small_action(
+                            glyph::TRASH,
+                            "Delete",
+                            Message::DeleteServer(row.name.clone()),
+                        ),
                     ]
                     .spacing(8)
                     .align_y(iced::Alignment::Center),
                 )
-                .padding([6, 8])
+                .padding([7, 9])
                 .width(Length::Fill)
-                .style(move |theme: &iced::Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style {
-                        background: Some(background.into()),
-                        border: iced::Border {
-                            color: palette.background.strong.color,
-                            width: 1.0,
-                            radius: 6.0.into(),
-                        },
-                        ..container::Style::default()
-                    }
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(background.into()),
+                    border: iced::Border {
+                        color: border,
+                        width: 1.0,
+                        radius: 5.0.into(),
+                    },
+                    ..container::Style::default()
                 })
                 .into()
             })
             .collect();
 
-        let form = column![
-            text("Add / edit server").size(16),
-            row![
-                text_input("Name", &self.fields.name)
-                    .on_input(|value| Message::Field(Field::Name, value))
-                    .width(Length::Fixed(220.0)),
-                text_input("Server URL", &self.fields.server)
-                    .on_input(|value| Message::Field(Field::Server, value))
-                    .width(Length::Fill),
-            ]
-            .spacing(8),
-            row![
-                text_input("CA certificate (PEM path)", &self.fields.ca)
-                    .on_input(|value| Message::Field(Field::Ca, value))
-                    .width(Length::Fill),
-                text_input("API token", &self.fields.token)
-                    .secure(true)
-                    .on_input(|value| Message::Field(Field::Token, value))
-                    .width(Length::Fixed(220.0)),
-            ]
-            .spacing(8),
-            row![
-                button("Test & save").on_press(Message::TestServer),
-                button("New").on_press(Message::NewServer),
-                button("Refresh").on_press(Message::OpenServers),
-                button("Close").on_press(Message::CloseServers),
-            ]
-            .spacing(8),
-        ]
-        .spacing(8);
-
-        container(
+        let form = container(
             column![
-                text("Servers").size(24),
-                scrollable(WidgetColumn::with_children(rows).spacing(4))
-                    .height(Length::Fill),
-                form,
-                text(&self.server_message).size(12),
+                text("Add / edit server").size(13).font(theme::semibold()),
+                row![
+                    text_input("Name", &self.fields.name)
+                        .on_input(|value| Message::Field(Field::Name, value))
+                        .width(Length::Fixed(220.0)),
+                    text_input("Server URL", &self.fields.server)
+                        .on_input(|value| Message::Field(Field::Server, value))
+                        .width(Length::Fill),
+                ]
+                .spacing(8),
+                row![
+                    text_input("CA certificate (PEM path)", &self.fields.ca)
+                        .on_input(|value| Message::Field(Field::Ca, value))
+                        .width(Length::Fill),
+                    text_input("API token", &self.fields.token)
+                        .secure(true)
+                        .on_input(|value| Message::Field(Field::Token, value))
+                        .width(Length::Fixed(220.0)),
+                ]
+                .spacing(8),
+                row![
+                    button("Test & save").on_press(Message::TestServer),
+                    button("New").on_press(Message::NewServer),
+                    button("Refresh").on_press(Message::OpenServers),
+                ]
+                .spacing(8),
             ]
-            .spacing(10),
+            .spacing(8),
         )
-        .padding(16)
-        .width(Length::Fixed(880.0))
-        .height(Length::Fixed(620.0))
-        .style(|theme: &iced::Theme| {
-            let palette = theme.extended_palette();
-            container::Style {
-                background: Some(palette.background.base.color.into()),
-                border: iced::Border {
-                    color: palette.background.strong.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..container::Style::default()
-            }
-        })
-        .into()
+        .padding(10)
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::BG_SECONDARY.into()),
+            border: iced::Border {
+                color: theme::BORDER,
+                width: 1.0,
+                radius: 5.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        let footer = row![
+            text(&self.server_message).size(11).color(theme::TEXT_MUTED),
+            horizontal_space(),
+            button("Close").on_press(Message::CloseModal),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        let body = column![
+            scrollable(WidgetColumn::with_children(rows).spacing(4)).height(Length::Fill),
+            form,
+            footer,
+        ]
+        .spacing(10)
+        .height(Length::Fill);
+
+        modal_panel(Modal::Servers, body.into())
     }
 
     fn connect_view(&self) -> Element<'_, Message> {
@@ -1824,6 +1978,13 @@ impl App {
         let error = TorrentState::Error as i32;
 
         let bottom: Element<Message> = WidgetColumn::with_children(vec![
+            icon_nav(
+                expanded,
+                glyph::SETTINGS,
+                theme::TEXT_SECONDARY,
+                "Settings",
+                Message::OpenSettings,
+            ),
             icon_nav(
                 expanded,
                 glyph::SERVER,
@@ -2278,6 +2439,99 @@ impl App {
         })
         .into()
     }
+}
+
+fn modal_panel<'a>(modal: Modal, body: Element<'a, Message>) -> Element<'a, Message> {
+    let (width, height) = modal.size();
+    let close = button(
+        text(glyph::CLOSE)
+            .font(icons::solid())
+            .size(12.0)
+            .color(theme::TEXT_SECONDARY),
+    )
+    .on_press(Message::CloseModal)
+    .padding([4, 7])
+    .style(|_theme: &iced::Theme, _status| button::Style {
+        background: Some(theme::BG.into()),
+        border: iced::Border {
+            color: theme::BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    });
+
+    let title_bar = mouse_area(
+        container(
+            row![
+                text(modal.title()).size(15).font(theme::semibold()),
+                horizontal_space(),
+                close,
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([8, 12])
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::BG_SECONDARY.into()),
+            border: iced::Border {
+                color: theme::BORDER,
+                width: 0.0,
+                radius: iced::border::Radius {
+                    top_left: 8.0,
+                    top_right: 8.0,
+                    bottom_right: 0.0,
+                    bottom_left: 0.0,
+                },
+            },
+            ..container::Style::default()
+        }),
+    )
+    .on_press(Message::ModalDragStart)
+    .interaction(mouse::Interaction::Grab);
+
+    container(column![
+        title_bar,
+        container(body).padding(14).height(Length::Fill),
+    ])
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(height))
+    .style(|_theme: &iced::Theme| container::Style {
+        background: Some(theme::BG.into()),
+        border: iced::Border {
+            color: theme::BORDER,
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
+fn small_action(icon: char, label: &'static str, message: Message) -> Element<'static, Message> {
+    button(
+        row![
+            text(icon)
+                .font(icons::solid())
+                .size(10.0)
+                .color(theme::TEXT_SECONDARY),
+            text(label).size(11).color(theme::TEXT_SECONDARY),
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(message)
+    .padding([4, 8])
+    .style(|_theme: &iced::Theme, _status| button::Style {
+        background: Some(theme::BG.into()),
+        border: iced::Border {
+            color: theme::BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    })
+    .into()
 }
 
 fn nav_button(
