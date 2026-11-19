@@ -27,7 +27,21 @@ pub(crate) mod ffi {
         type Session;
 
         fn new_session(download_rate_limit: u64, upload_rate_limit: u64) -> UniquePtr<Session>;
-        fn add_torrent(self: Pin<&mut Session>, metainfo: &[u8], save_path: &str) -> u64;
+        fn add_torrent(
+            self: Pin<&mut Session>,
+            metainfo: &[u8],
+            save_path: &str,
+            resume_data: &[u8],
+        ) -> u64;
+        fn restore_torrent(
+            self: Pin<&mut Session>,
+            id: u64,
+            metainfo: &[u8],
+            save_path: &str,
+            resume_data: &[u8],
+        ) -> bool;
+        fn request_resume(self: Pin<&mut Session>, id: u64) -> bool;
+        fn take_resume(self: Pin<&mut Session>, id: u64) -> Vec<u8>;
         fn pause(self: Pin<&mut Session>, id: u64) -> bool;
         fn resume(self: Pin<&mut Session>, id: u64) -> bool;
         fn remove(self: Pin<&mut Session>, id: u64) -> bool;

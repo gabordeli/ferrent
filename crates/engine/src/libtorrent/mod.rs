@@ -33,6 +33,19 @@ enum Command {
         spec: AddTorrent,
         reply: Sender<Result<TorrentId, EngineError>>,
     },
+    Restore {
+        id: TorrentId,
+        spec: AddTorrent,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    RequestResume {
+        id: TorrentId,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    TakeResume {
+        id: TorrentId,
+        reply: Sender<Result<Option<Vec<u8>>, EngineError>>,
+    },
     Pause {
         id: TorrentId,
         reply: Sender<Result<(), EngineError>>,
@@ -106,6 +119,24 @@ impl TorrentEngine for LibtorrentEngine {
     fn add_torrent(&mut self, spec: AddTorrent) -> Result<TorrentId, EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Add { spec, reply })?;
+        Self::recv(response)
+    }
+
+    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::Restore { id, spec, reply })?;
+        Self::recv(response)
+    }
+
+    fn request_resume_data(&mut self, id: TorrentId) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::RequestResume { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn take_resume_data(&mut self, id: TorrentId) -> Result<Option<Vec<u8>>, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::TakeResume { id, reply })?;
         Self::recv(response)
     }
 
@@ -189,7 +220,10 @@ fn run_worker(
                     }
                 };
                 let save_path = spec.save_path.to_string_lossy().into_owned();
-                let id = session.pin_mut().add_torrent(&metainfo, &save_path);
+                let resume_data = spec.resume_data.as_deref().unwrap_or(&[]);
+                let id = session
+                    .pin_mut()
+                    .add_torrent(&metainfo, &save_path, resume_data);
                 if id == 0 {
                     let _ = reply.send(Err(EngineError::Rejected {
                         reason: session.last_error().to_string(),
@@ -199,6 +233,44 @@ fn run_worker(
                 let status = convert_status(session.status(id));
                 let _ = events.send(EngineEvent::Added(status));
                 let _ = reply.send(Ok(id));
+            }
+            Ok(Command::Restore { id, spec, reply }) => {
+                let metainfo = match &spec.source {
+                    TorrentSource::Metainfo(bytes) => bytes.clone(),
+                    TorrentSource::Magnet(_) => {
+                        let _ = reply.send(Err(EngineError::Rejected {
+                            reason: "magnet URIs are not supported by the libtorrent backend yet"
+                                .to_owned(),
+                        }));
+                        continue;
+                    }
+                };
+                let save_path = spec.save_path.to_string_lossy().into_owned();
+                let resume_data = spec.resume_data.as_deref().unwrap_or(&[]);
+                if session
+                    .pin_mut()
+                    .restore_torrent(id, &metainfo, &save_path, resume_data)
+                {
+                    let status = convert_status(session.status(id));
+                    let _ = events.send(EngineEvent::Added(status));
+                    let _ = reply.send(Ok(()));
+                } else {
+                    let _ = reply.send(Err(EngineError::Rejected {
+                        reason: session.last_error().to_string(),
+                    }));
+                }
+            }
+            Ok(Command::RequestResume { id, reply }) => {
+                let ok = session.pin_mut().request_resume(id);
+                let _ = reply.send(if ok {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                });
+            }
+            Ok(Command::TakeResume { id, reply }) => {
+                let data: Vec<u8> = session.pin_mut().take_resume(id).into_iter().collect();
+                let _ = reply.send(Ok(if data.is_empty() { None } else { Some(data) }));
             }
             Ok(Command::Pause { id, reply }) => {
                 let ok = session.pin_mut().pause(id);
@@ -341,6 +413,7 @@ mod tests {
                 total_bytes: data.len() as u64,
                 source: TorrentSource::Metainfo(FIXTURE.to_vec()),
                 save_path: dir.clone(),
+                resume_data: None,
             })
             .expect("add torrent");
 
@@ -363,6 +436,73 @@ mod tests {
     }
 
     #[test]
+    fn resume_data_restores_without_recheck() {
+        let dir = temp_dir("libtorrent-resume");
+        let data = payload();
+        fs::write(dir.join("payload.bin"), &data).expect("write payload");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "payload.bin".to_owned(),
+                total_bytes: data.len() as u64,
+                source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+                save_path: dir.clone(),
+                resume_data: None,
+            })
+            .expect("add torrent");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = engine.status(id).expect("status");
+            if status.progress >= 0.999 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "torrent did not finish: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        engine.request_resume_data(id).expect("request resume");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let resume = loop {
+            if let Some(data) = engine.take_resume_data(id).expect("take resume") {
+                break data;
+            }
+            assert!(Instant::now() < deadline, "no resume data");
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert!(!resume.is_empty());
+        engine.remove(id).expect("remove original");
+        drop(engine);
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        engine
+            .restore_torrent(
+                id,
+                AddTorrent {
+                    name: "payload.bin".to_owned(),
+                    total_bytes: data.len() as u64,
+                    source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+                    save_path: dir.clone(),
+                    resume_data: Some(resume),
+                },
+            )
+            .expect("restore torrent");
+        std::thread::sleep(Duration::from_millis(500));
+
+        let status = engine.status(id).expect("restored status");
+        assert!(
+            status.progress >= 0.999,
+            "restored torrent did not use resume data: {status:?}"
+        );
+        engine.remove(id).expect("remove restored");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn magnet_source_is_rejected() {
         let mut engine = LibtorrentEngine::new(EngineSettings::default());
         let error = engine
@@ -371,6 +511,7 @@ mod tests {
                 total_bytes: 0,
                 source: TorrentSource::Magnet("magnet:?xt=urn:btih:0123456789abcdef".to_owned()),
                 save_path: temp_dir("libtorrent-magnet"),
+                resume_data: None,
             })
             .expect_err("magnet should be rejected");
         assert!(matches!(error, EngineError::Rejected { .. }));

@@ -101,6 +101,43 @@ impl TorrentEngine for MockEngine {
         Ok(id)
     }
 
+    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
+        if self.torrents.contains_key(&id) {
+            return Err(EngineError::Rejected {
+                reason: format!("torrent {id} already exists"),
+            });
+        }
+        let status = TorrentStatus {
+            id,
+            name: spec.name,
+            total_bytes: spec.total_bytes,
+            state: TorrentState::Queued,
+            progress: 0.0,
+            download_rate: 0,
+            upload_rate: 0,
+        };
+        self.next_id = self.next_id.max(id + 1);
+        self.torrents.insert(id, status.clone());
+        self.emit(EngineEvent::Added(status));
+        Ok(())
+    }
+
+    fn request_resume_data(&mut self, id: TorrentId) -> Result<(), EngineError> {
+        if self.torrents.contains_key(&id) {
+            Ok(())
+        } else {
+            Err(EngineError::NotFound { id })
+        }
+    }
+
+    fn take_resume_data(&mut self, id: TorrentId) -> Result<Option<Vec<u8>>, EngineError> {
+        if self.torrents.contains_key(&id) {
+            Ok(Some(b"mock-resume".to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn pause(&mut self, id: TorrentId) -> Result<(), EngineError> {
         let state = {
             let status = self
@@ -181,6 +218,7 @@ mod tests {
                 total_bytes: 1024,
                 source: TorrentSource::Magnet(format!("magnet:?xt=urn:btih:{name}")),
                 save_path: PathBuf::from("/tmp/ferrent"),
+                resume_data: None,
             })
             .expect("add torrent")
     }

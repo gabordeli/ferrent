@@ -50,4 +50,7 @@ mellett készült; a Python overhead miatt indikatív, nem `rusqlite` benchmark.
   migrációs lépést beiktatni; ismeretlen verzióra `UnsupportedSchema`.
 - **Backup:** a daemon leállítása mellett a fájl másolható; később jöhet a
   redb backup API.
+- **Fastresume:** a daemon a torrent rekordokat és a fastresume-ot a store-ban
+  tartja; `SIGTERM`/`SIGINT`-re ment. `kill -9` után az utolsó fastresume
+  elavulhat; ilyenkor a libtorrent recheckelhet.
 - A `crash_writer` bin csak teszt-segéd; a csomagolásból (M3) ki kell zárni.

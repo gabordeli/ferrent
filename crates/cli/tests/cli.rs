@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
+use ferrent_daemon::store::{MemoryStore, StateStore};
 use ferrent_engine::{MockEngine, TorrentEngine};
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -57,7 +58,8 @@ async fn start_server() -> TestServer {
     let mirror = Arc::new(StateMirror::new());
     let (watch, _) = broadcast::channel(64);
     let mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
-    let state = Arc::new(AppState::new(engine, mirror, watch, "secret"));
+    let store: Box<dyn StateStore> = Box::new(MemoryStore::new());
+    let state = Arc::new(AppState::new(engine, mirror, watch, store, "secret"));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");
     let dir = std::env::temp_dir().join(format!(

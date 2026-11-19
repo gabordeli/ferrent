@@ -164,6 +164,20 @@
 
 **Files:** `crates/cli/src/main.rs`, `crates/cli/src/config.rs`, `crates/cli/src/output.rs`, `crates/cli/src/error.rs`, `crates/cli/tests/cli.rs`, `crates/daemon/src/main.rs`, `docs/cli.md`
 
+### M1-T5 – Store + fastresume daemon integration
+
+**Scope:** A `StateStore` rekordok (metainfo, mentési út, fastresume) bekötése a daemonba: add/remove perzisztálás, induláskori restore, SIGTERM/SIGINT fastresume-mentés.
+
+**Acceptance**
+
+- [ ] `ferrentd` add/remove után a `state.redb` tartalmazza/törli a torrent rekordot.
+- [ ] Induláskor a daemon a rekordokat restore-olja, azonos ID-val; a fastresume átadódik az engine-nek.
+- [ ] SIGTERM/SIGINT esetén a fastresume mentődik; `kill -9` esetén az utolsó mentés elavulhat (dokumentált).
+- [ ] Valódi libtorrent resume roundtrip teszt: add → save_resume_data → új engine → restore, progress 1.0.
+- [ ] Mock daemon restart: add → SIGTERM → restart → a torrent megjelenik; remove → restart → nincs.
+
+**Files:** `crates/engine/src/types.rs`, `crates/engine/src/engine.rs`, `crates/engine/src/mock.rs`, `crates/engine/src/libtorrent/`, `crates/daemon/src/persist.rs`, `crates/daemon/src/store/memory.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/daemon/src/main.rs`
+
 ---
 
 ## M2 – Thin client MVP

@@ -92,3 +92,7 @@ cargo run -p ferrent-daemon --features libtorrent
 
 A daemon kiírja a cert útját és a fingerprintet; a CLI-nek a
 `--ca ./ferrent-data/tls-cert.pem` és a `--token secret` kell.
+
+A daemon a `FERRENT_DATA_DIR` alatt tartja a `state.redb`-t; a torrent
+rekordok újraindítás után visszajönnek. `SIGTERM`/`SIGINT` esetén fastresume-t
+ment; `kill -9` után az utolsó mentés elavulhat, ilyenkor recheck lehetséges.

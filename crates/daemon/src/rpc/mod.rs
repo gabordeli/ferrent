@@ -29,7 +29,9 @@ use tonic::metadata::MetadataMap;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
+use crate::persist::{self, PersistedTorrent};
 use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror};
+use crate::store::StateStore;
 
 pub use tls::TlsMaterial;
 
@@ -67,6 +69,7 @@ pub struct AppState {
     engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
     mirror: Arc<StateMirror>,
     watch: broadcast::Sender<EngineEvent>,
+    store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
 }
 
@@ -76,14 +79,31 @@ impl AppState {
         engine: Box<dyn TorrentEngine>,
         mirror: Arc<StateMirror>,
         watch: broadcast::Sender<EngineEvent>,
+        store: Box<dyn StateStore>,
         token: impl Into<String>,
     ) -> Self {
         Self {
             engine: Arc::new(Mutex::new(engine)),
             mirror,
             watch,
+            store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
         }
+    }
+
+    #[must_use]
+    pub fn engine_handle(&self) -> Arc<Mutex<Box<dyn TorrentEngine>>> {
+        Arc::clone(&self.engine)
+    }
+
+    #[must_use]
+    pub fn store_handle(&self) -> Arc<Mutex<Box<dyn StateStore>>> {
+        Arc::clone(&self.store)
+    }
+
+    #[must_use]
+    pub fn mirror_handle(&self) -> Arc<StateMirror> {
+        Arc::clone(&self.mirror)
     }
 }
 
@@ -113,6 +133,20 @@ impl FerrentService {
         .map_err(|error| Status::internal(error.to_string()))?
         .map_err(engine_status)
     }
+
+    async fn persist<F>(&self, operation: F) -> Result<(), Status>
+    where
+        F: FnOnce(&mut dyn StateStore) -> Result<(), crate::store::StoreError> + Send + 'static,
+    {
+        let store = Arc::clone(&self.state.store);
+        tokio::task::spawn_blocking(move || {
+            let mut store = store.lock().expect("state store mutex poisoned");
+            operation(&mut **store)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?
+        .map_err(|error| Status::internal(format!("state store: {error}")))
+    }
 }
 
 #[tonic::async_trait]
@@ -128,9 +162,25 @@ impl Ferrent for FerrentService {
             total_bytes: request.total_bytes,
             source: TorrentSource::Metainfo(request.metainfo),
             save_path: PathBuf::from(request.save_path),
+            resume_data: None,
+        };
+        let name = spec.name.clone();
+        let save_path = spec.save_path.clone();
+        let metainfo = match &spec.source {
+            TorrentSource::Metainfo(bytes) => bytes.clone(),
+            TorrentSource::Magnet(_) => Vec::new(),
         };
         let id = self
             .with_engine(move |engine| engine.add_torrent(spec))
+            .await?;
+        let persisted = PersistedTorrent {
+            id,
+            name,
+            save_path,
+            metainfo,
+            resume_data: None,
+        };
+        self.persist(move |store| persist::save_torrent(store, &persisted))
             .await?;
         Ok(Response::new(AddTorrentResponse { id }))
     }
@@ -162,6 +212,8 @@ impl Ferrent for FerrentService {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
         self.with_engine(move |engine| engine.remove(id)).await?;
+        self.persist(move |store| persist::remove_torrent(store, id))
+            .await?;
         Ok(Response::new(RemoveTorrentResponse {}))
     }
 

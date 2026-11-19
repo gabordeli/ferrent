@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "rust/cxx.h"
 
@@ -16,7 +17,12 @@ class Session {
     Session(const Session &) = delete;
     Session &operator=(const Session &) = delete;
 
-    uint64_t add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path);
+    uint64_t add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
+                         rust::Slice<const uint8_t> resume_data);
+    bool restore_torrent(uint64_t id, rust::Slice<const uint8_t> metainfo,
+                         rust::Str save_path, rust::Slice<const uint8_t> resume_data);
+    bool request_resume(uint64_t id);
+    rust::Vec<uint8_t> take_resume(uint64_t id);
     bool pause(uint64_t id);
     bool resume(uint64_t id);
     bool remove(uint64_t id);
@@ -28,6 +34,11 @@ class Session {
     rust::String last_error() const;
 
   private:
+    std::optional<uint64_t> add_impl(std::optional<uint64_t> requested_id,
+                                     rust::Slice<const uint8_t> metainfo,
+                                     rust::Str save_path,
+                                     rust::Slice<const uint8_t> resume_data);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

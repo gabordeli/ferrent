@@ -177,9 +177,9 @@ ferrent/
 
 | # | Kérdés | Mikor döntünk | Hogyan |
 |---|--------|---------------|--------|
-| 1 | `libtorrent` 1.2.x vagy 2.0.x | M0 | RSS/CPU/indulási mérés 4 000 torrenttel; ADR |
+| 1 | `libtorrent` 1.2.x vagy 2.0.x | M0 | **2.0.11** – ADR 0001, engine-szintű mérés |
 | 2 | gRPC vagy WebSocket + bináris | M1 | Prototípus; ha a `tonic` codegen/streaming súrlódik, váltás |
-| 3 | `redb` vagy SQLite | M1 | Írási terhelés, méret, eszközök; ADR |
+| 3 | `redb` vagy SQLite | M1 | **redb 2.6.4** – ADR 0002 |
 | 4 | `iced` vagy `Tauri` | M2 | 4 000 soros spike: RAM, FPS, fejlesztési idő; ADR |
 | 5 | Licenc | M0 | MIT/Apache-2.0 dual vs. GPL-3.0; felhasználói döntés |
 | 6 | Minimum Debian verzió | M3 | Debian 12 vs 11 build konténer; statikus link teszt |

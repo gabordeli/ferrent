@@ -303,6 +303,7 @@ fn main() {
                 total_bytes: payload.len() as u64,
                 source: TorrentSource::Metainfo(metainfo),
                 save_path: dir.clone(),
+                resume_data: None,
             })
             .expect("add torrent");
 

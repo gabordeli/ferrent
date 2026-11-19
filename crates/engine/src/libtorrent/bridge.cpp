@@ -10,6 +10,7 @@
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/hasher.hpp>
+#include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/sha1_hash.hpp>
@@ -17,6 +18,7 @@
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/write_resume_data.hpp>
 
 #include <algorithm>
 #include <iterator>
@@ -80,6 +82,7 @@ struct Session::Impl {
     lt::session session;
     std::map<uint64_t, lt::torrent_handle> handles;
     std::map<lt::sha1_hash, uint64_t> ids;
+    std::map<uint64_t, std::vector<char>> resume_data;
     uint64_t next_id = 1;
     std::string last_error;
 
@@ -91,7 +94,8 @@ struct Session::Impl {
         lt::settings_pack pack;
         pack.set_int(
             lt::settings_pack::alert_mask,
-            static_cast<int>(lt::alert_category::status | lt::alert_category::error));
+            static_cast<int>(lt::alert_category::status | lt::alert_category::error |
+                             lt::alert_category::storage));
         pack.set_int(lt::settings_pack::download_rate_limit, clamp_rate(download_rate_limit));
         pack.set_int(lt::settings_pack::upload_rate_limit, clamp_rate(upload_rate_limit));
         return pack;
@@ -128,7 +132,10 @@ Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit)
 
 Session::~Session() = default;
 
-uint64_t Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path) {
+std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
+                                          rust::Slice<const uint8_t> metainfo,
+                                          rust::Str save_path,
+                                          rust::Slice<const uint8_t> resume_data) {
     impl_->last_error.clear();
 
     lt::error_code ec;
@@ -136,24 +143,80 @@ uint64_t Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str sav
         reinterpret_cast<char const *>(metainfo.data()), static_cast<int>(metainfo.size()), ec);
     if (ec) {
         impl_->last_error = ec.message();
-        return 0;
+        return std::nullopt;
     }
 
     lt::add_torrent_params params;
+    if (resume_data.size() > 0) {
+        lt::error_code resume_ec;
+        params = lt::read_resume_data(
+            {reinterpret_cast<char const *>(resume_data.data()),
+             static_cast<int>(resume_data.size())},
+            resume_ec);
+        if (resume_ec) {
+            impl_->last_error = resume_ec.message();
+            return std::nullopt;
+        }
+    }
     params.ti = std::move(info);
     params.save_path = static_cast<std::string>(save_path);
 
     auto handle = impl_->session.add_torrent(params, ec);
     if (ec) {
         impl_->last_error = ec.message();
-        return 0;
+        return std::nullopt;
     }
 
-    const uint64_t id = impl_->next_id++;
+    uint64_t id;
+    if (requested_id) {
+        id = *requested_id;
+        if (impl_->handles.count(id) > 0) {
+            impl_->last_error = "torrent id already exists";
+            impl_->session.remove_torrent(handle);
+            return std::nullopt;
+        }
+        impl_->next_id = std::max(impl_->next_id, id + 1);
+    } else {
+        id = impl_->next_id++;
+    }
+
     // v1 info hash; v2-only torrents need info_hashes() once they matter here.
     impl_->ids.emplace(handle.info_hash(), id);
     impl_->handles.emplace(id, handle);
     return id;
+}
+
+uint64_t Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
+                              rust::Slice<const uint8_t> resume_data) {
+    return add_impl(std::nullopt, metainfo, save_path, resume_data).value_or(0);
+}
+
+bool Session::restore_torrent(uint64_t id, rust::Slice<const uint8_t> metainfo,
+                              rust::Str save_path, rust::Slice<const uint8_t> resume_data) {
+    return add_impl(id, metainfo, save_path, resume_data).has_value();
+}
+
+bool Session::request_resume(uint64_t id) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.save_resume_data();
+    return true;
+}
+
+rust::Vec<uint8_t> Session::take_resume(uint64_t id) {
+    rust::Vec<uint8_t> out;
+    auto it = impl_->resume_data.find(id);
+    if (it == impl_->resume_data.end()) {
+        return out;
+    }
+    out.reserve(it->second.size());
+    for (char byte : it->second) {
+        out.push_back(static_cast<uint8_t>(byte));
+    }
+    impl_->resume_data.erase(it);
+    return out;
 }
 
 bool Session::pause(uint64_t id) {
@@ -181,6 +244,7 @@ bool Session::remove(uint64_t id) {
     }
     auto handle = it->second;
     impl_->ids.erase(handle.info_hash());
+    impl_->resume_data.erase(id);
     impl_->handles.erase(it);
     impl_->session.remove_torrent(handle);
     return true;
@@ -241,6 +305,10 @@ rust::Vec<FfiEvent> Session::poll_events() {
                         static_cast<uint64_t>(std::max(status.download_rate, 0)),
                         static_cast<uint64_t>(std::max(status.upload_rate, 0))});
                 }
+            }
+        } else if (auto *resume = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
+            if (auto id = impl_->id_for(resume->handle)) {
+                impl_->resume_data[*id] = lt::write_resume_data_buf(resume->params);
             }
         }
     }

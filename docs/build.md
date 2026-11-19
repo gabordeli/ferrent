@@ -55,6 +55,14 @@ cargo test -p ferrent-daemon --release -- --nocapture
 
 A `crash_recovery` csak Unixon fut (SIGKILL).
 
+## Daemon persistence (M1-T5)
+
+A `ferrentd` a `FERRENT_DATA_DIR` alatt tartja a `state.redb`-t és a TLS
+anyagot. Indításkor a torrent rekordokat (metainfo, mentési út, fastresume)
+betölti és restore-olja; `SIGTERM`/`SIGINT` esetén fastresume-t ment.
+`kill -9` esetén az utolsó fastresume elavulhat, ilyenkor a libtorrent
+recheckelhet. A részletes lépések: `docs/cli.md`.
+
 ## RPC / TLS (M1-T3)
 
 ```bash

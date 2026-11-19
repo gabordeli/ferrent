@@ -60,6 +60,8 @@ pub struct AddTorrent {
     pub total_bytes: u64,
     pub source: TorrentSource,
     pub save_path: PathBuf,
+    /// Fastresume data returned by [`crate::TorrentEngine::take_resume_data`].
+    pub resume_data: Option<Vec<u8>>,
 }
 
 /// Engine-wide rate limits. A value of `0` means unlimited.

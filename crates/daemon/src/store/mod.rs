@@ -4,10 +4,12 @@
 //! opaque byte blobs. The store buffers writes and commits only the dirty
 //! records on [`StateStore::flush`].
 
+mod memory;
 mod redb_store;
 
 use std::fmt;
 
+pub use memory::MemoryStore;
 pub use redb_store::RedbStore;
 
 /// Schema version written to the database on first open.
