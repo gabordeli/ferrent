@@ -1,8 +1,8 @@
 # Ferrent – roadmap
 
-> Állapot: 2026-11-19, **terv** (kód még nincs a repóban).
+> Állapot: 2026-11-20, a port terve rögzítve (M4–M7); a kód az M0–M2-ben él, az M4-T1 első szelete elkezdve.
 > Architektúra: [ARCHITECTURE.md](ARCHITECTURE.md).
-> Sorrend: **MVP (v0.1)** → **v1.0**. A taskok nem időbecslések, hanem lezárt, ellenőrizhető egységek.
+> Sorrend: **MVP (v0.1)** → **v0.2–v0.5** (Deluge-plugin port) → **v1.0**. A taskok nem időbecslések, hanem lezárt, ellenőrizhető egységek.
 
 **Jelölések:** 🤖 agent-ready (önállóan kipipelhető, nincs külső döntés) · ⚠️ döntést igényel · 🔬 mérés/benchmark
 
@@ -20,7 +20,8 @@
 - [ ] `ferrent-gui`: 4 000 soros virtualizált tábla ≥ 60 FPS, TLS-sel csatlakozik, a műveletek működnek.
 - [ ] `.torrent` hozzáadás nyers bájton át megy (távoli daemon is).
 - [ ] Legalább egy valós torrent végigfut a daemonon, és a restart nem okoz rechecket.
-- [ ] Az eredmények `docs/measurements/mvp.md`-ben rögzítve; `v0.1.0` tag.
+- [ ] Az eredmények `docs/measurements/mvp.md`-ben rögzítve.
+- [ ] Éles torrenteken (≥5 torrent, ~1 hét) bizonyított működés után `v0.1.0` tag (M2-T5).
 
 **Non-goals (MVP)**
 
@@ -230,7 +231,7 @@
 
 ### M2-T4 – MVP end-to-end acceptance
 
-**Scope:** Debian + 4 000 torrent + GUI + CLI; mérés, soak, dokumentálás, `v0.1.0` tag.
+**Scope:** Debian + 4 000 torrent + GUI + CLI; mérés, soak, dokumentálás. A `v0.1.0` tag nem itt, hanem az éles használat után (M2-T5).
 
 **Acceptance**
 
@@ -238,20 +239,385 @@
 - [ ] 24 órás soak: nincs crash; RSS-növekedés < 10%.
 - [ ] Restart recheck nélkül; indulás ≤ 30 s.
 - [ ] GUI másik gépről TLS-en csatlakozik.
-- [ ] Ismert korlátok dokumentálva; `v0.1.0` tag.
+- [ ] Ismert korlátok dokumentálva.
 
 **Files:** `docs/measurements/mvp.md`, `README.md`, `crates/daemon/examples/mvp_prepare.rs`, `crates/daemon/examples/rpc_bench.rs`, `ci/soak.sh`
+
+### M2-T5 – v0.1.0 kiadás éles torrenteken
+
+**Scope:** a kiadás kapuja nem a soak, hanem a valódi használat: a daemon legalább pár éles torrenttel fut a valódi szerveren, majd `v0.1.0` tag + release notes.
+
+**Acceptance**
+
+- [ ] Legalább 5 éles torrent legalább 7 napon át a daemonon, napi használat mellett.
+- [ ] A torrentek tényleg dolgoznak: peer/tracker forgalom látszik, nem csak a state.
+- [ ] Nincs crash és nincs kényszerű újraindítás; a Bugsinkben nincs új daemon-hiba.
+- [ ] Éles restart recheck nélkül, a state (seeding/paused) megmarad; indulás ≤ 30 s.
+- [ ] Tapasztalatok a `docs/measurements/mvp.md`-ben (éles szakasz); `v0.1.0` tag.
+
+**Files:** `docs/measurements/mvp.md`, `README.md`
+
+### M2-T6 – GUI: Figma logó integrálása
+
+**Scope:** a sidebar szöveges „Ferrent” wordmarkje helyett a Figma MCP-vel exportált logó, becsomagolt assetként (mint a fontok).
+
+**Acceptance**
+
+- [ ] A logó a Figma MCP-vel exportálva (SVG vagy 2× PNG), a `crates/gui/assets/` alatt verziózva.
+- [ ] A sidebar tetején a logó; sötét háttéren olvasható, 1440×900-on nem lóg ki, nem torzul.
+- [ ] Az ablakikon (ahol a platform támogatja) szintén a logót használja.
+- [ ] `cargo build -p ferrent-gui` zöld; screenshot a változásról.
+
+**Files:** `crates/gui/src/main.rs`, `crates/gui/assets/`, `crates/gui/Cargo.toml`
+
+### M2-T7 – GUI: Activity fül valós eseményekkel
+
+**Scope:** a Details → Activity fül a polling-diffből érzékelt állapotváltásokat mutatja (checking → downloading → seeding, pause/resume, error); daemon oldali eseménytörténet egyelőre nem kell.
+
+**Acceptance**
+
+- [ ] A kliens a két poll közötti állapotkülönbségből eseményt képez (`checking→seeding`, `→error`, pause/resume, remove).
+- [ ] Az esemény: időpont, torrent név/ID, előző→új állapot, forrás (kliens művelet vagy daemon-oldali váltás).
+- [ ] Csak az utolsó N (pl. 200) esemény marad meg; a kiválasztott torrentre szűrhető.
+- [ ] Kiválasztás nélkül összesített nézet vagy egyértelmű üres állapot.
+- [ ] Legalább egy unit teszt a diff→esemény logikára.
+
+**Files:** `crates/gui/src/main.rs`, `crates/gui/src/activity.rs` (új), `crates/gui/src/connection.rs`
+
+### M2-T8 – Soak újrafuttatás a jelenlegi binárison
+
+**Scope:** a most futó soak a redesign előtti binárison megy (a GUI seeds/peers értékei 0-k); a #25 után a jelenlegi `main` binárison kell megismételni.
+
+**Acceptance**
+
+- [ ] A jelenlegi binárison fut a 10 000 torrentes soak, ugyanazzal a `ci/soak.sh` mintavevővel.
+- [ ] A GUI a soak daemonra csatlakozva valós seeds/peers/ETA értékeket mutat.
+- [ ] A baseline (restore idő, RSS) és a CSV útvonala rögzítve; a 24h kiértékelés ehhez a futáshoz kötve.
+- [ ] A futás a #25 kapuit használja; nincs párhuzamos soak a régi binárison.
+
+**Files:** `ci/soak.sh`, `docs/measurements/mvp.md`, `crates/daemon/examples/mvp_prepare.rs`
+
+---
+
+# v0.2–v0.5 – Deluge-plugin port (M4–M7)
+
+> A hat Deluge-funkció (AutoAdd, Label, Execute, Scheduler, DiskGuard, MobileUi)
+> nem külön plugin, hanem a daemon beépített képességei. Részletes elemzés,
+> döntések és kockázatok: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
+> A kockázat/döntés jegyzet GitLabon is külön issue.
+>
+> GitLab: M4–M7 milestone-ok (#8–#11), task issue-k #30–#47, kockázat/döntés #48.
+
+**Öt közös alap**
+
+1. **Config service** – tipizált, validált, revíziózott `config.toml` + redb runtime state; `GetConfig`/`SetConfig`, atomikus apply, hot reload.
+2. **Pause authority** – `USER`/`SCHEDULER`/`DISK_GUARD`/`RATIO` reasonök; effektív paused = bármelyik aktív; restartnál a `USER` marad, a tranziens újraszámolódik.
+3. **Effektív beállítás-feloldás** – torrent override > label policy > session; a label nem mutálja a torrentet.
+4. **Esemény-journal** – perzisztált domain események + kurzor; erre épül a hook, a notifications outbox, az Activity és a web SSE.
+5. **Infohash** – first-class azonosító; duplicate add → `AlreadyExists{id}`; ez az AutoAdd-dedupe, az import és a cross-seed alapja.
+
+**Rögzített döntések (2026-11-20):** egy TOML szekciókkal; label effektív feloldás, egy label/torrent (v1); scheduler piros = mindent pause-ol (`pause_seeding` opció); külön `ferrent-web` binary; DiskGuard add gate default `notify` (AutoAdd `defer`), `reject` opció; hook default argv, shell opt-in, 60 s timeout, max 4 párhuzamos.
+
+---
+
+## M4 – v0.2 Alapok: config, motor, pause, label
+
+**Done when:** a daemon tipizált configból él és hot-reloadol; a GUI Settings modal fülekkel szerkeszt; a torrentnek van labelje és infohashje; a per-torrent limitek, a move storage és a `Finished` esemény működik; a pause reason modell tesztelt.
+
+**Non-goals:** watch dir, scheduler, disk guard, hookok, notifications, web.
+
+**Függ:** M1/M2.
+
+### M4-T1 – Config service és séma 🤖
+
+**Scope:** rétegezett config (file + redb + env), szekciók, validáció, revision, atomikus apply, `GetConfig`/`SetConfig`, CLI `config get/set`.
+
+**Acceptance**
+
+- [ ] ismeretlen kulcs/érték → `apply_result.error`, nem csendes default.
+- [ ] elavult revision → `ABORTED`, a futó config nem változik.
+- [ ] érvényes `SetConfig` után reload nélkül él a változás + `ConfigChanged` event.
+- [ ] a token redacted; partial apply rollback tesztelt; 4 000 torrent mellett < 50 ms.
+- [ ] `ferrent-cli config get --json` és `set` működik a daemon ellen.
+
+**Files:** `crates/daemon/src/config/{mod,schema,apply}.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/cli/src/config.rs`, `docs/adr/0006-config-service.md`
+
+### M4-T2 – Motor-képességek 🤖
+
+**Scope:** per-torrent limitek, session/queue limitek, `move_storage`, `Moving` state, infohash, `Finished`, duplicate add.
+
+**Acceptance**
+
+- [ ] `TorrentEngine`: `set_torrent_limits`, `move_storage`, bulk pause/resume; `EngineSettings` + `active_*`.
+- [ ] `TorrentStatus.infohash`, `TorrentState::Moving` (proto 7); minden struct-literal builder fordul.
+- [ ] `EngineEvent::Finished` pontosan egyszer, restart után sem ismétlődik.
+- [ ] duplicate add → `AlreadyExists{id}`; a daemon a meglévő ID-t adja vissza.
+- [ ] valós libtorrent: azonos FS-en move recheck nélkül; cross-FS `Moving` → `Seeding`.
+
+**Files:** `crates/engine/src/{types,engine,mock,libtorrent}/*`, `crates/daemon/src/state.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`
+
+### M4-T3 – Pause authority ⚠️
+
+**Scope:** reason-modell, effektív állapot, perzisztencia, bulk session pause, UI reason.
+
+**Acceptance**
+
+- [ ] property teszt: effektív paused = bármely reason aktív.
+- [ ] kézi pause → scheduler/guard `ok` nem indítja újra; kézi resume → guard `low` újra pause-ol.
+- [ ] restart után a `USER` megmarad, a tranziens reasonök újraszámolódnak.
+- [ ] 10 000 torrenten a bulk váltás < 1 s; csak a korábban futókat resume-olja.
+- [ ] `GetStatus`/`Torrent` tartalmazza a reason kódot; a GUI tooltipben mutatja.
+
+**Files:** `crates/daemon/src/control.rs`, `crates/daemon/src/state.rs`, `crates/daemon/src/persist.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `docs/adr/0007-pause-authority.md`
+
+### M4-T4 – Labels core 🤖
+
+**Scope:** label CRUD + policy (move target, limitek, auto-match predicate), hozzárendelés, effektív feloldás, szűrés/rendezés, move-on-complete.
+
+**Acceptance**
+
+- [ ] egy torrent egy label (v1); label törlése → No Label.
+- [ ] effektív limit = torrent override > label > session; levételkor a kézi override megmarad.
+- [ ] `ListTorrents` label szűrő/rendezés; 4 000 torrent p95 < 50 ms.
+- [ ] `Finished` → `move_completed_path`; siker/hiba event; a DiskGuard látja a célt.
+- [ ] auto-match: tracker substring + név regex; új torrentnél és label létrehozásakor is lefut.
+
+**Files:** `crates/daemon/src/labels.rs`, `crates/daemon/src/policy.rs`, `crates/daemon/src/persist.rs`, `crates/daemon/src/state.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`
+
+### M4-T5 – GUI Settings workbench + label UI 🤖
+
+**Scope:** 900×640 modal, bal fülsáv (Connection, Session, Labels), tábla + egy Save + Reload + dirty, validáció; label oszlop/szűrő/context menü.
+
+**Acceptance**
+
+- [ ] a Settings modal fülekkel nyílik, Esc/Close, 1440×900-on elfér.
+- [ ] egy Save az összes tabot menti; Reload eldobja; dirty jelzés; hiba a sor mellett.
+- [ ] Label tábla: név, szín, move path, limitek, auto-match; egy Save.
+- [ ] táblában label oszlop, sidebar label szűrő, hozzárendelés context menüből.
+- [ ] screenshot + Xvfb smoke + `cargo test -p ferrent-gui`.
+
+**Files:** `crates/gui/src/settings.rs`, `crates/gui/src/labels.rs`, `crates/gui/src/table.rs`, `crates/gui/src/main.rs`, `crates/gui/tests/`
+
+---
+
+## M5 – v0.3 Automatizálás: AutoAdd, hookok, scheduler, notifications
+
+**Done when:** watch dir → add → label → limit → move → finished hook end-to-end működik; a scheduler három szintje restart- és DST-biztos; a webhook és a Telegram kézbesítés retry-jal, dedupe-pal és digesttel megy; a GUI tabok készen vannak.
+
+**Non-goals:** disk guard, web, ratio-alapú auto-remove (M8), email/ntfy/push.
+
+**Függ:** M4.
+
+### M5-T1 – AutoAdd 🤖
+
+**Scope:** watch dir CRUD, inotify + reconcile scan, infohash dedupe, post-add action, invalid retry, label/save path/add paused, GUI tab.
+
+**Acceptance**
+
+- [ ] 100 `.torrent` → mind egyszer, p95 < 2 s (inotify) / 30 s (scan).
+- [ ] duplikált fájl más néven → nincs második torrent; a fájl a configured action szerint mozog/törlődik.
+- [ ] hibás/0 bájtos → 3 kísérlet után `.invalid`; restart után a számláló megmarad.
+- [ ] `.magnet` egy és több sorral; a label az adddal együtt kerül be.
+- [ ] opcionális disk gate: kevés hely → a fájl a watch dirben marad.
+
+**Files:** `crates/daemon/src/autoadd.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/autoadd.rs`, `tests/`
+
+### M5-T2 – Execute hookok ⚠️
+
+**Scope:** esemény-journal + kurzor, hook entitás, argv/env contract, timeout/concurrency, log, GUI tab.
+
+**Acceptance**
+
+- [ ] added/finished/removed/error eseményre futtat; argv `{id} {name} {path} {infohash} {label}`.
+- [ ] at-least-once: `kill -9` után a nem nyugtázott esemény újra lefut (idempotencia a hooké, dokumentálva).
+- [ ] timeout → process group kill; exit code/stdout/stderr a journalban.
+- [ ] max 4 párhuzamos; a torrent szál nem blokkol; shell csak opt-in.
+- [ ] `removed` esetén a név/path a remove előtti pillanatképből jön.
+
+**Files:** `crates/daemon/src/events.rs`, `crates/daemon/src/hooks.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/hooks.rs`, `docs/adr/0009-event-journal.md`
+
+### M5-T3 – Scheduler ⚠️
+
+**Scope:** 24×7 rács (zöld/sárga/piros), időzóna, next-boundary tick, session + aktív limitek, `SCHEDULER` reason, GUI tab, státusz.
+
+**Acceptance**
+
+- [ ] tick ≤ 1 s pontossággal a határnál; suspend után újraszámol.
+- [ ] zöld = session default; sárga = limitek; piros = scheduler pause, csak a futókat resume-olja.
+- [ ] kézi pause megmarad; a guard pause-t nem írja felül.
+- [ ] DST tavasz/ősz teszt `chrono-tz` + fake clock; státusz `GetStatus`-ban.
+- [ ] 10 000 torrenten a váltás < 1 s.
+
+**Files:** `crates/daemon/src/scheduler.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/scheduler.rs`, `tests/`
+
+### M5-T4 – Notification router + webhook 🤖
+
+**Scope:** esemény → szabály → outbox → csatorna; webhook JSON + HMAC; retry/backoff; dead-letter; secret-kezelés; GUI/CLI test.
+
+**Acceptance**
+
+- [ ] az esemény a szabály alapján outbox rekordot kap; `(event_id, channel)` dedupe; restart után nincs dupla.
+- [ ] webhook: JSON POST, `X-Ferrent-Event`, `X-Ferrent-Delivery`, opcionális `X-Ferrent-Signature: sha256=…`; timeout.
+- [ ] 5xx/429 → exponenciális backoff, max 5 kísérlet, utána `dead` + Activity bejegyzés.
+- [ ] a token/secret nem kerül logba; a webhook URL csak http/https.
+- [ ] Settings → Notifications tábla + egy Save/Reload + „Test”; `ferrent-cli notify test`.
+- [ ] fake HTTP szerverrel tesztelt; nincs hálózat a unit tesztekben.
+
+**Files:** `crates/daemon/src/notify/{mod,outbox,webhook}.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/notifications.rs`, `crates/cli/src/notify.rs`, `tests/`
+
+### M5-T5 – Telegram + digest/quiet hours 🤖
+
+**Scope:** Telegram Bot API csatorna, HTML escape, 4 096 karakter, 429 `retry_after`; digest/coalescing; quiet hours; label-szűrés.
+
+**Acceptance**
+
+- [ ] `sendMessage` `chat_id`-dal és opcionális `message_thread_id`-vel; a hosszú szöveg levágva.
+- [ ] 429 esetén `retry_after` szerint vár; a token redacted.
+- [ ] digest: 10 esemény vagy 30 s ablak; 100 `finished` esemény nem floodol.
+- [ ] quiet hours + label-szűrés érvényesül; a „Test” a kiválasztott chatre küld.
+- [ ] 1 000 esemény outbox drain < 60 s a rate limit mellett; mock HTTP teszt.
+
+**Files:** `crates/daemon/src/notify/telegram.rs`, `crates/daemon/src/notify/digest.rs`, `crates/daemon/src/config/`, `crates/gui/src/settings/notifications.rs`, `tests/`
+
+### M5-T6 – Automatizálás acceptance 🔬
+
+**Scope:** E2E + restart + config reload + mérés.
+
+**Acceptance**
+
+- [ ] watch dir → add → label → limit → move → finished hook → webhook E2E; Telegram mockkal.
+- [ ] restart közben nincs elveszett/duplázott add, hook vagy notification.
+- [ ] config reload frissíti a futó szabályokat; hibás config → régi marad.
+- [ ] mérés: 100 fájl, 1 000 torrent; `docs/measurements/automation.md`.
+
+**Files:** `tests/automation_e2e.rs`, `tests/notify_e2e.rs`, `docs/measurements/automation.md`
+
+---
+
+## M6 – v0.4 DiskGuard
+
+**Done when:** lemezenkénti szabad hely, guard, add-time kapu és GUI; több mountos hoston bizonyított.
+
+**Non-goals:** auto-remove, SMART, nem-Ferrent pathok.
+
+**Függ:** M4 (label move target), M4-T2 (`Moving`).
+
+### M6-T1 – Storage model 🤖
+
+**Scope:** mount tábla, `statvfs`, `st_dev` csoportosítás/aliasok, path mapping (session/label/torrent), unknown, payload.
+
+**Acceptance**
+
+- [ ] `/proc/self/mounts` parse + pseudo FS szűrés; bind mountok egy disk; leghosszabb mountpoint a display.
+- [ ] payload: mount, fs, total/free/used, paths, torrents, labels, deluge, low; unknown[].
+- [ ] tmpfs + bind mount teszt; eltűnt path → unknown, nem hiba.
+- [ ] `statvfs` `spawn_blocking` + timeout; beragadt NFS nem blokkol.
+- [ ] 1 000 path mellett < 50 ms.
+
+**Files:** `crates/daemon/src/diskguard/{storage,mod}.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`
+
+### M6-T2 – Guard engine + kapuk ⚠️
+
+**Scope:** threshold/hysteresis, notify/pause, csak aktív írók, `DISK_GUARD` reason, add gate, move cél ellenőrzés.
+
+**Acceptance**
+
+- [ ] low = `free < min`; ok = `free >= min + margin`; csak tranziens emitál.
+- [ ] pause csak Downloading/Queued/Checking/Moving; seed nem; kézi pause-t nem ír felül.
+- [ ] add: cél FS < min → `FAILED_PRECONDITION` (config: notify/reject); AutoAdd visszatart.
+- [ ] move target < size → a move nem indul, event + notification.
+- [ ] restart után újraértékel; hiba → utolsó payload.
+
+**Files:** `crates/daemon/src/diskguard/guard.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/rpc/mod.rs`, `tests/`
+
+### M6-T3 – DiskGuard API + GUI + acceptance 🤖 🔬
+
+**Scope:** `GetDisks`/`SetGuardConfig`, Storage tab + status item, multi-mount mérés.
+
+**Acceptance**
+
+- [ ] Settings → Storage tábla mountonként (total/free/min/margin/action), egy Save + Reload.
+- [ ] sidebar „N disks · X free”, low → piros, kattintás a tabra.
+- [ ] 3 FS-es host + tmpfs low szimuláció: a megfelelő torrentek pause/resume.
+- [ ] `DiskLow`/`DiskOk` notification a M5 csatornákra.
+- [ ] mérés: poll idő, pause/resume latency, 4 000 torrent; `docs/measurements/diskguard.md`.
+
+**Files:** `crates/gui/src/settings/diskguard.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`, `docs/measurements/diskguard.md`
+
+---
+
+## M7 – v0.5 WebUI
+
+**Done when:** `ferrent-web` + SPA mobilról használható; lista/detail/add/label/pause; SSE; 10 000 torrent.
+
+**Non-goals:** settings szerkesztés, push (v1.1), teljes parity.
+
+**Függ:** M4 (label), M5/M6 státusz opcionális.
+
+### M7-T1 – `ferrent-web` skeleton + auth + SSE ⚠️
+
+**Scope:** axum, TLS/reverse proxy, token/password, session, statikus SPA, `/health`, SSE gateway 1 Hz coalescing.
+
+**Acceptance**
+
+- [ ] csatlakozik a daemonhoz TLS pinninggel; a tokent nem logolja.
+- [ ] login → session token/cookie; read-only mód; 5/perc limit; logout.
+- [ ] SSE: csak változott torrentek, ≤ 1 msg/s/kliens, 15 s heartbeat; reconnect után read API szinkron.
+- [ ] `/health` és SPA azonos originon; nincs CORS.
+- [ ] ADR 0010: külön binary vs embedded döntés.
+
+**Files:** `crates/web/src/{main,config,auth,sse}.rs`, `docs/adr/0010-web-gateway.md`
+
+### M7-T2 – REST API (thin) 🤖
+
+**Scope:** list/detail/files/add/pause/resume/remove/label/bulk; szerveroldali filter/sort/page; add magnet + file + paused + label.
+
+**Acceptance**
+
+- [ ] a végpontok a Ferrent RPC-t tükrözik; duplicate → 409 + id.
+- [ ] lista offset/limit/filter/state/label/sort; 10k mellett p95 < 300 ms.
+- [ ] hibakódok 400/401/403/404/409/412; JSON séma dokumentálva.
+- [ ] bulk max 1 000 id, részleges `ok`/`failed`.
+
+**Files:** `crates/web/src/api.rs`, `docs/web-api.md`, `tests/`
+
+### M7-T3 – SPA port a webui2-ből 🤖
+
+**Scope:** Vue app adapter (`api.ts`, `types.ts`), lista/detail/add/label, mobil gesztusok, i18n/theme, PWA.
+
+**Acceptance**
+
+- [ ] a meglévő SPA a Ferrent API-val fut; a webui2 flow-k működnek.
+- [ ] 10k torrent virtualizált lista; 360/390 px-en nincs vízszintes scroll.
+- [ ] HU/EN, light/dark, offline banner; PWA manifest/SW push nélkül.
+- [ ] Playwright smoke mock API ellen; 0 console error.
+
+**Files:** `webui/src/api.ts`, `webui/src/types.ts`, `webui/src/App.vue`, `webui/e2e/`
+
+### M7-T4 – Deployment + acceptance 🔬
+
+**Scope:** systemd/nginx, read-only dashboard, telefonos teszt, perf.
+
+**Acceptance**
+
+- [ ] reverse proxy alatt (path vagy 443) működik; a daemon portja nem publikus.
+- [ ] telefonon végig: list → detail → pause → add → label.
+- [ ] 10k torrent, 3 kliens, 1 óra: RSS < 150 MB, nincs SSE szivárgás.
+- [ ] mérés + telepítési doksi; opcionális read-only token.
+
+**Files:** `packaging/systemd/ferrent-web.service`, `docs/web-install.md`, `docs/measurements/webui.md`
 
 ---
 
 # v1.0 – telepíthető, migrálható, üzemeltethető
 
-**Definíció:** `apt install ferrentd` egy tiszta Debianon; a meglévő Deluge-állomány átemelhető; a *arr stack és a VPN-es homelab használat kényelmes; a rendszer soak-tesztelt.
+**Definíció:** `apt install ferrentd` egy tiszta Debianon; a meglévő Deluge-állomány átemelhető; a Deluge-pluginok funkciói beépítve (labels, AutoAdd, scheduler, hooks, notifications, DiskGuard, web UI); a *arr stack és a VPN-es homelab használat kényelmes; a rendszer soak-tesztelt.
 
 **Done when**
 
 - [ ] Aláírt APT repo + `systemctl` + Docker image; friss telepítés dokumentált.
 - [ ] `import-deluge` 4 000 torrentet visz át, újraellenőrzés nélkül (vagy dokumentált fallbackkel).
+- [ ] A v0.2–v0.5 funkciók élesben: labels + AutoAdd + scheduler + hooks + notifications + DiskGuard + web UI.
 - [ ] Sonarr/Radarr add + list működik az emulált qBittorrent API-n.
 - [ ] VPN-interfész kötés leak-teszttel bizonyítva; `/metrics` Grafana-kompatibilis.
 - [ ] 72 órás soak + `kill -9` recovery zöld; nincs fd/RSS szivárgás.
@@ -259,7 +625,7 @@
 
 **Non-goals (v1.0)**
 
-- Mobil kliens, média-streaming, több daemon klaszter.
+- Natív mobil kliens, média-streaming, több daemon klaszter.
 - Saját torrent motor, Deluge plugin ABI.
 - Windows/macOS daemon.
 
@@ -328,29 +694,29 @@
 
 ---
 
-## M4 – Ökoszisztéma és automatizáció
+## M8 – Ökoszisztéma (v1.0)
 
-**Done when:** a Deluge-ból át lehet költözni; a *arr stack és a VPN-es homelab kiszolgálható; a pluginok helyét beépített szabályok és webhookok veszik át.
+**Done when:** a Deluge-ból át lehet költözni; a *arr stack és a VPN-es homelab kiszolgálható; az arány/idő alapú auto-remove kész (a labels/hooks/scheduler a v0.2–v0.3-ban).
 
 **Non-goals:** teljes Deluge RPC emuláció, plugin ABI, torrent kereső/indexer.
 
-**Függ:** M3
+**Függ:** M3, M7
 
-### M4-T1 – `import-deluge`
+### M8-T1 – `import-deluge`
 
-**Scope:** Deluge `state` könyvtár beolvasása (`.torrent` + `.fastresume` + címkék), dry-run, idempotens import.
+**Scope:** Deluge `state` könyvtár beolvasása (`.torrent` + `.fastresume` + címkék) + a plugin-configok (`label.conf`, `autoadd.conf`, `execute.conf`, `scheduler.conf`) mappingje; dry-run, idempotens import.
 
 **Acceptance**
 
-- [ ] `ferrent-cli import-deluge --state-dir ... --dry-run` listázza a talált torrenteket.
-- [ ] 4 000 torrent importja lefut; a címkék megőrződnek; a duplikátumok kimaradnak.
+- [ ] `ferrent-cli import-deluge --state-dir ... --dry-run` listázza a talált torrenteket és a felismert plugin-configokat.
+- [ ] 4 000 torrent importja lefut; a címkék megőrződnek; a duplikátumok (infohash) kimaradnak.
+- [ ] A `label.conf` → label-hozzárendelés, `autoadd.conf` → watch dir, `execute.conf` → hook, `scheduler.conf` → rács; a host-függő pathokról figyelmeztet.
 - [ ] Kompatibilis fastresume esetén nincs recheck; ellenkező esetben dokumentált fallback.
-- [ ] Újrafuttatás nem duplikál (idempotens).
-- [ ] Kis valós Deluge-fixture-rel tesztelve.
+- [ ] Újrafuttatás nem duplikál (idempotens); kis valós Deluge-fixture-rel tesztelve.
 
 **Files:** `crates/cli/src/import_deluge.rs`, `tests/fixtures/deluge-state/`
 
-### M4-T2 – qBittorrent Web API emuláció (*arr)
+### M8-T2 – qBittorrent Web API emuláció (*arr)
 
 **Scope:** auth/login, `torrents/add`, `torrents/info`, kategóriák, pause/resume/delete; opt-in végpont.
 
@@ -364,21 +730,21 @@
 
 **Files:** `crates/daemon/src/compat/qbittorrent.rs`, `crates/daemon/tests/compat/`
 
-### M4-T3 – Automatizáció: címkék, auto-remove, hookok/webhookok
+### M8-T3 – Arány/idő alapú auto-remove
 
-**Scope:** címke/kategória szabályok mentési útvonallal; arány/idő/seeding limit; shell hook + JSON webhook retry-jal.
+**Scope:** a label policy + session default `stop_at_ratio`/`remove_at_ratio`/seed idő használata; a pause authority `RATIO` reasonje; dry-run; törlés adattal vagy anélkül.
 
 **Acceptance**
 
-- [ ] A szabályok TOML-ban konfigurálhatók; reload viselkedése dokumentált.
-- [ ] Az auto-remove betartja a limiteket; dry-run mód elérhető.
-- [ ] Webhook: timeout, retry, log; nem blokkolja a torrent szálat.
-- [ ] A hook környezeti változók dokumentálva; gyakori példák.
-- [ ] Szabály-kiértékelés unit tesztelve.
+- [ ] a limit a label policy-ból vagy a session defaultból jön; a kézi override érvényesül.
+- [ ] dry-run listázza a jelölteket; élesben csak a limitet elért torrentek törlődnek.
+- [ ] `Moving`/`Checking` alatt nincs törlés; a `RATIO` reason a pause authorityn megy.
+- [ ] esemény + notification a törlésről; a szabály-kiértékelés unit tesztelt.
+- [ ] hibás/elérhetetlen path → a torrent nem törlődik, hanem `dead` jelölést kap.
 
-**Files:** `crates/daemon/src/automation/`
+**Files:** `crates/daemon/src/automation/ratio.rs`, `crates/daemon/src/control.rs`, `crates/daemon/tests/`
 
-### M4-T4 – VPN interfész-kötés + Prometheus `/metrics`
+### M8-T4 – VPN interfész-kötés + Prometheus `/metrics`
 
 **Scope:** `outgoing_interfaces`/`listen_interfaces` kötés, link-figyelés, szüneteltetés interfész-vesztéskor; opcionális metrics endpoint.
 
@@ -393,15 +759,15 @@
 
 ---
 
-## M5 – Hardening és 1.0 kiadás
+## M9 – Hardening és 1.0 kiadás
 
 **Done when:** a rendszer soak- és crash-tesztelt, a biztonsági és teljesítmény-regresszió kapuzott, a dokumentáció teljes, a `v1.0.0` kiadva.
 
 **Non-goals:** új nagy funkció; csak hardening, mérés, dokumentáció, release.
 
-**Függ:** M4
+**Függ:** M8
 
-### M5-T1 – Soak, crash recovery, robustness
+### M9-T1 – Soak, crash recovery, robustness
 
 **Scope:** 72 órás soak 4 000 torrenttel; `kill -9` recovery; sérült DB rekord; malformed protokoll üzenet.
 
@@ -415,7 +781,7 @@
 
 **Files:** `tests/soak/`, `docs/measurements/v1-soak.md`
 
-### M5-T2 – Biztonság + teljesítmény-regresszió
+### M9-T2 – Biztonság + teljesítmény-regresszió
 
 **Scope:** auth/TLS review, függőség-audit, nightly perf harness a büdzséhez képest; threat model.
 
@@ -429,7 +795,7 @@
 
 **Files:** `.github/workflows/perf.yml`, `docs/security.md`
 
-### M5-T3 – Dokumentáció + `v1.0.0` release
+### M9-T3 – Dokumentáció + `v1.0.0` release
 
 **Scope:** README quickstart, telepítés, CLI/API referencia, migrációs útmutató, release notes, tag.
 
@@ -447,4 +813,4 @@
 
 ## Első lépés
 
-Ha most indul a kódolás: **M0-T1 → M0-T2 → M0-T3 → M0-T4**, és csak a harness eredménye után döntsünk a `libtorrent` ágról (ADR 0001) és a perzisztenciáról (ADR 0002).
+A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).

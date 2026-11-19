@@ -3,12 +3,12 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::error::Error;
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ferrent_daemon::config::{ConfigStore, ResolvedConfig, read_token_file};
 use ferrent_daemon::persist;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::{StateMirror, TorrentQuery};
@@ -18,7 +18,6 @@ use ferrent_engine::MockEngine;
 use ferrent_engine::TorrentEngine;
 #[cfg(feature = "libtorrent")]
 use ferrent_engine::{EngineSettings, LibtorrentEngine};
-use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -32,18 +31,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     result
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct FileConfig {
-    data_dir: Option<PathBuf>,
-    download_dir: Option<PathBuf>,
-    bind: Option<String>,
-    token_file: Option<PathBuf>,
-}
-
 struct Config {
-    data_dir: PathBuf,
-    download_dir: PathBuf,
-    bind: String,
+    store: ConfigStore,
+    resolved: ResolvedConfig,
     token: String,
 }
 
@@ -51,57 +41,41 @@ fn load_config() -> Result<Config, Box<dyn Error>> {
     let path = env::var_os("FERRENT_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/etc/ferrent/config.toml"));
-    let file: FileConfig = if path.is_file() {
-        toml::from_str(&fs::read_to_string(&path)?)?
-    } else {
-        FileConfig::default()
-    };
-    let data_dir = env::var_os("FERRENT_DATA_DIR")
-        .map(PathBuf::from)
-        .or(file.data_dir)
-        .unwrap_or_else(|| PathBuf::from("./ferrent-data"));
-    let download_dir = env::var_os("FERRENT_DOWNLOAD_DIR")
-        .map(PathBuf::from)
-        .or(file.download_dir)
-        .unwrap_or_else(|| data_dir.join("downloads"));
-    let bind = env::var("FERRENT_BIND")
-        .ok()
-        .or(file.bind)
-        .unwrap_or_else(|| "127.0.0.1:50051".to_owned());
+    let store = ConfigStore::load(path)?;
+    let resolved = store.resolved()?;
     let token = if let Ok(token) = env::var("FERRENT_TOKEN") {
         token
     } else {
-        let token_path = file
-            .token_file
-            .unwrap_or_else(|| PathBuf::from("/etc/ferrent/token"));
-        fs::read_to_string(&token_path)
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("cannot read token file {}: {error}", token_path.display()),
-                )
-            })?
-            .trim()
-            .to_owned()
+        read_token_file(&resolved.token_file).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "cannot read token file {}: {error}",
+                    resolved.token_file.display()
+                ),
+            )
+        })?
     };
     if token.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "empty API token").into());
     }
     Ok(Config {
-        data_dir,
-        download_dir,
-        bind,
+        store,
+        resolved,
         token,
     })
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
-    let config = load_config()?;
-    let data_dir = config.data_dir;
-    let download_dir = config.download_dir;
-    let token = config.token;
-    let bind = config.bind;
+    let Config {
+        store: _config_store,
+        resolved,
+        token,
+    } = load_config()?;
+    let data_dir = resolved.data_dir;
+    let download_dir = resolved.download_dir;
+    let bind = resolved.bind;
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
     let store = RedbStore::open(data_dir.join("state.redb"))?;
