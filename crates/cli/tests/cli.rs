@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::{MemoryStore, StateStore};
@@ -64,6 +65,7 @@ async fn start_server() -> TestServer {
         mirror,
         watch,
         store,
+        ConfigStore::default(),
         "secret",
         PathBuf::from("."),
         PathBuf::from("/tmp"),
@@ -244,6 +246,43 @@ async fn watch_receives_added_event() {
     let event: Value = serde_json::from_str(line.trim()).expect("watch JSON");
     assert_eq!(event["event"].as_str(), Some("added"));
     assert_eq!(event["torrent"]["name"].as_str(), Some("watched"));
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn cli_config_get_and_set() {
+    let server = start_server().await;
+
+    let get = run_cli(&server, &["--json", "config", "get"]).await;
+    assert!(get.status.success(), "config get failed: {}", stderr(&get));
+    let initial: Value = serde_json::from_slice(&get.stdout).expect("get JSON");
+    assert_eq!(initial["revision"].as_u64(), Some(0));
+    assert_eq!(initial["toml"].as_str(), Some(""));
+
+    let path = server.dir.join("daemon.toml");
+    let text = "# keep\nbind = \"127.0.0.1:50051\"\n";
+    std::fs::write(&path, text).expect("write config");
+
+    let set = run_cli(
+        &server,
+        &[
+            "--json",
+            "config",
+            "set",
+            path.to_str().expect("config path"),
+        ],
+    )
+    .await;
+    assert!(set.status.success(), "config set failed: {}", stderr(&set));
+    let updated: Value = serde_json::from_slice(&set.stdout).expect("set JSON");
+    assert_eq!(updated["revision"].as_u64(), Some(1));
+
+    let get = run_cli(&server, &["--json", "config", "get"]).await;
+    assert!(get.status.success(), "config get failed: {}", stderr(&get));
+    let fetched: Value = serde_json::from_slice(&get.stdout).expect("get JSON");
+    assert_eq!(fetched["revision"].as_u64(), Some(1));
+    assert_eq!(fetched["toml"].as_str(), Some(text));
 
     server.shutdown();
 }

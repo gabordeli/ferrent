@@ -28,6 +28,10 @@ service Ferrent {
   rpc Watch(WatchRequest) returns (stream WatchResponse);
   // Moves a torrent up or down in the download queue.
   rpc MoveTorrent(MoveTorrentRequest) returns (MoveTorrentResponse);
+  // Returns the configuration document and its revision.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  // Replaces the configuration if the revision is current.
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 }
 
 // Request for aggregate daemon status.
@@ -121,6 +125,33 @@ message MoveTorrentRequest {
 
 // Response of a successful queue move.
 message MoveTorrentResponse {}
+
+// Request for the current configuration.
+message GetConfigRequest {}
+
+// The current configuration document.
+message GetConfigResponse {
+  // Raw TOML, preserving comments and formatting.
+  string toml = 1;
+  // Revision to pass to SetConfig.
+  uint64 revision = 2;
+  // Keys overridden by the environment; SetConfig cannot change them.
+  repeated string env_locked = 3;
+}
+
+// Request to replace the configuration.
+message SetConfigRequest {
+  // Complete TOML document.
+  string toml = 1;
+  // Revision from GetConfig; a stale revision is rejected.
+  uint64 revision = 2;
+}
+
+// Response of a successful configuration change.
+message SetConfigResponse {
+  // The new revision.
+  uint64 revision = 1;
+}
 
 // Request for one torrent snapshot.
 message GetTorrentRequest {
@@ -239,7 +270,15 @@ message WatchResponse {
     Progress progress = 3;
     // A torrent was removed.
     Removed removed = 4;
+    // The configuration changed.
+    ConfigChanged config_changed = 5;
   }
+}
+
+// A configuration revision change.
+message ConfigChanged {
+  // The new revision.
+  uint64 revision = 1;
 }
 
 // State change delta.

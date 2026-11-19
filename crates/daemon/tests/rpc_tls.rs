@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::{MemoryStore, StateStore};
@@ -11,8 +12,9 @@ use ferrent_engine::{MockEngine, TorrentEngine};
 use ferrent_protocol::client::connect;
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetTorrentRequest, ListTorrentsRequest, PauseTorrentRequest,
-    RemoveTorrentRequest, ResumeTorrentRequest, SortField, TorrentState, WatchRequest,
+    AddTorrentRequest, GetConfigRequest, GetTorrentRequest, ListTorrentsRequest,
+    PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SortField,
+    TorrentState, WatchRequest,
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -49,6 +51,7 @@ async fn start_server(token: &str) -> TestServer {
         mirror,
         watch,
         store,
+        ConfigStore::default(),
         token,
         std::path::PathBuf::from("."),
         std::path::PathBuf::from("/tmp"),
@@ -212,6 +215,103 @@ async fn watch_streams_added_and_stays_idle() {
 
     let idle = tokio::time::timeout(Duration::from_millis(500), stream.message()).await;
     assert!(idle.is_err(), "expected no idle event, got {idle:?}");
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn config_roundtrip_and_revision_conflict() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    let initial = client
+        .get_config(GetConfigRequest {})
+        .await
+        .expect("get config")
+        .into_inner();
+    assert_eq!(initial.revision, 0);
+    assert!(initial.toml.is_empty());
+
+    let text = "# keep\nbind = \"127.0.0.1:50051\"\n[session]\ndownload_rate_limit = 1024\n";
+    let updated = client
+        .set_config(SetConfigRequest {
+            toml: text.to_owned(),
+            revision: initial.revision,
+        })
+        .await
+        .expect("set config")
+        .into_inner();
+    assert_eq!(updated.revision, 1);
+
+    let fetched = client
+        .get_config(GetConfigRequest {})
+        .await
+        .expect("get config")
+        .into_inner();
+    assert_eq!(fetched.revision, 1);
+    assert_eq!(fetched.toml, text);
+
+    let stale = client
+        .set_config(SetConfigRequest {
+            toml: "bind = \"127.0.0.1:50052\"\n".to_owned(),
+            revision: 0,
+        })
+        .await
+        .expect_err("stale revision");
+    assert_eq!(stale.code(), tonic::Code::Aborted);
+
+    let invalid = client
+        .set_config(SetConfigRequest {
+            toml: "[session]\nnope = 1\n".to_owned(),
+            revision: 1,
+        })
+        .await
+        .expect_err("invalid config");
+    assert_eq!(invalid.code(), tonic::Code::InvalidArgument);
+
+    let after = client
+        .get_config(GetConfigRequest {})
+        .await
+        .expect("get config")
+        .into_inner();
+    assert_eq!(after.revision, 1);
+    assert_eq!(after.toml, text);
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn watch_streams_config_changes() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    let mut stream = client
+        .watch(WatchRequest {})
+        .await
+        .expect("watch")
+        .into_inner();
+
+    client
+        .set_config(SetConfigRequest {
+            toml: "bind = \"127.0.0.1:50051\"\n".to_owned(),
+            revision: 0,
+        })
+        .await
+        .expect("set config");
+
+    let response = tokio::time::timeout(Duration::from_secs(1), stream.message())
+        .await
+        .expect("config event timeout")
+        .expect("watch stream");
+    let event = response.expect("watch message");
+    match event.event {
+        Some(WatchEvent::ConfigChanged(change)) => assert_eq!(change.revision, 1),
+        other => panic!("unexpected watch event: {other:?}"),
+    }
 
     server.shutdown();
 }

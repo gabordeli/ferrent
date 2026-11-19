@@ -69,7 +69,7 @@ fn load_config() -> Result<Config, Box<dyn Error>> {
 async fn run() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     let Config {
-        store: _config_store,
+        store: config_store,
         resolved,
         token,
     } = load_config()?;
@@ -108,6 +108,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         mirror,
         watch,
         store,
+        config_store,
         token,
         data_dir.clone(),
         download_dir.clone(),

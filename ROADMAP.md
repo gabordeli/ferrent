@@ -330,17 +330,17 @@
 
 ### M4-T1 – Config service és séma 🤖
 
-**Scope:** rétegezett config (file + redb + env), szekciók, validáció, revision, atomikus apply, `GetConfig`/`SetConfig`, CLI `config get/set`.
+**Scope:** rétegezett config (file + env), szekciók, validáció, revision, atomikus apply, `GetConfig`/`SetConfig`, CLI `config get/set`; a redb a futásidejű label/watch állapoté (M4-T4/M5).
 
 **Acceptance**
 
-- [ ] ismeretlen kulcs/érték → `apply_result.error`, nem csendes default.
-- [ ] elavult revision → `ABORTED`, a futó config nem változik.
-- [ ] érvényes `SetConfig` után reload nélkül él a változás + `ConfigChanged` event.
-- [ ] a token redacted; partial apply rollback tesztelt; 4 000 torrent mellett < 50 ms.
-- [ ] `ferrent-cli config get --json` és `set` működik a daemon ellen.
+- [x] ismeretlen kulcs/érték → `apply_result.error`, nem csendes default.
+- [x] elavult revision → `ABORTED`, a futó config nem változik.
+- [x] érvényes `SetConfig` után reload nélkül él a változás + `ConfigChanged` event.
+- [x] a token redacted; partial apply rollback tesztelt; 4 000 torrent mellett < 50 ms.
+- [x] `ferrent-cli config get --json` és `set` működik a daemon ellen.
 
-**Files:** `crates/daemon/src/config/{mod,schema,apply}.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/cli/src/config.rs`, `docs/adr/0006-config-service.md`
+**Files:** `crates/daemon/src/config/{mod,schema,apply}.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/cli/src/main.rs`, `docs/adr/0006-config-service.md`
 
 ### M4-T2 – Motor-képességek 🤖
 

@@ -37,6 +37,8 @@ ferrent-cli pause <id>
 ferrent-cli resume <id>
 ferrent-cli remove <id>
 ferrent-cli watch [--count N]
+ferrent-cli config get
+ferrent-cli config set <file> [--revision N]
 ```
 
 - `add`: a `.torrent` fájl nyers bájtjait küldi; a `--save-path` a daemon
@@ -44,6 +46,11 @@ ferrent-cli watch [--count N]
 - `list`: szerveroldali szűrés/rendezés/lapozás; `--limit 0` = nincs limit.
 - `watch`: delta-stream; `Ctrl-C` tisztán leáll; `--count N` N esemény után
   kilép.
+- `config get`: a daemon config TOML dokumentuma és a revízió; `--json`-nal
+  `{"revision", "env_locked", "toml"}`.
+- `config set <file>`: a teljes TOML-t feltölti; `--revision N` nélkül a CLI
+  lekéri a aktuális revíziót. Elavult revízióra a daemon `ABORTED`-del válaszol,
+  a futó config nem változik.
 - `--json` globális flag: minden parancs JSON-t ad.
 
 ## JSON kimenet (stabil, v1)
@@ -52,6 +59,8 @@ ferrent-cli watch [--count N]
 - `list`: `{"total": 1, "torrents": [<torrent>]}`
 - `show`: `<torrent>`
 - `pause` / `resume` / `remove`: `{"ok": true, "id": 0}`
+- `config get`: `{"revision": 0, "env_locked": ["bind"], "toml": "..."}`
+- `config set`: `{"revision": 1}`
 - `<torrent>`: `{"id", "name", "state", "progress", "total_bytes",
   "download_rate", "upload_rate", "error"}`
 - `watch`: soronként egy objektum:
@@ -59,6 +68,7 @@ ferrent-cli watch [--count N]
   - `{"event":"state_changed","id":0,"state":"paused"}`
   - `{"event":"progress","id":0,"progress":0.5,"download_rate":1,"upload_rate":2}`
   - `{"event":"removed","id":0}`
+  - `{"event":"config_changed","revision":1}`
 
 A `state` értékek: `unspecified`, `queued`, `checking`, `downloading`,
 `seeding`, `paused`, `error`.

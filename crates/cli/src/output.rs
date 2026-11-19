@@ -89,6 +89,10 @@ pub fn print_event(event: &WatchResponse, json_mode: bool) -> Result<(), CliErro
                 "event": "removed",
                 "id": removed.id,
             }),
+            Event::ConfigChanged(change) => json!({
+                "event": "config_changed",
+                "revision": change.revision,
+            }),
         };
         println!(
             "{}",
@@ -108,6 +112,9 @@ pub fn print_event(event: &WatchResponse, json_mode: bool) -> Result<(), CliErro
                 format_rate(progress.upload_rate)
             ),
             Event::Removed(removed) => println!("removed {}", removed.id),
+            Event::ConfigChanged(change) => {
+                println!("config revision {}", change.revision);
+            }
         }
     }
     std::io::stdout().flush()?;

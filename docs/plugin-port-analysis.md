@@ -8,8 +8,8 @@
 
 | Terület | Ma | Forrás |
 |---|---|---|
-| Config | lapos TOML (`data_dir`, `download_dir`, `bind`, `token_file`), nincs hot reload | `crates/daemon/src/main.rs` |
-| RPC | add/pause/resume/remove/get/list/status/files/peers/trackers/watch/queue-move | `crates/protocol/proto/ferrent/v1/ferrent.proto` |
+| Config | tipizált TOML szekciókkal, env-layering, revision, atomikus apply, hot reload | `crates/daemon/src/config/` |
+| RPC | add/pause/resume/remove/get/list/status/files/peers/trackers/watch/queue-move/config get-set | `crates/protocol/proto/ferrent/v1/ferrent.proto` |
 | State mirror | név-substring + state szűrő, 6 rendezési kulcs | `crates/daemon/src/state.rs` |
 | Perzisztencia | név, save path, metainfo, fastresume, queue order | `crates/daemon/src/persist.rs` |
 | Engine | per-torrent limit nélkül; `EngineSettings` = le/fel limit + seed mode | `crates/engine/src/{engine,types}.rs` |
@@ -85,7 +85,7 @@ A Settings gomb és a modal már létezik, de üres: ez a port természetes cont
 
 ## 3. Célarchitektúra: öt közös alap
 
-1. **Config service** – egy `config.toml` szekciókkal + redb a futásidejű állapotnak; `GetConfig`/`SetConfig` `revision`-nal, atomikus apply, hot reload; hibán a régi snapshot marad. A token redacted. A GUI és a CLI ugyanazt használja.
+1. **Config service** – egy `config.toml` szekciókkal + redb a futásidejű állapotnak; `GetConfig`/`SetConfig` `revision`-nal, atomikus apply, hot reload; hibán a régi snapshot marad. A token redacted. A GUI és a CLI ugyanazt használja. **Kész (2026-11-20):** tipizált séma, env-layering, revision + atomic swap + atomikus fájlírás, RPC és CLI; a redb runtime state a label/watch feladatoknál jön.
 2. **Pause authority** – `pause_reasons: {USER, SCHEDULER, DISK_GUARD, RATIO}`; effektív paused = bármelyik ok aktív. Az engine csak az effektív váltást kapja. Restartnál a `USER` perzisztált, a tranziens reasonök újraszámolódnak.
 3. **Effektív beállítás-feloldás** – torrent override > label policy > session default; a label hozzárendelése/levétele csak újraszámol. A move-on-complete a label policy része; a DiskGuard a célt is látja.
 4. **Esemény-journal** – perzisztált, sorrendezett domain események (added/finished/removed/error/disk_low/scheduler_changed) + kurzor. Erre épül a hook, a notifications outbox, az Activity fül és a web SSE. Az engine `Finished` eseménye pontosan egyszer jön.

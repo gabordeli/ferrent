@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetTorrentRequest, ListTorrentsRequest, MoveTorrentRequest,
-    PauseTorrentRequest, QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest, SortField,
-    WatchRequest,
+    AddTorrentRequest, GetConfigRequest, GetTorrentRequest, ListTorrentsRequest,
+    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RemoveTorrentRequest,
+    ResumeTorrentRequest, SetConfigRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -119,6 +119,25 @@ enum Command {
         /// Stop after N events.
         #[arg(long)]
         count: Option<usize>,
+    },
+    /// Read or replace the daemon configuration.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Print the current TOML document and revision.
+    Get,
+    /// Replace the configuration from a TOML file.
+    Set {
+        /// TOML file to upload.
+        file: PathBuf,
+        /// Revision from `config get`; fetched automatically when omitted.
+        #[arg(long)]
+        revision: Option<u64>,
     },
 }
 
@@ -312,6 +331,42 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             }
         }
+        Command::Config { command } => match command {
+            ConfigCommand::Get => {
+                let response = client.get_config(GetConfigRequest {}).await?.into_inner();
+                if json {
+                    output::print_json(&json!({
+                        "revision": response.revision,
+                        "env_locked": response.env_locked,
+                        "toml": response.toml,
+                    }));
+                } else {
+                    print!("{}", response.toml);
+                }
+            }
+            ConfigCommand::Set { file, revision } => {
+                let toml = std::fs::read_to_string(&file)?;
+                let revision = match revision {
+                    Some(revision) => revision,
+                    None => {
+                        client
+                            .get_config(GetConfigRequest {})
+                            .await?
+                            .into_inner()
+                            .revision
+                    }
+                };
+                let response = client
+                    .set_config(SetConfigRequest { toml, revision })
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({ "revision": response.revision }));
+                } else {
+                    println!("config updated to revision {}", response.revision);
+                }
+            }
+        },
     }
 
     Ok(())

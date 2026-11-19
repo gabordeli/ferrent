@@ -13,15 +13,15 @@ use ferrent_engine::{
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTorrentResponse, GetStatusRequest, GetStatusResponse,
-    GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
-    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
+    AddTorrentRequest, AddTorrentResponse, ConfigChanged, GetConfigRequest, GetConfigResponse,
+    GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse,
+    GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
     GetTorrentTrackersRequest, GetTorrentTrackersResponse, ListTorrentsRequest,
     ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
     PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
-    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SortField,
-    StateChanged, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker, WatchRequest,
-    WatchResponse,
+    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SetConfigRequest,
+    SetConfigResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentPeer, TorrentState,
+    TorrentTracker, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -33,6 +33,7 @@ use tonic::metadata::MetadataMap;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
+use crate::config::{ConfigError, ConfigStore};
 use crate::persist::{self, PersistedTorrent};
 use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror, state_code};
 use crate::store::StateStore;
@@ -89,6 +90,8 @@ pub struct AppState {
     engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
     mirror: Arc<StateMirror>,
     watch: broadcast::Sender<EngineEvent>,
+    config: ConfigStore,
+    config_watch: broadcast::Sender<u64>,
     store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
     data_dir: PathBuf,
@@ -97,19 +100,24 @@ pub struct AppState {
 
 impl AppState {
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         engine: Box<dyn TorrentEngine>,
         mirror: Arc<StateMirror>,
         watch: broadcast::Sender<EngineEvent>,
         store: Box<dyn StateStore>,
+        config: ConfigStore,
         token: impl Into<String>,
         data_dir: PathBuf,
         download_dir: PathBuf,
     ) -> Self {
+        let (config_watch, _) = broadcast::channel(16);
         Self {
             engine: Arc::new(Mutex::new(engine)),
             mirror,
             watch,
+            config,
+            config_watch,
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
             data_dir,
@@ -333,9 +341,7 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<GetTorrentFilesResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        let files = self
-            .with_engine(move |engine| engine.files(id))
-            .await?;
+        let files = self.with_engine(move |engine| engine.files(id)).await?;
         Ok(Response::new(GetTorrentFilesResponse {
             files: files
                 .into_iter()
@@ -355,9 +361,7 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<GetTorrentPeersResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        let peers = self
-            .with_engine(move |engine| engine.peers(id))
-            .await?;
+        let peers = self.with_engine(move |engine| engine.peers(id)).await?;
         Ok(Response::new(GetTorrentPeersResponse {
             peers: peers
                 .into_iter()
@@ -378,9 +382,7 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<GetTorrentTrackersResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        let trackers = self
-            .with_engine(move |engine| engine.trackers(id))
-            .await?;
+        let trackers = self.with_engine(move |engine| engine.trackers(id)).await?;
         Ok(Response::new(GetTorrentTrackersResponse {
             trackers: trackers
                 .into_iter()
@@ -415,6 +417,34 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn get_config(
+        &self,
+        request: Request<GetConfigRequest>,
+    ) -> Result<Response<GetConfigResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let resolved = self.state.config.resolved().map_err(config_status)?;
+        Ok(Response::new(GetConfigResponse {
+            toml: self.state.config.toml(),
+            revision: self.state.config.revision(),
+            env_locked: resolved.env_locked.into_iter().collect(),
+        }))
+    }
+
+    async fn set_config(
+        &self,
+        request: Request<SetConfigRequest>,
+    ) -> Result<Response<SetConfigResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let revision = self
+            .state
+            .config
+            .apply_toml(&request.toml, request.revision)
+            .map_err(config_status)?;
+        let _ = self.state.config_watch.send(revision);
+        Ok(Response::new(SetConfigResponse { revision }))
+    }
+
     type WatchStream = Pin<Box<dyn Stream<Item = Result<WatchResponse, Status>> + Send + 'static>>;
 
     async fn watch(
@@ -422,12 +452,20 @@ impl Ferrent for FerrentService {
         request: Request<WatchRequest>,
     ) -> Result<Response<Self::WatchStream>, Status> {
         self.state.auth.check(request.metadata())?;
-        let receiver = self.state.watch.subscribe();
-        let stream = BroadcastStream::new(receiver).filter_map(|item| match item {
-            Ok(event) => Some(Ok(to_proto_watch(event))),
-            Err(error) => Some(Err(Status::resource_exhausted(error.to_string()))),
-        });
-        Ok(Response::new(Box::pin(stream)))
+        let torrents =
+            BroadcastStream::new(self.state.watch.subscribe()).filter_map(|item| match item {
+                Ok(event) => Some(Ok(to_proto_watch(event))),
+                Err(error) => Some(Err(Status::resource_exhausted(error.to_string()))),
+            });
+        let configs = BroadcastStream::new(self.state.config_watch.subscribe()).filter_map(
+            |item| match item {
+                Ok(revision) => Some(Ok(WatchResponse {
+                    event: Some(WatchEvent::ConfigChanged(ConfigChanged { revision })),
+                })),
+                Err(error) => Some(Err(Status::resource_exhausted(error.to_string()))),
+            },
+        );
+        Ok(Response::new(Box::pin(torrents.merge(configs))))
     }
 }
 
@@ -453,6 +491,16 @@ fn engine_status(error: EngineError) -> Status {
         EngineError::NotFound { .. } => Status::not_found(error.to_string()),
         EngineError::InvalidTransition { .. } => Status::failed_precondition(error.to_string()),
         EngineError::Rejected { .. } => Status::invalid_argument(error.to_string()),
+    }
+}
+
+fn config_status(error: ConfigError) -> Status {
+    match &error {
+        ConfigError::RevisionConflict { .. } => Status::aborted(error.to_string()),
+        ConfigError::Parse(_) | ConfigError::Invalid(_) => {
+            Status::invalid_argument(error.to_string())
+        }
+        ConfigError::Io { .. } => Status::internal(error.to_string()),
     }
 }
 
