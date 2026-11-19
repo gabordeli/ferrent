@@ -171,6 +171,13 @@ impl StateMirror {
     /// Runs a server-side filter/sort/page query against the published snapshot.
     #[must_use]
     pub fn query(&self, query: &TorrentQuery) -> Vec<TorrentStatus> {
+        self.query_page(query).0
+    }
+
+    /// Like [`Self::query`], but also returns the total match count before
+    /// paging.
+    #[must_use]
+    pub fn query_page(&self, query: &TorrentQuery) -> (Vec<TorrentStatus>, usize) {
         let snapshot = self.snapshot.load_full();
         let needle = query.filter.as_ref().map(|filter| filter.to_lowercase());
 
@@ -199,29 +206,38 @@ impl StateMirror {
             ordering.then_with(|| left.id.cmp(&right.id))
         });
 
+        let total = items.len();
         let limit = if query.limit == 0 {
             usize::MAX
         } else {
             query.limit
         };
-        items
+        let page = items
             .into_iter()
             .skip(query.offset)
             .take(limit)
             .map(|status| status.as_ref().clone())
-            .collect()
+            .collect();
+        (page, total)
     }
 }
 
 /// Applies engine events to the mirror and publishes snapshots periodically.
 ///
 /// The task owns the only writer path; readers never wait on the mutex.
-pub async fn run_mirror(mirror: Arc<StateMirror>, mut events: broadcast::Receiver<EngineEvent>) {
+pub async fn run_mirror(
+    mirror: Arc<StateMirror>,
+    mut events: broadcast::Receiver<EngineEvent>,
+    watch: broadcast::Sender<EngineEvent>,
+) {
     let mut ticker = tokio::time::interval(PUBLISH_INTERVAL);
     loop {
         tokio::select! {
             event = events.recv() => match event {
-                Ok(event) => mirror.apply(event),
+                Ok(event) => {
+                    mirror.apply(event.clone());
+                    let _ = watch.send(event);
+                }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     eprintln!("state mirror lagged by {skipped} events");
                 }
@@ -308,12 +324,13 @@ mod tests {
         let mirror = StateMirror::new();
         seed_4000(&mirror);
 
-        let first_page = mirror.query(&TorrentQuery {
+        let (first_page, total) = mirror.query_page(&TorrentQuery {
             sort: TorrentSort::Progress,
             descending: true,
             limit: 10,
             ..TorrentQuery::default()
         });
+        assert_eq!(total, 4_000);
         assert_eq!(first_page.len(), 10);
         for pair in first_page.windows(2) {
             assert!(pair[0].progress >= pair[1].progress);
@@ -407,7 +424,8 @@ mod tests {
     async fn mirror_task_publishes_and_drains_on_shutdown() {
         let mirror = Arc::new(StateMirror::new());
         let (sender, receiver) = broadcast::channel(16);
-        let task = tokio::spawn(run_mirror(Arc::clone(&mirror), receiver));
+        let (watch, _) = broadcast::channel(16);
+        let task = tokio::spawn(run_mirror(Arc::clone(&mirror), receiver, watch));
 
         for id in 0..3 {
             sender

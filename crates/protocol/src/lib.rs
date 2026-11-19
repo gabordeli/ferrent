@@ -1,7 +1,15 @@
 //! Wire protocol shared by `ferrentd`, `ferrent-cli`, and `ferrent-gui`.
-//!
-//! The concrete gRPC schema lands in M1-T3; this crate is the single source of
-//! truth for request and response types.
+
+pub mod client;
+
+pub mod v1 {
+    //! Generated protobuf and gRPC types.
+    #![allow(clippy::all)]
+
+    tonic::include_proto!("ferrent.v1");
+}
+
+pub use v1::*;
 
 /// Version advertised during the client handshake.
 pub const PROTOCOL_VERSION: u32 = 1;

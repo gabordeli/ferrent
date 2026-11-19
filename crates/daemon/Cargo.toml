@@ -21,5 +21,12 @@ path = "src/bin/crash_writer.rs"
 [dependencies]
 arc-swap = "1"
 ferrent-engine = { path = "../engine" }
+ferrent-protocol = { path = "../protocol" }
+rcgen = "0.14"
 redb = "2"
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+rustls-pemfile = "2"
+sha2 = "0.10"
+subtle = "2"
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["net", "sync"] }
+tonic = { version = "0.14", features = ["tls-ring"] }

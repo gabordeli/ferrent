@@ -55,6 +55,24 @@ cargo test -p ferrent-daemon --release -- --nocapture
 
 A `crash_recovery` csak Unixon fut (SIGKILL).
 
+## RPC / TLS (M1-T3)
+
+```bash
+cargo test -p ferrent-daemon --test rpc_tls
+```
+
+- A szerver önaláírt certet generál (`TlsMaterial`); a kliens ezt a certet
+  használja CA-ként (pin). A fingerprint SHA-256.
+- A token `authorization: Bearer <token>` fejlécben megy; rossz token →
+  `UNAUTHENTICATED`.
+- A proto: `crates/protocol/proto/ferrent/v1/ferrent.proto`; a `protoc`ot a
+  `protoc-bin-vendored` adja, nem kell rendszer csomag.
+- Buf lint/breaking (Dockerrel):
+
+  ```bash
+  docker run --rm -v "$PWD:/workspace" -w /workspace bufbuild/buf:latest lint
+  ```
+
 ## Load harness (M0-T4)
 
 ```bash

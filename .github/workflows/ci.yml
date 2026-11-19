@@ -63,6 +63,28 @@ jobs:
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
 
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+      - name: Breaking check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}"
+          else
+            BASE="HEAD~1"
+          fi
+          if git ls-tree -r --name-only "$BASE" | grep -q '\.proto$'; then
+            buf breaking --against ".git#ref=$BASE"
+          else
+            echo "No proto baseline in $BASE; skipping breaking check."
+          fi
+
   fmt:
     runs-on: ubuntu-latest
     steps:

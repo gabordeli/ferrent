@@ -142,13 +142,13 @@
 
 **Acceptance**
 
-- [ ] `proto/ferrent.proto` verziózott; mezőszám nem újrahasznált; breaking-change ellenőrzés CI-ban.
+- [ ] `crates/protocol/proto/ferrent/v1/ferrent.proto` verziózott; mezőszám nem újrahasznált; breaking-change ellenőrzés CI-ban.
 - [ ] Kliens TLS-en át tud add/list/pause/resume/remove műveletet.
 - [ ] Delta-stream: inaktív torrent 60 s alatt 0 üzenet; aktív ~1 Hz.
 - [ ] Rossz token → `UNAUTHENTICATED`; pin-elt ujjlenyomat eltérés → egyértelmű hiba.
 - [ ] `docs/adr/0004-transport.md`: gRPC vs WebSocket döntés indoklással.
 
-**Files:** `crates/protocol/proto/ferrent.proto`, `crates/daemon/src/rpc/`, `crates/protocol/src/client.rs`
+**Files:** `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/protocol/src/client.rs`, `crates/daemon/src/rpc/`, `crates/daemon/tests/rpc_tls.rs`, `buf.yaml`, `docs/adr/0004-transport.md`
 
 ### M1-T4 – `ferrent-cli` 🤖
 

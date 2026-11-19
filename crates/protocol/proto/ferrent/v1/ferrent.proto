@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package ferrent.v1;
+
+// Ferrent daemon control API.
+service Ferrent {
+  // Adds a torrent from raw metainfo bytes.
+  rpc AddTorrent(AddTorrentRequest) returns (AddTorrentResponse);
+  // Pauses a torrent.
+  rpc PauseTorrent(PauseTorrentRequest) returns (PauseTorrentResponse);
+  // Resumes a torrent.
+  rpc ResumeTorrent(ResumeTorrentRequest) returns (ResumeTorrentResponse);
+  // Removes a torrent.
+  rpc RemoveTorrent(RemoveTorrentRequest) returns (RemoveTorrentResponse);
+  // Returns one torrent snapshot.
+  rpc GetTorrent(GetTorrentRequest) returns (GetTorrentResponse);
+  // Returns a filtered, sorted, paginated torrent list.
+  rpc ListTorrents(ListTorrentsRequest) returns (ListTorrentsResponse);
+  // Streams torrent deltas to the client.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// Request to add a torrent.
+message AddTorrentRequest {
+  // Display name.
+  string name = 1;
+  // Raw .torrent metainfo bytes.
+  bytes metainfo = 2;
+  // Save path on the daemon host.
+  string save_path = 3;
+  // Known size in bytes, or zero when unknown.
+  uint64 total_bytes = 4;
+}
+
+// Response with the engine-assigned torrent id.
+message AddTorrentResponse {
+  // Torrent id.
+  uint64 id = 1;
+}
+
+// Request to pause a torrent.
+message PauseTorrentRequest {
+  // Torrent id.
+  uint64 id = 1;
+}
+
+// Response of a successful pause.
+message PauseTorrentResponse {}
+
+// Request to resume a torrent.
+message ResumeTorrentRequest {
+  // Torrent id.
+  uint64 id = 1;
+}
+
+// Response of a successful resume.
+message ResumeTorrentResponse {}
+
+// Request to remove a torrent.
+message RemoveTorrentRequest {
+  // Torrent id.
+  uint64 id = 1;
+}
+
+// Response of a successful removal.
+message RemoveTorrentResponse {}
+
+// Request for one torrent snapshot.
+message GetTorrentRequest {
+  // Torrent id.
+  uint64 id = 1;
+}
+
+// Response with one torrent snapshot.
+message GetTorrentResponse {
+  // Torrent snapshot.
+  Torrent torrent = 1;
+}
+
+// Lifecycle state of a torrent.
+enum TorrentState {
+  // Unspecified state.
+  TORRENT_STATE_UNSPECIFIED = 0;
+  // Queued for the engine.
+  TORRENT_STATE_QUEUED = 1;
+  // Checking files or resume data.
+  TORRENT_STATE_CHECKING = 2;
+  // Downloading or fetching metadata.
+  TORRENT_STATE_DOWNLOADING = 3;
+  // Download finished; seeding.
+  TORRENT_STATE_SEEDING = 4;
+  // Paused.
+  TORRENT_STATE_PAUSED = 5;
+  // Engine error; see the `error` field for details.
+  TORRENT_STATE_ERROR = 6;
+}
+
+// Snapshot of one torrent.
+message Torrent {
+  // Torrent id.
+  uint64 id = 1;
+  // Display name.
+  string name = 2;
+  // Total size in bytes.
+  uint64 total_bytes = 3;
+  // Lifecycle state.
+  TorrentState state = 4;
+  // Completion ratio in 0.0..=1.0.
+  float progress = 5;
+  // Current download rate in bytes per second.
+  uint64 download_rate = 6;
+  // Current upload rate in bytes per second.
+  uint64 upload_rate = 7;
+  // Error message when the state is TORRENT_STATE_ERROR.
+  string error = 8;
+}
+
+// Sort key for the torrent list.
+enum SortField {
+  // Defaults to id.
+  SORT_FIELD_UNSPECIFIED = 0;
+  // Sort by torrent id.
+  SORT_FIELD_ID = 1;
+  // Sort by display name.
+  SORT_FIELD_NAME = 2;
+  // Sort by completion ratio.
+  SORT_FIELD_PROGRESS = 3;
+  // Sort by download rate.
+  SORT_FIELD_DOWNLOAD_RATE = 4;
+  // Sort by upload rate.
+  SORT_FIELD_UPLOAD_RATE = 5;
+}
+
+// Request for a filtered, sorted, paginated list.
+message ListTorrentsRequest {
+  // Case-insensitive substring filter on the name; empty means no filter.
+  string filter = 1;
+  // Sort key.
+  SortField sort = 2;
+  // Sort descending when true.
+  bool descending = 3;
+  // Number of matching torrents to skip.
+  uint32 offset = 4;
+  // Page size; zero means no limit.
+  uint32 limit = 5;
+}
+
+// One page of torrents plus the total match count.
+message ListTorrentsResponse {
+  // Torrents in this page.
+  repeated Torrent torrents = 1;
+  // Total number of torrents matching the query before paging.
+  uint32 total = 2;
+}
+
+// Request to start a delta stream.
+message WatchRequest {}
+
+// One delta from the daemon.
+message WatchResponse {
+  // The delta kind.
+  oneof event {
+    // A torrent was added.
+    Torrent added = 1;
+    // A torrent changed state.
+    StateChanged state_changed = 2;
+    // A torrent made progress.
+    Progress progress = 3;
+    // A torrent was removed.
+    Removed removed = 4;
+  }
+}
+
+// State change delta.
+message StateChanged {
+  // Torrent id.
+  uint64 id = 1;
+  // New state.
+  TorrentState state = 2;
+}
+
+// Progress delta.
+message Progress {
+  // Torrent id.
+  uint64 id = 1;
+  // Completion ratio in 0.0..=1.0.
+  float progress = 2;
+  // Current download rate in bytes per second.
+  uint64 download_rate = 3;
+  // Current upload rate in bytes per second.
+  uint64 upload_rate = 4;
+}
+
+// Removal delta.
+message Removed {
+  // Torrent id.
+  uint64 id = 1;
+}
