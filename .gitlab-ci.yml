@@ -1,0 +1,44 @@
+stages:
+  - quality
+  - sonar
+
+# SonarQube Community Build does not ship an active Rust analyzer. Generate
+# Clippy diagnostics and import them as Sonar generic issues instead.
+clippy-report:
+  stage: quality
+  image: rust:1.100-slim
+  variables:
+    CARGO_TERM_COLOR: never
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+        libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
+        libxrandr-dev libxi-dev python3
+    - rustup component add clippy
+  script:
+    - cargo clippy --workspace --all-targets --message-format=json > clippy.json
+    - python3 ci/clippy_to_sonar.py clippy.json sonar-issues.json
+  artifacts:
+    paths:
+      - sonar-issues.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+sonarqube:
+  stage: sonar
+  image: sonarsource/sonar-scanner-cli:latest
+  needs:
+    - clippy-report
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: sonarqube
+    paths:
+      - .sonar/cache
+  script:
+    - sonar-scanner -Dsonar.externalIssuesReportPaths=sonar-issues.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

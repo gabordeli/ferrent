@@ -3,3 +3,6 @@
 /.playwright-mcp/
 /crates/gui/spikes/*/target/
 /crates/gui/spikes/tauri-spike/gen/
+/.sonar/
+/clippy.json
+/sonar-issues.json
