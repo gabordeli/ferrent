@@ -31,6 +31,52 @@ A token a GUI `~/.config/ferrent/gui.toml` fájljában `0600` móddal van.
   --ca /var/lib/ferrent/tls-cert.pem --token 'change-me' list
 ```
 
+## Kipróbálás demo adatokkal
+
+A legegyszerűbb út a mock daemon: nem kell libtorrent, és 4 000 (vagy
+10 000) torrenttel indul.
+
+```bash
+cargo build --release -p ferrent-gui --example demo_server
+./target/release/examples/demo_server --torrents 4000 --port 50129 \
+  --data-dir /tmp/ferrent-demo
+
+# másik terminálban
+cargo build --release -p ferrent-cli -p ferrent-gui
+./target/release/ferrent-gui
+```
+
+A GUI profil mezői:
+
+- Server URL: `https://localhost:50129` (a tanúsítvány SAN-je `localhost`,
+  ezért `127.0.0.1` helyett ezt használd)
+- CA: `/tmp/ferrent-demo/tls-cert.pem`
+- API token: `secret`
+
+Első csatlakozáskor a fingerprint dialóguson kell jóváhagyni a daemont.
+Utána jön a virtualizált tábla; a szűrő, rendezés, Details panel és a
+jobb klikkes műveletek használhatók.
+
+CLI-vel ugyanez:
+
+```bash
+./target/release/ferrent-cli --server https://localhost:50129 \
+  --ca /tmp/ferrent-demo/tls-cert.pem --token secret --json list --limit 20
+```
+
+Valódi, perzisztens daemonhoz:
+
+```bash
+FERRENT_DATA_DIR=/tmp/ferrent-data FERRENT_TOKEN=secret \
+  FERRENT_BIND=127.0.0.1:50051 ./target/release/ferrentd
+```
+
+A GUI-hoz ilyenkor `https://localhost:50051` és
+`/tmp/ferrent-data/tls-cert.pem` kell. A `.deb`-et a
+`cargo deb -p ferrent-daemon --features libtorrent` állítja elő; a
+telepített változat configja `/etc/ferrent/config.toml`, a tokenje
+`/etc/ferrent/token`.
+
 ## Jelenlegi állapot (v0.1.0 / MVP)
 
 - 4 000 torrent betölthető; a state mirror és a gRPC API a 4 000 soros
