@@ -221,6 +221,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     descending: desc,
                     offset,
                     limit,
+                    state_filter: 0,
                 })
                 .await?
                 .into_inner();
