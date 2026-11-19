@@ -22,6 +22,15 @@ path = "src/main.rs"
 name = "crash_writer"
 path = "src/bin/crash_writer.rs"
 
+[[example]]
+name = "mvp_prepare"
+path = "examples/mvp_prepare.rs"
+required-features = ["libtorrent"]
+
+[[example]]
+name = "rpc_bench"
+path = "examples/rpc_bench.rs"
+
 [dependencies]
 arc-swap = "1"
 ferrent-engine = { path = "../engine" }

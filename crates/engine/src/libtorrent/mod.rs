@@ -203,7 +203,11 @@ fn run_worker(
     events: broadcast::Sender<EngineEvent>,
     settings: EngineSettings,
 ) {
-    let mut session = new_session(settings.download_rate_limit, settings.upload_rate_limit);
+    let mut session = new_session(
+        settings.download_rate_limit,
+        settings.upload_rate_limit,
+        settings.seed_mode,
+    );
     let mut last_progress = Instant::now();
 
     loop {

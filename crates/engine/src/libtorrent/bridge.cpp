@@ -83,11 +83,13 @@ struct Session::Impl {
     std::map<uint64_t, lt::torrent_handle> handles;
     std::map<lt::sha1_hash, uint64_t> ids;
     std::map<uint64_t, std::vector<char>> resume_data;
+    bool seed_mode;
     uint64_t next_id = 1;
     std::string last_error;
 
-    Impl(uint64_t download_rate_limit, uint64_t upload_rate_limit)
-        : session(make_settings(download_rate_limit, upload_rate_limit)) {}
+    Impl(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode)
+        : session(make_settings(download_rate_limit, upload_rate_limit)),
+          seed_mode(seed_mode) {}
 
     static lt::settings_pack make_settings(uint64_t download_rate_limit,
                                            uint64_t upload_rate_limit) {
@@ -98,6 +100,10 @@ struct Session::Impl {
                              lt::alert_category::storage));
         pack.set_int(lt::settings_pack::download_rate_limit, clamp_rate(download_rate_limit));
         pack.set_int(lt::settings_pack::upload_rate_limit, clamp_rate(upload_rate_limit));
+        pack.set_int(lt::settings_pack::active_limit, 5000);
+        pack.set_int(lt::settings_pack::active_seeds, 5000);
+        pack.set_int(lt::settings_pack::active_downloads, 5000);
+        pack.set_int(lt::settings_pack::active_checking, 5000);
         return pack;
     }
 
@@ -127,8 +133,8 @@ struct Session::Impl {
     }
 };
 
-Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit)
-    : impl_(std::make_unique<Impl>(download_rate_limit, upload_rate_limit)) {}
+Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode)
+    : impl_(std::make_unique<Impl>(download_rate_limit, upload_rate_limit, seed_mode)) {}
 
 Session::~Session() = default;
 
@@ -160,6 +166,9 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
     }
     params.ti = std::move(info);
     params.save_path = static_cast<std::string>(save_path);
+    if (impl_->seed_mode) {
+        params.flags |= lt::torrent_flags::seed_mode;
+    }
 
     auto handle = impl_->session.add_torrent(params, ec);
     if (ec) {
@@ -331,8 +340,8 @@ rust::String Session::last_error() const {
 }
 
 std::unique_ptr<Session> new_session(uint64_t download_rate_limit,
-                                     uint64_t upload_rate_limit) {
-    return std::make_unique<Session>(download_rate_limit, upload_rate_limit);
+                                     uint64_t upload_rate_limit, bool seed_mode) {
+    return std::make_unique<Session>(download_rate_limit, upload_rate_limit, seed_mode);
 }
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload) {

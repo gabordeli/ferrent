@@ -39,30 +39,39 @@ impl PersistedTorrent {
     }
 }
 
-/// Saves (or updates) one torrent record.
+/// Saves one torrent record.
 pub fn save_torrent(
     store: &mut dyn StateStore,
     torrent: &PersistedTorrent,
 ) -> Result<(), StoreError> {
-    let mut ops = vec![
-        StoreOp::Put {
+    save_torrents(store, std::slice::from_ref(torrent))
+}
+
+/// Saves several torrent records in one transaction.
+pub fn save_torrents(
+    store: &mut dyn StateStore,
+    torrents: &[PersistedTorrent],
+) -> Result<(), StoreError> {
+    let mut ops = Vec::with_capacity(torrents.len() * 4);
+    for torrent in torrents {
+        ops.push(StoreOp::Put {
             key: key(torrent.id, NAME),
             value: torrent.name.as_bytes().to_vec(),
-        },
-        StoreOp::Put {
+        });
+        ops.push(StoreOp::Put {
             key: key(torrent.id, SAVE_PATH),
             value: torrent.save_path.to_string_lossy().as_bytes().to_vec(),
-        },
-        StoreOp::Put {
+        });
+        ops.push(StoreOp::Put {
             key: key(torrent.id, METAINFO),
             value: torrent.metainfo.clone(),
-        },
-    ];
-    if let Some(data) = &torrent.resume_data {
-        ops.push(StoreOp::Put {
-            key: key(torrent.id, FAST_RESUME),
-            value: data.clone(),
         });
+        if let Some(data) = &torrent.resume_data {
+            ops.push(StoreOp::Put {
+                key: key(torrent.id, FAST_RESUME),
+                value: data.clone(),
+            });
+        }
     }
     store.batch(ops)
 }

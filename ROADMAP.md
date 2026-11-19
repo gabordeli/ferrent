@@ -240,7 +240,7 @@
 - [ ] GUI másik gépről TLS-en csatlakozik.
 - [ ] Ismert korlátok dokumentálva; `v0.1.0` tag.
 
-**Files:** `docs/measurements/mvp.md`, `README.md`
+**Files:** `docs/measurements/mvp.md`, `README.md`, `crates/daemon/examples/mvp_prepare.rs`, `crates/daemon/examples/rpc_bench.rs`, `ci/soak.sh`
 
 ---
 

@@ -1,11 +1,12 @@
 //! `ferrentd`: TLS gRPC daemon with persisted torrent state.
 
+use std::collections::BTreeSet;
 use std::env;
 use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ferrent_daemon::persist;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
@@ -21,6 +22,7 @@ use tokio::sync::broadcast;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let started = Instant::now();
     let data_dir = env::var_os("FERRENT_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("./ferrent-data"));
@@ -31,6 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
     let store = RedbStore::open(data_dir.join("state.redb"))?;
     let persisted = persist::load_torrents(&store)?;
+    let restored_count = persisted.len();
 
     #[cfg(feature = "libtorrent")]
     let mut engine: Box<dyn TorrentEngine> =
@@ -56,6 +59,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&bind).await?;
     let local = listener.local_addr()?;
     println!("ferrentd listening on https://{local}");
+    println!("restored_torrents={restored_count}");
+    println!("startup_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
     println!("TLS fingerprint: {}", tls.fingerprint);
     println!(
         "CA certificate: {}",
@@ -104,18 +109,36 @@ async fn save_fastresumes(state: Arc<AppState>) {
         for id in &ids {
             let _ = engine.request_resume_data(*id);
         }
-        std::thread::sleep(Duration::from_millis(500));
 
-        let mut entries = Vec::new();
-        for id in &ids {
-            if let Ok(Some(data)) = engine.take_resume_data(*id) {
-                entries.push((*id, data));
+        let mut remaining: BTreeSet<u64> = ids.iter().copied().collect();
+        let mut entries = Vec::with_capacity(ids.len());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !remaining.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            for id in remaining.clone() {
+                if let Ok(Some(data)) = engine.take_resume_data(id) {
+                    remaining.remove(&id);
+                    entries.push((id, data));
+                }
             }
+        }
+        if !remaining.is_empty() {
+            eprintln!(
+                "fastresume missing for {} of {} torrents",
+                remaining.len(),
+                ids.len()
+            );
         }
 
         let mut store = store.lock().expect("state store mutex poisoned");
         if let Err(error) = persist::save_fastresumes(&mut **store, &entries) {
             eprintln!("failed to save fastresume: {error}");
+        } else {
+            println!(
+                "saved fastresume for {} of {} torrents",
+                entries.len(),
+                ids.len()
+            );
         }
     })
     .await;

@@ -26,7 +26,11 @@ pub(crate) mod ffi {
 
         type Session;
 
-        fn new_session(download_rate_limit: u64, upload_rate_limit: u64) -> UniquePtr<Session>;
+        fn new_session(
+            download_rate_limit: u64,
+            upload_rate_limit: u64,
+            seed_mode: bool,
+        ) -> UniquePtr<Session>;
         fn add_torrent(
             self: Pin<&mut Session>,
             metainfo: &[u8],

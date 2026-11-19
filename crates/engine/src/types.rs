@@ -71,6 +71,8 @@ pub struct EngineSettings {
     pub download_rate_limit: u64,
     /// Upload limit in bytes per second.
     pub upload_rate_limit: u64,
+    /// Treat newly added torrents as complete without an initial file check.
+    pub seed_mode: bool,
 }
 
 /// Delta emitted by the engine. Consumers apply these to their state mirror.

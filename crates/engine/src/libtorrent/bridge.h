@@ -11,7 +11,7 @@ struct FfiEvent;
 
 class Session {
   public:
-    Session(uint64_t download_rate_limit, uint64_t upload_rate_limit);
+    Session(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode);
     ~Session();
 
     Session(const Session &) = delete;
@@ -43,6 +43,7 @@ class Session {
     std::unique_ptr<Impl> impl_;
 };
 
-std::unique_ptr<Session> new_session(uint64_t download_rate_limit, uint64_t upload_rate_limit);
+std::unique_ptr<Session> new_session(uint64_t download_rate_limit, uint64_t upload_rate_limit,
+                                     bool seed_mode);
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload);
