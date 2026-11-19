@@ -100,10 +100,12 @@ struct Session::Impl {
                              lt::alert_category::storage));
         pack.set_int(lt::settings_pack::download_rate_limit, clamp_rate(download_rate_limit));
         pack.set_int(lt::settings_pack::upload_rate_limit, clamp_rate(upload_rate_limit));
-        pack.set_int(lt::settings_pack::active_limit, 5000);
-        pack.set_int(lt::settings_pack::active_seeds, 5000);
-        pack.set_int(lt::settings_pack::active_downloads, 5000);
-        pack.set_int(lt::settings_pack::active_checking, 5000);
+        // Head-room for the 10 000-torrent soak: libtorrent queues anything above
+        // active_limit, and a queued torrent never reports as seeding.
+        pack.set_int(lt::settings_pack::active_limit, 20000);
+        pack.set_int(lt::settings_pack::active_seeds, 20000);
+        pack.set_int(lt::settings_pack::active_downloads, 20000);
+        pack.set_int(lt::settings_pack::active_checking, 20000);
         return pack;
     }
 

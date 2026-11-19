@@ -139,6 +139,7 @@ enum Message {
     CloseServers,
     ServerStatus(String, Result<ServerStatus, String>),
     SelectServer(usize),
+    ConnectServer(String),
     DeleteServer(String),
     NewServer,
     TestServer,
@@ -421,6 +422,7 @@ impl App {
                 }
                 Task::none()
             }
+            Message::ConnectServer(name) => self.connect_server(&name),
             Message::DeleteServer(name) => self.delete_server(&name),
             Message::NewServer => {
                 self.fields = Fields::default();
@@ -500,6 +502,30 @@ impl App {
             return Task::none();
         }
 
+        self.start_profile_connection(profile)
+    }
+
+    fn connect_server(&mut self, name: &str) -> Task<Message> {
+        let Some(profile) = self
+            .config
+            .profiles
+            .iter()
+            .find(|profile| profile.name == name)
+            .cloned()
+        else {
+            self.server_message = format!("Unknown server {name}");
+            return Task::none();
+        };
+        self.config.active = Some(profile.name.clone());
+        if let Err(error) = self.config.save(&self.config_path) {
+            self.server_message = format!("Cannot save config: {error}");
+        }
+        self.servers_open = false;
+        self.fields = Fields::from_profile(&profile);
+        self.start_profile_connection(profile)
+    }
+
+    fn start_profile_connection(&mut self, profile: ServerProfile) -> Task<Message> {
         let config = ServerConfig::from(&profile);
         let fingerprint = match connection::fingerprint(&config) {
             Ok(fingerprint) => fingerprint,
@@ -1371,6 +1397,7 @@ impl App {
     }
 
     fn server_manager_view(&self) -> Element<'_, Message> {
+        let active = self.config.active.clone();
         let rows: Vec<Element<Message>> = self
             .server_rows
             .iter()
@@ -1390,13 +1417,21 @@ impl App {
                     (None, Some(error)) => ("error".to_owned(), error.clone()),
                     (None, None) => ("checking...".to_owned(), String::new()),
                 };
+                let is_active = active.as_deref() == Some(row.name.as_str());
+                let title = if is_active {
+                    format!("{} · active", row.name)
+                } else {
+                    row.name.clone()
+                };
                 row![
-                    column![text(row.name.clone()).size(14), text(row.server.clone()).size(11)]
+                    column![text(title).size(14), text(row.server.clone()).size(11)]
                         .width(Length::Fixed(250.0))
                         .spacing(2),
                     column![text(state).size(12), text(detail).size(12)]
                         .width(Length::Fill)
                         .spacing(2),
+                    button(if is_active { "Reconnect" } else { "Connect" })
+                        .on_press(Message::ConnectServer(row.name.clone())),
                     button("Edit").on_press(Message::SelectServer(index)),
                     button("Delete").on_press(Message::DeleteServer(row.name.clone())),
                 ]
