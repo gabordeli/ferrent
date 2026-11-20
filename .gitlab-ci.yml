@@ -1,8 +1,27 @@
+spec:
+  inputs:
+    release_type:
+      default: patch
+      options:
+        - patch
+        - minor
+        - major
+      description: "Release version bump, used when release_version is empty."
+    release_version:
+      default: ""
+      description: "Explicit version (0.1.1 or 0.1.1-rc1); overrides release_type."
+---
+
 stages:
   - cleanup
   - quality
   - sonar
+  - version
   - release
+
+variables:
+  RELEASE_TYPE: "$[[ inputs.release_type ]]"
+  RELEASE_VERSION: "$[[ inputs.release_version ]]"
 
 # The project runner is a shell executor, so run the tools in Docker explicitly.
 # A previous Docker run can leave root-owned build files; the cleanup job fixes
@@ -30,7 +49,7 @@ clippy-report:
         apt-get update -qq &&
         apt-get install -y -qq --no-install-recommends
           libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
-          libxrandr-dev libxi-dev libssl-dev pkg-config python3 &&
+          libxrandr-dev libxi-dev libglib2.0-dev libgtk-3-dev libssl-dev pkg-config python3 &&
         rustup component add clippy &&
         cargo clippy --workspace --all-targets --message-format=json > /tmp/clippy.json &&
         python3 ci/clippy_to_sonar.py /tmp/clippy.json /tmp/sonar-issues.json &&
@@ -59,21 +78,41 @@ sonarqube:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
-# Tag-driven release: builds both architectures and publishes them to the
-# project's Debian Package Registry (Packages & Registries in the UI). The tag
-# must match the Cargo.toml version; only the Debian rendering differs
-# (v0.1.0-rc1 -> 0.1.0~rc1-1). Verification (systemd containers, qemu) runs
-# locally and in the GitHub workflow, not here.
-release-deb:
-  stage: release
+# Manual release from the GitLab UI ("Run pipeline" on main): the version comes
+# from release_version (or a patch/minor/major bump), the job bumps Cargo.toml,
+# commits and tags it, and the build below works from that commit.
+release-version:
+  stage: version
   needs: []
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - bash .gitlab/release-version.sh
+  artifacts:
+    reports:
+      dotenv: tmp/release.env
+    paths:
+      - tmp/release.env
+
+# Builds both architectures and publishes them to the Debian Package Registry.
+# A missing GITLAB_TOKEN is fine for a plain tag pipeline (CI_JOB_TOKEN uploads),
+# but the manual release needs it for the commit/tag push.
+release-deb:
+  stage: release
+  needs:
+    - job: release-version
+      artifacts: true
+      optional: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]/'
   script:
     - packaging/debian/version.sh --self-test
-    - packaging/debian/version.sh "$CI_COMMIT_TAG"
-    - TAG="$CI_COMMIT_TAG" packaging/debian/build.sh debian:12 amd64
-    - TAG="$CI_COMMIT_TAG" packaging/debian/build.sh debian:12 arm64
+    - if [ -n "${RELEASE_COMMIT:-}" ]; then git fetch -q origin && git checkout -q "$RELEASE_COMMIT"; fi
+    - tag="${RELEASE_TAG:-$CI_COMMIT_TAG}"
+    - packaging/debian/version.sh "$tag"
+    - TAG="$tag" packaging/debian/build.sh debian:12 amd64
+    - TAG="$tag" packaging/debian/build.sh debian:12 arm64
     - packaging/apt/publish-gitlab.sh target/debian-dist
   artifacts:
     paths:
