@@ -21,7 +21,7 @@ component=${COMPONENT:-main}
 
 if [ -n "${CI_JOB_TOKEN:-}" ]; then
     auth=(-u "gitlab-ci-token:$CI_JOB_TOKEN")
-    headers=()
+    headers=(--header "JOB-TOKEN: $CI_JOB_TOKEN")
     who="job token"
 else
     : "${GITLAB_TOKEN:?set GITLAB_TOKEN or run inside CI}"
