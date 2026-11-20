@@ -86,31 +86,11 @@ A repó felépítése és a kulcs rotációja: `packaging/apt/README.md`.
 
 ## GitLab Package Registry (saját GitLab)
 
-A saját GitLabon (`gabor/ferrent`, project 56) a csomagok a **Debian Package
-Registry**-ben is megjelennek (Packages & Registries a UI-ban). A repó privát,
-ezért az apt-nak tokent kell adni.
+A kiadott `.deb`-ek a saját GitLabon, a **Packages & Registries** alatt is
+megjelennek (`ferrentd`, verziónként, arch-onként külön fájl). Ezen a GitLabon
+(19.5.5) a Debian registry API-route-jai nincsenek meg (`/debian_distributions`
+→ 404, mérve), ezért a publikálás a **generic registry**-be megy; az apt
+telepítés továbbra is az aláírt repóból (`packaging/apt/build-repo.sh`) megy.
 
-```bash
-# 1. kulcs (a GitLab a saját kulcsával írja alá a Release-t)
-sudo install -d -m 0755 /etc/apt/keyrings
-sudo curl -fsSL --header "PRIVATE-TOKEN: $TOKEN" \
-  -o /etc/apt/keyrings/ferrent-gitlab.asc \
-  https://cirice-gitlab.ddns.net/api/v4/projects/56/debian_distributions/bookworm/key.asc
-
-# 2. forrás (bookworm / trixie / noble közül a gépnek megfelelő)
-echo 'deb [signed-by=/etc/apt/keyrings/ferrent-gitlab.asc] https://cirice-gitlab.ddns.net/api/v4/projects/56/packages/debian bookworm main' \
-  | sudo tee /etc/apt/sources.list.d/ferrent.list
-
-# 3. hitelesítés (PAT vagy deploy token)
-sudo tee /etc/apt/auth.conf.d/ferrent.conf >/dev/null <<AUTH
-machine cirice-gitlab.ddns.net login <user> password <token>
-AUTH
-sudo chmod 600 /etc/apt/auth.conf.d/ferrent.conf
-
-sudo apt update && sudo apt install ferrentd
-```
-
-A registry a csomagot **három kódnévre** tölti fel (`bookworm`, `trixie`,
-`noble`) — ugyanaz a fájl, csak a registry-útvonal más. A GitHub Pages-es
-(nyilvános, token nélküli) út változatlanul a `docs/apt-install.md` első
-fele; a kettő ugyanazt a `.deb`-et szolgálja ki.
+A registry-ből kézzel:
+`https://cirice-gitlab.ddns.net/gabor/ferrent/-/packages` (tokenes böngésző).
