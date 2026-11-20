@@ -20,6 +20,8 @@ case "$version" in *'$[['*) version="" ;; esac
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
+git fetch -q --tags origin || true
+
 if [ -n "$version" ]; then
     version=${version#v}
 else
