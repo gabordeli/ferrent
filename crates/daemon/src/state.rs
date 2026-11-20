@@ -254,6 +254,27 @@ impl StateMirror {
             .collect()
     }
 
+    /// Replaces the recorded save path of one torrent.
+    ///
+    /// The engine reports a storage move only as a state change, so the daemon
+    /// records the new path itself once the move succeeded.
+    pub fn set_save_path(&self, id: TorrentId, path: &std::path::Path) -> bool {
+        let changed = {
+            let mut data = self.data.lock().expect("state mirror poisoned");
+            if let Some(status) = data.torrents.get_mut(&id) {
+                Arc::make_mut(status).save_path = path.to_owned();
+                data.dirty.insert(id);
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
+            self.snapshot_dirty.store(true, Ordering::Release);
+        }
+        changed
+    }
+
     /// Returns a torrent snapshot.
     #[must_use]
     pub fn get(&self, id: TorrentId) -> Option<TorrentStatus> {

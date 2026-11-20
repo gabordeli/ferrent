@@ -1108,7 +1108,7 @@ pub async fn serve(
     state: Arc<AppState>,
     tls: &TlsMaterial,
 ) -> Result<(), tonic::transport::Error> {
-    spawn_engine_watcher(Arc::clone(&state));
+    let _engine_watcher = spawn_engine_watcher(Arc::clone(&state));
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
@@ -1124,8 +1124,9 @@ pub async fn serve(
         .await
 }
 
-/// Moves finished torrents to their label's `move_completed_path`.
-fn spawn_engine_watcher(state: Arc<AppState>) {
+/// Journals `Finished`/`Error` events and moves finished torrents to their
+/// label's `move_completed_path`.
+pub fn spawn_engine_watcher(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut events = state.watch.subscribe();
         loop {
@@ -1158,13 +1159,26 @@ fn spawn_engine_watcher(state: Arc<AppState>) {
                         continue;
                     }
                     let engine = Arc::clone(&state.engine);
+                    let destination = target.clone();
                     let result = tokio::task::spawn_blocking(move || {
                         let mut engine = engine.lock().expect("engine mutex poisoned");
-                        engine.move_storage(id, target)
+                        engine.move_storage(id, destination)
                     })
                     .await;
                     match result {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            state.mirror.set_save_path(id, &target);
+                            let store = Arc::clone(&state.store);
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let mut store = store.lock().expect("state store mutex poisoned");
+                                if let Err(error) =
+                                    crate::persist::save_torrent_path(&mut **store, id, &target)
+                                {
+                                    eprintln!("save path persist failed for torrent {id}: {error}");
+                                }
+                            })
+                            .await;
+                        }
                         Ok(Err(error)) => eprintln!("label move failed for torrent {id}: {error}"),
                         Err(error) => eprintln!("label move task failed for torrent {id}: {error}"),
                     }
@@ -1192,7 +1206,7 @@ fn spawn_engine_watcher(state: Arc<AppState>) {
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
-    });
+    })
 }
 
 fn engine_status(error: EngineError) -> Status {
@@ -1532,7 +1546,7 @@ mod tests {
             PathBuf::from("."),
             PathBuf::from("/tmp"),
         ));
-        spawn_engine_watcher(Arc::clone(&state));
+        let _watcher = spawn_engine_watcher(Arc::clone(&state));
         tokio::time::sleep(Duration::from_millis(50)).await;
         state
             .watch

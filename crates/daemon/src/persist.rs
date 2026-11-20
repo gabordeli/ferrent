@@ -155,6 +155,18 @@ pub fn save_torrent_label(
     }])
 }
 
+/// Updates only the stored save path of one torrent (label move on complete).
+pub fn save_torrent_path(
+    store: &mut dyn StateStore,
+    id: TorrentId,
+    path: &std::path::Path,
+) -> Result<(), StoreError> {
+    store.batch(vec![StoreOp::Put {
+        key: key(id, SAVE_PATH),
+        value: path.to_string_lossy().into_owned().into_bytes(),
+    }])
+}
+
 /// Deletes all stored keys for one torrent.
 pub fn remove_torrent(store: &mut dyn StateStore, id: TorrentId) -> Result<(), StoreError> {
     let ops = [NAME, SAVE_PATH, METAINFO, FAST_RESUME, PAUSED, LABEL]

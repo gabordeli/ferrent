@@ -485,12 +485,12 @@
 
 **Acceptance**
 
-- [ ] watch dir → add → label → limit → move → finished hook → webhook E2E; Telegram mockkal.
-- [ ] restart közben nincs elveszett/duplázott add, hook vagy notification.
-- [ ] config reload frissíti a futó szabályokat; hibás config → régi marad.
-- [ ] mérés: 100 fájl, 1 000 torrent; `docs/measurements/automation.md`.
+- [x] watch dir → add → label → limit → move → finished hook → webhook E2E; Telegram mockkal (fake HTTP szerver, `tests/automation_e2e.rs`).
+- [x] restart közben nincs elveszett/duplázott add, hook vagy notification (két runtime-mal; journal + outbox + infohash dedupe).
+- [x] config reload frissíti a futó szabályokat; hibás config → régi marad.
+- [x] mérés: 100 fájl, 1 000 torrent; `docs/measurements/automation.md` (add pass 10,1–14,4 ms release).
 
-**Files:** `tests/automation_e2e.rs`, `tests/notify_e2e.rs`, `docs/measurements/automation.md`
+**Files:** `crates/daemon/tests/automation_e2e.rs`, `docs/measurements/automation.md`; a move-path javítás: `crates/daemon/src/state.rs`, `crates/daemon/src/persist.rs`, `crates/daemon/src/rpc/mod.rs`
 
 ---
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T5 kész; a következő szelet **M5-T6 Automatizálás acceptance**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); a következő mérföldkő az **M6 DiskGuard**, azon belül az M6-T1 storage model.
