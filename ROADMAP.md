@@ -683,10 +683,11 @@
 
 **Acceptance**
 
-- [ ] `cargo deb -p ferrent-daemon` előállítja a binárist, unitot, configot, man page-et.
-- [ ] Friss Debian 12-n telepítés után `systemctl start ferrentd` működik; a `ferrent` user létrejön.
-- [ ] `apt remove` megtartja a `/var/lib/ferrent`-et; `purge` törli (dokumentálva).
-- [ ] A csomagban nincs secret; a config jogosultsága 0640, tulajdonos `root:ferrent`.
+- [x] `cargo deb -p ferrent-daemon` előállítja a binárist, unitot, configot, man page-et.
+- [x] Friss Debian 12-n telepítés után `systemctl start ferrentd` működik; a `ferrent` user létrejön.
+- [x] `apt remove` megtartja a `/var/lib/ferrent`-et; `purge` törli (dokumentálva).
+- [x] A csomagban nincs secret; a config jogosultsága 0640, tulajdonos `root:ferrent`.
+- [x] Ismételhető ellenőrzés: `packaging/debian/container-test.sh` (31 assert, Debian 12 és 13, `docs/measurements/packaging.md`). A `$auto` miatt a `.deb`-et a cél-suite-ban kell építeni (bookworm recipe a `packaging/debian/README.md`-ben; a build konténer a T2).
 
 **Files:** `packaging/debian/`, `crates/daemon/Cargo.toml` (`[package.metadata.deb]`)
 
@@ -853,4 +854,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T4 kész** LAN-módban (gateway + auth + SSE + REST + SPA + HTTPS + unit/doksi; a publikus reverse proxy későbbi döntés).
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T4 kész** LAN-módban (gateway + auth + SSE + REST + SPA + HTTPS + unit/doksi; a publikus reverse proxy későbbi döntés). **M3-T1 kész**: `.deb` + unit + man page, 31 assertes konténer-teszt Debian 12/13-on (`docs/measurements/packaging.md`).
