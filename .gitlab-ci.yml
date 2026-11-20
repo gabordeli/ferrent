@@ -124,11 +124,21 @@ probe-debian-api:
   rules:
     - if: '$CI_COMMIT_BRANCH'
   script:
-    - echo "API=$CI_API_V4_URL PROJECT=$CI_PROJECT_ID"
+    - echo "API=$CI_API_V4_URL PROJECT=$CI_PROJECT_ID VERSION=$(gitlab-rails --version 2>/dev/null || true)"
     - |
-      for u in "$CI_API_V4_URL/projects/$CI_PROJECT_ID/debian_distributions" \
-               "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/debian"; do
-        echo "== $u"
-        curl -sS -o /tmp/out -w 'HTTP %{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" "$u"
-        head -c 300 /tmp/out; echo
+      for u in \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/debian_distributions" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/debian/distributions" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/debian_distributions/bookworm/key.asc" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/debian/dists/bookworm/Release"; do
+        printf '== %s -> ' "$u"
+        curl -sS -o /tmp/out -w '%{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" "$u"
+        head -c 160 /tmp/out; echo
       done
+    - printf 'dummy\n' > /tmp/dummy_0.1.0-1_amd64.deb
+    - |
+      printf '== upload dummy -> '
+      curl -sS -o /tmp/up -w '%{http_code}\n' -u "gitlab-ci-token:$CI_JOB_TOKEN" \
+        --upload-file /tmp/dummy_0.1.0-1_amd64.deb \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/debian/dummy_0.1.0-1_amd64.deb?distribution=bookworm&component=main"
+      head -c 300 /tmp/up; echo
