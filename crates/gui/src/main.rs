@@ -3151,6 +3151,8 @@ impl App {
                     hook_event_toggle(HookEvent::Finished, row.event),
                     hook_event_toggle(HookEvent::Removed, row.event),
                     hook_event_toggle(HookEvent::Error, row.event),
+                    hook_event_toggle(HookEvent::DiskLow, row.event),
+                    hook_event_toggle(HookEvent::DiskOk, row.event),
                 ]
                 .spacing(6),
             ]

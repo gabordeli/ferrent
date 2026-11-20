@@ -4,6 +4,7 @@
 //! torrents into the label's *library* folder. Both folders live in the same
 //! zone list, so the completion move stays a rename on one filesystem.
 
+pub mod guard;
 pub mod moves;
 pub mod paths;
 pub mod storage;

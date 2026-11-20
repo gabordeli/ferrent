@@ -8,14 +8,17 @@ use std::sync::Arc;
 
 use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::control::TorrentControl;
+use ferrent_daemon::diskguard::guard::Level;
 use ferrent_daemon::diskguard::moves::{MoveOutcome, RETRY_SECS};
-use ferrent_daemon::diskguard::{self, Zone, ZoneError};
+use ferrent_daemon::diskguard::{self, DiskReport, Zone, ZoneError};
 use ferrent_daemon::events::EventKind;
 use ferrent_daemon::labels::{Label, LabelState};
 use ferrent_daemon::rpc::AppState;
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::MemoryStore;
-use ferrent_engine::{AddTorrent, MockEngine, TorrentEngine, TorrentSource};
+use ferrent_engine::{
+    AddTorrent, EngineEvent, MockEngine, TorrentEngine, TorrentSource, TorrentState,
+};
 
 fn base(tag: &str) -> PathBuf {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -369,4 +372,175 @@ async fn a_label_change_waits_for_the_next_completion() {
     assert_eq!(fixture.save_path(), series);
 
     let _ = std::fs::remove_dir_all(&holder);
+}
+
+#[tokio::test]
+async fn the_guard_pauses_writers_and_resumes_them_after_recovery() {
+    let base = base("guard");
+    let mut engine = MockEngine::new();
+    let name = |suffix: &str| format!("magnet:?xt=urn:btih:{suffix}");
+    let downloading = engine
+        .add_torrent(AddTorrent {
+            name: "download.mkv".to_owned(),
+            total_bytes: 100,
+            source: TorrentSource::Magnet(name("download")),
+            save_path: base.clone(),
+            resume_data: None,
+        })
+        .expect("add");
+    engine.advance(downloading, 0.5, 1, 0).expect("advance");
+    let seeding = engine
+        .add_torrent(AddTorrent {
+            name: "seed.mkv".to_owned(),
+            total_bytes: 100,
+            source: TorrentSource::Magnet(name("seed")),
+            save_path: base.clone(),
+            resume_data: None,
+        })
+        .expect("add");
+    engine.advance(seeding, 1.0, 0, 0).expect("advance");
+    let manual = engine
+        .add_torrent(AddTorrent {
+            name: "manual.mkv".to_owned(),
+            total_bytes: 100,
+            source: TorrentSource::Magnet(name("manual")),
+            save_path: base.clone(),
+            resume_data: None,
+        })
+        .expect("add");
+    engine.advance(manual, 0.5, 1, 0).expect("advance");
+    engine.pause(manual).expect("pause");
+    // A second filesystem: its downloads must not be touched.
+    let other = std::path::Path::new("/tmp").join(format!("ferrent-guard-{}", std::process::id()));
+    std::fs::create_dir_all(&other).expect("other");
+    let elsewhere = engine
+        .add_torrent(AddTorrent {
+            name: "elsewhere.mkv".to_owned(),
+            total_bytes: 100,
+            source: TorrentSource::Magnet(name("elsewhere")),
+            save_path: other.clone(),
+            resume_data: None,
+        })
+        .expect("add");
+    engine.advance(elsewhere, 0.5, 1, 0).expect("advance");
+
+    let mirror = Arc::new(StateMirror::new());
+    for status in engine.list() {
+        mirror.apply(EngineEvent::Added(status));
+    }
+    mirror.publish();
+
+    let mut control = TorrentControl::default();
+    assert!(control.set_user(manual, true));
+
+    let (watch, _) = tokio::sync::broadcast::channel(8);
+    let state = Arc::new(AppState::new(
+        Box::new(engine),
+        Arc::clone(&mirror),
+        watch,
+        Box::new(MemoryStore::new()),
+        ConfigStore::default(),
+        control,
+        LabelState::default(),
+        "token",
+        base.clone(),
+    ));
+    let disk = |free: u64| DiskReport {
+        mount: base.clone(),
+        device: "test".to_owned(),
+        fstype: "ext4".to_owned(),
+        total: 1_000,
+        free,
+        used: 1_000 - free,
+        low: false,
+        zones: Vec::new(),
+        labels: Vec::new(),
+        torrents: 3,
+    };
+    let report = |free: u64| diskguard::StorageReport {
+        disks: vec![disk(free)],
+        unknown: Vec::new(),
+    };
+
+    let low = report(10);
+    let mut second = low.disks[0].clone();
+    second.mount = other.clone();
+    second.free = 900;
+    second.used = 100;
+    let mut low = low;
+    low.disks.push(second);
+    let pass = state
+        .apply_levels(
+            &low,
+            &[
+                (base.clone(), Level::Low, true),
+                (other.clone(), Level::Ok, false),
+            ],
+        )
+        .await;
+    assert_eq!(pass.paused, 1, "{pass:?}");
+    assert_eq!(pass.transitions.len(), 1);
+    let state_of = |id: u64| {
+        state
+            .engine
+            .lock()
+            .expect("engine")
+            .status(id)
+            .expect("status")
+            .state
+    };
+    assert_eq!(state_of(downloading), TorrentState::Paused);
+    assert_eq!(state_of(seeding), TorrentState::Seeding, "seeding is kept");
+    assert_eq!(state_of(manual), TorrentState::Paused);
+    assert!(
+        state
+            .control
+            .lock()
+            .expect("control")
+            .user_paused()
+            .any(|id| id == manual)
+    );
+
+    let events = ferrent_daemon::hooks::pending_events(Arc::clone(&state.store))
+        .await
+        .expect("pending");
+    assert!(
+        events.iter().any(|event| event.kind == EventKind::DiskLow),
+        "{events:?}"
+    );
+
+    let ok = report(900);
+    let mut ok = ok;
+    let mut second = ok.disks[0].clone();
+    second.mount = other.clone();
+    ok.disks.push(second);
+    let pass = state
+        .apply_levels(
+            &ok,
+            &[(base.clone(), Level::Ok, true), (other, Level::Ok, false)],
+        )
+        .await;
+    assert_eq!(pass.resumed, 1, "{pass:?}");
+    assert_eq!(state_of(downloading), TorrentState::Downloading);
+    assert_eq!(
+        state_of(manual),
+        TorrentState::Paused,
+        "the manual pause is not cleared"
+    );
+    assert!(
+        state
+            .control
+            .lock()
+            .expect("control")
+            .user_paused()
+            .any(|id| id == manual)
+    );
+
+    let events = ferrent_daemon::hooks::pending_events(Arc::clone(&state.store))
+        .await
+        .expect("pending");
+    assert!(
+        events.iter().any(|event| event.kind == EventKind::DiskOk),
+        "{events:?}"
+    );
 }

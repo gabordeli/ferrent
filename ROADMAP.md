@@ -548,13 +548,13 @@
 
 **Acceptance**
 
-- [ ] low = `free < min`; ok = `free >= min + margin`; csak tranziens emitál.
-- [ ] pause csak Downloading/Queued/Checking/Moving; seed nem; kézi pause-t nem ír felül.
-- [ ] `DiskLow`/`DiskOk` notification a M5 csatornákra (digest/quiet szerint).
-- [ ] restart után újraértékel; hiba → utolsó payload.
-- [ ] 3 FS + tmpfs low szimuláció: a megfelelő torrentek pause/resume.
+- [x] low = `free < min`; ok = `free >= min + margin`; csak tranziens emitál.
+- [x] pause csak Downloading/Queued/Checking/Moving; seed nem; kézi pause-t nem ír felül (közös reason-bitset).
+- [x] `DiskLow`/`DiskOk` esemény a M5 csatornákra (a hook/notification szerkesztő is ismeri a két nevet).
+- [x] restart után újraértékel (üres szint-térkép → első passban tranzíció); hiba/timeout → az utolsó payload marad (`storage_payload`).
+- [x] két fájlrendszer (build FS + tmpfs) szimuláció: csak az alacsony lemez írói pause-olódnak, a másiké nem; a 3 FS éles ellenőrzés a T4 hoston.
 
-**Files:** `crates/daemon/src/diskguard/guard.rs`, `crates/daemon/src/control.rs`, `tests/`
+**Files:** `crates/daemon/src/diskguard/guard.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/events.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/gui/src/settings.rs`, `crates/daemon/tests/diskguard.rs`
 
 ### M6-T4 – API + GUI + acceptance 🤖 🔬
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1 és M6-T2 kész**, a következő szelet az **M6-T3 Guard engine**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1–T3 kész**, a következő szelet az **M6-T4 API + GUI + acceptance**.

@@ -144,6 +144,14 @@ impl TorrentControl {
             .map(|(id, _)| *id)
     }
 
+    /// Ids that carry the disk guard pause reason.
+    pub fn disk_guard_paused(&self) -> impl Iterator<Item = TorrentId> + '_ {
+        self.reasons
+            .iter()
+            .filter(|(_, reasons)| reasons.contains(PauseReasons::DISK_GUARD))
+            .map(|(id, _)| *id)
+    }
+
     /// Ids that carry the manual pause reason.
     pub fn user_paused(&self) -> impl Iterator<Item = TorrentId> + '_ {
         self.reasons

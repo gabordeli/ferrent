@@ -681,10 +681,19 @@ pub enum HookEvent {
     Finished,
     Removed,
     Error,
+    DiskLow,
+    DiskOk,
 }
 
 impl HookEvent {
-    pub const ALL: [Self; 4] = [Self::Added, Self::Finished, Self::Removed, Self::Error];
+    pub const ALL: [Self; 6] = [
+        Self::Added,
+        Self::Finished,
+        Self::Removed,
+        Self::Error,
+        Self::DiskLow,
+        Self::DiskOk,
+    ];
 
     #[must_use]
     pub fn label(self) -> &'static str {
@@ -693,6 +702,8 @@ impl HookEvent {
             Self::Finished => "finished",
             Self::Removed => "removed",
             Self::Error => "error",
+            Self::DiskLow => "disk_low",
+            Self::DiskOk => "disk_ok",
         }
     }
 
@@ -707,10 +718,17 @@ impl HookEvent {
             "finished" | "complete" => Self::Finished,
             "removed" => Self::Removed,
             "error" => Self::Error,
+            "disk_low" => Self::DiskLow,
+            "disk_ok" => Self::DiskOk,
             _ => Self::Added,
         }
     }
 }
+
+/// Event names accepted by the notification channels.
+pub const EVENT_NAMES: [&str; 6] = [
+    "added", "finished", "removed", "error", "disk_low", "disk_ok",
+];
 
 /// One editable hook.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1390,7 +1408,7 @@ impl NotifyForm {
                 ));
             }
             for event in row.event_list() {
-                if !matches!(event.as_str(), "added" | "finished" | "removed" | "error") {
+                if !EVENT_NAMES.contains(&event.as_str()) {
                     return Err(format!("Telegram {}: unknown event {event:?}", index + 1));
                 }
             }
@@ -1427,7 +1445,7 @@ impl NotifyForm {
                 ));
             }
             for event in row.event_list() {
-                if !matches!(event.as_str(), "added" | "finished" | "removed" | "error") {
+                if !EVENT_NAMES.contains(&event.as_str()) {
                     return Err(format!("Webhook {}: unknown event {event:?}", index + 1));
                 }
             }

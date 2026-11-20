@@ -114,6 +114,10 @@ pub struct AppState {
     pub(crate) scheduler: Mutex<crate::scheduler::SchedulerState>,
     /// Completion moves waiting for space or a target folder.
     pub(crate) moves: Mutex<BTreeMap<TorrentId, crate::diskguard::moves::PendingMove>>,
+    /// Last disk guard payload, kept across a failed scan.
+    pub(crate) disks: Mutex<Option<crate::diskguard::StorageReport>>,
+    /// Disk guard threshold state per filesystem.
+    pub(crate) disk_levels: Mutex<BTreeMap<PathBuf, crate::diskguard::guard::Level>>,
 }
 
 impl AppState {
@@ -145,6 +149,8 @@ impl AppState {
             autoadd: Mutex::new(crate::autoadd::AutoAddStatus::default()),
             scheduler: Mutex::new(crate::scheduler::SchedulerState::default()),
             moves: Mutex::new(BTreeMap::new()),
+            disks: Mutex::new(None),
+            disk_levels: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -1167,6 +1173,7 @@ pub async fn serve(
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
     crate::notify::spawn_notifier(Arc::clone(&state));
     crate::diskguard::moves::spawn_move_retry(Arc::clone(&state));
+    crate::diskguard::guard::spawn_disk_guard(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),

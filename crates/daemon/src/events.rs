@@ -30,10 +30,21 @@ pub enum EventKind {
     Finished,
     Removed,
     Error,
+    /// A filesystem dropped below the disk guard floor.
+    DiskLow,
+    /// A filesystem recovered above the floor plus the margin.
+    DiskOk,
 }
 
 impl EventKind {
-    pub const ALL: [Self; 4] = [Self::Added, Self::Finished, Self::Removed, Self::Error];
+    pub const ALL: [Self; 6] = [
+        Self::Added,
+        Self::Finished,
+        Self::Removed,
+        Self::Error,
+        Self::DiskLow,
+        Self::DiskOk,
+    ];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -42,6 +53,8 @@ impl EventKind {
             Self::Finished => "finished",
             Self::Removed => "removed",
             Self::Error => "error",
+            Self::DiskLow => "disk_low",
+            Self::DiskOk => "disk_ok",
         }
     }
 
@@ -52,6 +65,8 @@ impl EventKind {
             "finished" | "complete" => Some(Self::Finished),
             "removed" => Some(Self::Removed),
             "error" => Some(Self::Error),
+            "disk_low" => Some(Self::DiskLow),
+            "disk_ok" => Some(Self::DiskOk),
             _ => None,
         }
     }
