@@ -11,7 +11,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub use apply::ConfigStore;
-pub use schema::{FileConfig, QueueConfig, ResolvedConfig, SessionConfig, read_token_file};
+pub use schema::{
+    FileConfig, NotifyConfig, QueueConfig, ResolvedConfig, SessionConfig, read_token_file,
+};
 
 /// A configuration read, parse, validation or revision error.
 #[derive(Debug)]

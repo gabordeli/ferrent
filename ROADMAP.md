@@ -471,13 +471,13 @@
 
 **Acceptance**
 
-- [ ] `sendMessage` `chat_id`-dal és opcionális `message_thread_id`-vel; a hosszú szöveg levágva.
-- [ ] 429 esetén `retry_after` szerint vár; a token redacted.
-- [ ] digest: 10 esemény vagy 30 s ablak; 100 `finished` esemény nem floodol.
-- [ ] quiet hours + label-szűrés érvényesül; a „Test” a kiválasztott chatre küld.
-- [ ] 1 000 esemény outbox drain < 60 s a rate limit mellett; mock HTTP teszt.
+- [x] `sendMessage` `chat_id`-dal és opcionális `message_thread_id`-vel; a hosszú szöveg 4 096 karakterre vágva (HTML-escape).
+- [x] 429 esetén `retry_after` szerint vár (a backoff helyett); a token nem kerül logba.
+- [x] digest: 10 esemény vagy 30 s ablak; 100 `finished` → 10 üzenet; 1 000 → 100 üzenet (< 60 s, teszt).
+- [x] quiet hours (`HH:MM` + időzóna) + globális/per-csatorna label-szűrés; a „Test” minden engedélyezett csatornára küld.
+- [x] mock HTTP szerveres tesztek (200/429 `retry_after`, HTML body, digest/quiet).
 
-**Files:** `crates/daemon/src/notify/telegram.rs`, `crates/daemon/src/notify/digest.rs`, `crates/daemon/src/config/`, `crates/gui/src/settings/notifications.rs`, `tests/`
+**Files:** `crates/daemon/src/notify.rs`, `crates/daemon/src/config/schema.rs`, `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `crates/daemon/tests/notify.rs`
 
 ### M5-T6 – Automatizálás acceptance 🔬
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5, M5-T1–T4 kész; a következő szelet **M5-T5 Telegram + digest/quiet hours**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T5 kész; a következő szelet **M5-T6 Automatizálás acceptance**.

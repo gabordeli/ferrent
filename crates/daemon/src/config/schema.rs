@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::ConfigError;
 use crate::autoadd::WatchDir;
 use crate::hooks::HookSpec;
-use crate::notify::WebhookRule;
+use crate::notify::{TelegramRule, WebhookRule};
 use crate::scheduler::Grid;
 
 const DEFAULT_DATA_DIR: &str = "./ferrent-data";
@@ -51,6 +51,20 @@ pub struct NotifyConfig {
     pub enabled: bool,
     /// Webhook channels; the router fans out one delivery per matching rule.
     pub webhook: Vec<WebhookRule>,
+    /// Telegram channels.
+    pub telegram: Vec<TelegramRule>,
+    /// Digest threshold for Telegram (0 = immediate).
+    pub digest_events: u32,
+    /// Digest window in seconds (0 = only the threshold flushes).
+    pub digest_window_secs: u64,
+    /// Quiet hours start (`HH:MM`); empty disables them.
+    pub quiet_start: String,
+    /// Quiet hours end (`HH:MM`).
+    pub quiet_end: String,
+    /// Timezone of the quiet hours.
+    pub timezone: String,
+    /// Only deliver events with this label (empty = all).
+    pub label_filter: String,
 }
 
 impl Default for NotifyConfig {
@@ -58,6 +72,13 @@ impl Default for NotifyConfig {
         Self {
             enabled: true,
             webhook: Vec::new(),
+            telegram: Vec::new(),
+            digest_events: 10,
+            digest_window_secs: 30,
+            quiet_start: String::new(),
+            quiet_end: String::new(),
+            timezone: "UTC".to_owned(),
+            label_filter: String::new(),
         }
     }
 }
@@ -68,6 +89,23 @@ impl NotifyConfig {
         for (index, rule) in self.webhook.iter().enumerate() {
             rule.validate()
                 .map_err(|message| format!("notify.webhook[{index}]: {message}"))?;
+        }
+        for (index, rule) in self.telegram.iter().enumerate() {
+            rule.validate()
+                .map_err(|message| format!("notify.telegram[{index}]: {message}"))?;
+        }
+        if self.timezone.trim().parse::<chrono_tz::Tz>().is_err() {
+            return Err(format!(
+                "unknown notification timezone {:?}",
+                self.timezone.trim()
+            ));
+        }
+        crate::notify::parse_quiet(&self.quiet_start, &self.quiet_end)?;
+        if self.digest_events > 1_000 {
+            return Err("notify.digest_events must be at most 1000".to_owned());
+        }
+        if self.digest_window_secs > 86_400 {
+            return Err("notify.digest_window_secs must be at most 86400".to_owned());
         }
         Ok(())
     }

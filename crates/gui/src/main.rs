@@ -12,8 +12,8 @@ use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
-    self, ConfigField, HookEvent, HookField, LabelField, SchedulerLevel, Settings, SuccessAction,
-    Tab, WatchField, WebhookField,
+    self, ConfigField, DigestField, HookEvent, HookField, LabelField, SchedulerLevel, Settings,
+    SuccessAction, Tab, WatchField, WebhookField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -227,6 +227,12 @@ enum Message {
     NotifyTest,
     NotifyTested(Result<u32, String>),
     NotifyStatusLoaded(Result<connection::NotifyStatus, String>),
+    NotifyTelegramSelected(usize),
+    NotifyTelegramAdd,
+    NotifyTelegramRemove,
+    NotifyTelegramField(settings::TelegramField, String),
+    NotifyTelegramEnabled(bool),
+    DigestChanged(settings::DigestField, String),
     SelectLabelFilter(String),
     ChooseLabel(Option<String>),
     LabelsAssigned(Result<usize, String>),
@@ -812,7 +818,51 @@ impl App {
             Message::NotifySelected(index) => {
                 if index < self.settings.notify.webhooks.len() {
                     self.settings.notify_selected = Some(index);
+                    self.settings.notify_telegram = None;
                 }
+                Task::none()
+            }
+            Message::NotifyTelegramSelected(index) => {
+                if index < self.settings.notify.telegram.len() {
+                    self.settings.notify_telegram = Some(index);
+                    self.settings.notify_selected = None;
+                }
+                Task::none()
+            }
+            Message::NotifyTelegramAdd => {
+                self.settings.notify_telegram = Some(self.settings.notify.add_telegram());
+                self.settings.notify_selected = None;
+                Task::none()
+            }
+            Message::NotifyTelegramRemove => {
+                if let Some(index) = self.settings.notify_telegram {
+                    self.settings.notify.remove_telegram(index);
+                    self.settings.notify_telegram = if self.settings.notify.telegram.is_empty() {
+                        None
+                    } else {
+                        Some(index.min(self.settings.notify.telegram.len() - 1))
+                    };
+                }
+                Task::none()
+            }
+            Message::NotifyTelegramField(field, value) => {
+                if let Some(index) = self.settings.notify_telegram {
+                    if let Some(row) = self.settings.notify.telegram.get_mut(index) {
+                        row.set(field, value);
+                    }
+                }
+                Task::none()
+            }
+            Message::NotifyTelegramEnabled(value) => {
+                if let Some(index) = self.settings.notify_telegram {
+                    if let Some(row) = self.settings.notify.telegram.get_mut(index) {
+                        row.enabled = value;
+                    }
+                }
+                Task::none()
+            }
+            Message::DigestChanged(field, value) => {
+                self.settings.notify.set_digest(field, value);
                 Task::none()
             }
             Message::NotifyAdd => {
@@ -3227,8 +3277,9 @@ impl App {
 
     fn settings_notifications_view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
-        let rows: Vec<Element<Message>> = settings
-            .notify
+        let notify = &settings.notify;
+
+        let webhook_rows: Vec<Element<Message>> = notify
             .webhooks
             .iter()
             .enumerate()
@@ -3242,58 +3293,55 @@ impl App {
                     .next()
                     .unwrap_or("")
                     .to_owned();
+                let display = if host.is_empty() {
+                    "(no URL)".to_owned()
+                } else {
+                    host
+                };
                 let detail = if row.events.trim().is_empty() {
                     "all events".to_owned()
                 } else {
                     row.events.clone()
                 };
-                let display = if host.is_empty() {
-                    "(no URL)".to_owned()
-                } else {
-                    host.clone()
-                };
-                button(
-                    column![
-                        text(display).size(12),
-                        text(if row.enabled {
-                            detail
-                        } else {
-                            format!("{detail} · disabled")
-                        })
-                        .size(10)
-                        .color(theme::TEXT_MUTED),
-                    ]
-                    .spacing(2),
-                )
-                .on_press(Message::NotifySelected(index))
-                .width(Length::Fill)
-                .padding([5, 8])
-                .style(move |_theme: &iced::Theme, _status| button::Style {
-                    background: Some(
-                        if selected {
-                            theme::SURFACE
-                        } else {
-                            theme::BG_SECONDARY
-                        }
-                        .into(),
-                    ),
-                    text_color: if selected {
-                        theme::TEXT
+                notification_row(
+                    display,
+                    if row.enabled {
+                        detail
                     } else {
-                        theme::TEXT_SECONDARY
+                        format!("{detail} · disabled")
                     },
-                    border: iced::Border {
-                        color: if selected {
-                            theme::PRIMARY
-                        } else {
-                            theme::BG_SECONDARY
-                        },
-                        width: 0.0,
-                        radius: 4.0.into(),
+                    selected,
+                    Message::NotifySelected(index),
+                )
+            })
+            .collect();
+
+        let telegram_rows: Vec<Element<Message>> = notify
+            .telegram
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let selected = settings.notify_telegram == Some(index);
+                let chat = if row.chat_id.trim().is_empty() {
+                    "(no chat id)".to_owned()
+                } else {
+                    row.chat_id.trim().to_owned()
+                };
+                let detail = if row.events.trim().is_empty() {
+                    "all events".to_owned()
+                } else {
+                    row.events.clone()
+                };
+                notification_row(
+                    chat,
+                    if row.enabled {
+                        detail
+                    } else {
+                        format!("{detail} · disabled")
                     },
-                    ..button::Style::default()
-                })
-                .into()
+                    selected,
+                    Message::NotifyTelegramSelected(index),
+                )
             })
             .collect();
 
@@ -3311,54 +3359,121 @@ impl App {
             .spacing(8)
             .align_y(iced::Alignment::Center),
             container(
-                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+                scrollable(WidgetColumn::with_children(webhook_rows).spacing(2))
+                    .height(Length::Fill)
             )
-            .height(Length::Fill),
+            .height(Length::FillPortion(1)),
+            row![
+                text("Telegram").size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button("Add", Message::NotifyTelegramAdd, !settings.loading),
+                action_button(
+                    "Remove",
+                    Message::NotifyTelegramRemove,
+                    settings.notify_telegram.is_some() && !settings.loading,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(telegram_rows).spacing(2))
+                    .height(Length::Fill)
+            )
+            .height(Length::FillPortion(1)),
         ]
         .spacing(6)
         .width(Length::Fixed(320.0))
         .height(Length::Fill);
 
-        let editor: Element<Message> = if let Some(row) =
-            settings.notify.selected(settings.notify_selected)
-        {
-            let field = |field: WebhookField, placeholder: &'static str| {
+        let webhook_editor: Element<Message> =
+            if let Some(row) = notify.selected(settings.notify_selected) {
+                let field = |field: WebhookField, placeholder: &'static str| {
+                    column![
+                        text(field.label()).size(11).color(theme::TEXT_MUTED),
+                        text_input(placeholder, row.text(field))
+                            .style(muted_input_style)
+                            .width(Length::Fill)
+                            .on_input(move |value| Message::NotifyField(field, value)),
+                    ]
+                    .spacing(3)
+                };
                 column![
-                    text(field.label()).size(11).color(theme::TEXT_MUTED),
-                    text_input(placeholder, row.text(field))
-                        .style(muted_input_style)
-                        .width(Length::Fill)
-                        .on_input(move |value| Message::NotifyField(field, value)),
+                    field(WebhookField::Url, "https://example.test/ferrent"),
+                    field(WebhookField::Secret, "optional HMAC secret"),
+                    row![
+                        field(WebhookField::Events, "finished, error (empty = all)"),
+                        field(WebhookField::Timeout, "5000"),
+                    ]
+                    .spacing(8),
+                    checkbox("Channel enabled", row.enabled)
+                        .on_toggle(Message::NotifyWebhookEnabled)
+                        .size(14)
+                        .text_size(12),
                 ]
-                .spacing(3)
+                .spacing(8)
+                .into()
+            } else if let Some(row) = notify.selected_telegram(settings.notify_telegram) {
+                let field = |field: settings::TelegramField, placeholder: &'static str| {
+                    column![
+                        text(field.label()).size(11).color(theme::TEXT_MUTED),
+                        text_input(placeholder, row.text(field))
+                            .style(muted_input_style)
+                            .width(Length::Fill)
+                            .on_input(move |value| Message::NotifyTelegramField(field, value)),
+                    ]
+                    .spacing(3)
+                };
+                column![
+                    field(settings::TelegramField::Token, "123456:ABC-DEF"),
+                    row![
+                        field(settings::TelegramField::ChatId, "-1001234567890"),
+                        field(settings::TelegramField::ThreadId, "optional topic id"),
+                    ]
+                    .spacing(8),
+                    field(
+                        settings::TelegramField::Events,
+                        "finished, error (empty = all)"
+                    ),
+                    row![
+                        field(settings::TelegramField::Label, "only this label"),
+                        field(settings::TelegramField::Timeout, "5000"),
+                    ]
+                    .spacing(8),
+                    field(settings::TelegramField::ApiBase, TELEGRAM_API_BASE),
+                    checkbox("Channel enabled", row.enabled)
+                        .on_toggle(Message::NotifyTelegramEnabled)
+                        .size(14)
+                        .text_size(12),
+                ]
+                .spacing(8)
+                .into()
+            } else {
+                column![
+                    text("Select a webhook or a Telegram chat, or add one.")
+                        .size(12)
+                        .color(theme::TEXT_MUTED)
+                ]
+                .into()
             };
-            column![
-                field(WebhookField::Url, "https://example.test/ferrent"),
-                field(WebhookField::Secret, "optional HMAC secret"),
-                row![
-                    field(WebhookField::Events, "finished, error (empty = all)"),
-                    field(WebhookField::Timeout, "5000"),
-                ]
-                .spacing(8),
-                checkbox("Channel enabled", row.enabled)
-                    .on_toggle(Message::NotifyWebhookEnabled)
-                    .size(14)
-                    .text_size(12),
-                text("The daemon signs the JSON body with HMAC-SHA256 when a secret is set (X-Ferrent-Signature). Failures retry with backoff; after 5 attempts the delivery is dead-lettered.")
-                    .size(10)
-                    .color(theme::TEXT_MUTED),
+
+        let digest = column![
+            text("Digest and quiet hours (Telegram only)")
+                .size(11)
+                .color(theme::TEXT_MUTED),
+            row![
+                digest_field(DigestField::Events, "10", notify),
+                digest_field(DigestField::Window, "30", notify),
             ]
-            .spacing(10)
-            .max_width(560.0)
-            .into()
-        } else {
-            column![
-                text("Select a webhook, or add one.")
-                    .size(12)
-                    .color(theme::TEXT_MUTED),
+            .spacing(8),
+            row![
+                digest_field(DigestField::QuietStart, "23:00", notify),
+                digest_field(DigestField::QuietEnd, "07:00", notify),
+                digest_field(DigestField::Timezone, "Europe/Budapest", notify),
             ]
-            .into()
-        };
+            .spacing(8),
+            digest_field(DigestField::LabelFilter, "only this label", notify),
+        ]
+        .spacing(6);
 
         let status = settings.notify_status.map_or_else(
             || "outbox: -".to_owned(),
@@ -3371,11 +3486,16 @@ impl App {
             list,
             container(
                 column![
-                    checkbox("Notifications enabled", settings.notify.enabled)
+                    checkbox("Notifications enabled", notify.enabled)
                         .on_toggle(Message::NotifyEnabled)
                         .size(14)
                         .text_size(12),
-                    scrollable(editor).height(Length::Fill),
+                    scrollable(
+                        column![webhook_editor, digest,]
+                            .spacing(10)
+                            .max_width(560.0)
+                    )
+                    .height(Length::Fill),
                     row![
                         text(status)
                             .size(10)
@@ -3384,7 +3504,7 @@ impl App {
                         container(action_button(
                             "Test",
                             Message::NotifyTest,
-                            !settings.loading,
+                            !settings.loading
                         ))
                         .width(Length::Fixed(80.0)),
                     ]
@@ -4716,6 +4836,71 @@ fn watch_action(action: SuccessAction, current: SuccessAction) -> Element<'stati
         action == current,
         Message::AutoAddAction(action),
     )
+}
+
+/// Placeholder for the Telegram API base field.
+const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
+
+/// One selectable notification channel row.
+fn notification_row(
+    title: String,
+    detail: String,
+    selected: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    button(
+        column![
+            text(title).size(12),
+            text(detail).size(10).color(theme::TEXT_MUTED),
+        ]
+        .spacing(2),
+    )
+    .on_press(message)
+    .width(Length::Fill)
+    .padding([5, 8])
+    .style(move |_theme: &iced::Theme, _status| button::Style {
+        background: Some(
+            if selected {
+                theme::SURFACE
+            } else {
+                theme::BG_SECONDARY
+            }
+            .into(),
+        ),
+        text_color: if selected {
+            theme::TEXT
+        } else {
+            theme::TEXT_SECONDARY
+        },
+        border: iced::Border {
+            color: if selected {
+                theme::PRIMARY
+            } else {
+                theme::BG_SECONDARY
+            },
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    })
+    .into()
+}
+
+/// One digest/quiet-hours input.
+fn digest_field<'a>(
+    field: DigestField,
+    placeholder: &'a str,
+    notify: &'a settings::NotifyForm,
+) -> Element<'a, Message> {
+    column![
+        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text_input(placeholder, notify.digest_text(field))
+            .style(muted_input_style)
+            .width(Length::Fill)
+            .on_input(move |value| Message::DigestChanged(field, value)),
+    ]
+    .spacing(3)
+    .into()
 }
 
 fn settings_tab(tab: Tab, active: bool) -> Element<'static, Message> {

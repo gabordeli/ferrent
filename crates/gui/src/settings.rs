@@ -1222,6 +1222,13 @@ impl WebhookField {
 pub struct NotifyForm {
     pub enabled: bool,
     pub webhooks: Vec<WebhookRow>,
+    pub telegram: Vec<TelegramRow>,
+    pub digest_events: String,
+    pub digest_window: String,
+    pub quiet_start: String,
+    pub quiet_end: String,
+    pub timezone: String,
+    pub label_filter: String,
 }
 
 impl Default for NotifyForm {
@@ -1229,6 +1236,13 @@ impl Default for NotifyForm {
         Self {
             enabled: true,
             webhooks: Vec::new(),
+            telegram: Vec::new(),
+            digest_events: "10".to_owned(),
+            digest_window: "30".to_owned(),
+            quiet_start: String::new(),
+            quiet_end: String::new(),
+            timezone: "UTC".to_owned(),
+            label_filter: String::new(),
         }
     }
 }
@@ -1245,9 +1259,29 @@ impl NotifyForm {
         let Item::Table(table) = item else {
             return Err("notify must be a table".to_owned());
         };
+        let number = |key: &str, fallback: &str| {
+            table
+                .get(key)
+                .and_then(Item::as_integer)
+                .map_or_else(|| fallback.to_owned(), |value| value.to_string())
+        };
+        let text = |key: &str, fallback: &str| {
+            table
+                .get(key)
+                .and_then(Item::as_str)
+                .unwrap_or(fallback)
+                .to_owned()
+        };
         let mut form = Self {
             enabled: table.get("enabled").and_then(Item::as_bool).unwrap_or(true),
             webhooks: Vec::new(),
+            telegram: Vec::new(),
+            digest_events: number("digest_events", "10"),
+            digest_window: number("digest_window_secs", "30"),
+            quiet_start: text("quiet_start", ""),
+            quiet_end: text("quiet_end", ""),
+            timezone: text("timezone", "UTC"),
+            label_filter: text("label_filter", ""),
         };
         if let Some(item) = table.get("webhook") {
             let Item::ArrayOfTables(array) = item else {
@@ -1286,11 +1320,94 @@ impl NotifyForm {
                 });
             }
         }
+        if let Some(item) = table.get("telegram") {
+            let Item::ArrayOfTables(array) = item else {
+                return Err("notify.telegram must be an array of tables".to_owned());
+            };
+            for entry in array.iter() {
+                let text = |key: &str, fallback: &str| {
+                    entry
+                        .get(key)
+                        .and_then(Item::as_str)
+                        .unwrap_or(fallback)
+                        .to_owned()
+                };
+                let join = |key: &str| {
+                    entry
+                        .get(key)
+                        .and_then(Item::as_array)
+                        .map(|array| {
+                            array
+                                .iter()
+                                .filter_map(|item| item.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default()
+                };
+                form.telegram.push(TelegramRow {
+                    bot_token: text("bot_token", ""),
+                    chat_id: text("chat_id", ""),
+                    thread_id: text("message_thread_id", ""),
+                    events: join("events"),
+                    label: text("label", ""),
+                    enabled: entry.get("enabled").and_then(Item::as_bool).unwrap_or(true),
+                    api_base: text("api_base", "https://api.telegram.org"),
+                    timeout_ms: entry
+                        .get("timeout_ms")
+                        .and_then(Item::as_integer)
+                        .map_or_else(|| "5000".to_owned(), |value| value.to_string()),
+                });
+            }
+        }
         Ok(form)
     }
 
-    /// Checks every webhook before it is written back.
+    /// Checks every channel before it is written back.
     pub fn validate(&self) -> Result<(), String> {
+        for (index, row) in self.telegram.iter().enumerate() {
+            if row.bot_token.trim().is_empty() {
+                return Err(format!(
+                    "Telegram {}: bot token must not be empty",
+                    index + 1
+                ));
+            }
+            if row.chat_id.trim().is_empty() {
+                return Err(format!("Telegram {}: chat id must not be empty", index + 1));
+            }
+            let base = row.api_base.trim();
+            if !(base.starts_with("http://") || base.starts_with("https://")) {
+                return Err(format!("Telegram {}: API base must be http(s)", index + 1));
+            }
+            let timeout: u64 =
+                row.timeout_ms.trim().parse().map_err(|_| {
+                    format!("Telegram {}: timeout must be a whole number", index + 1)
+                })?;
+            if !(100..=60_000).contains(&timeout) {
+                return Err(format!(
+                    "Telegram {}: timeout must be between 100 and 60000 ms",
+                    index + 1
+                ));
+            }
+            for event in row.event_list() {
+                if !matches!(event.as_str(), "added" | "finished" | "removed" | "error") {
+                    return Err(format!("Telegram {}: unknown event {event:?}", index + 1));
+                }
+            }
+        }
+        for (label, text) in [
+            ("digest events", &self.digest_events),
+            ("digest window", &self.digest_window),
+        ] {
+            if !text.trim().is_empty() {
+                text.trim()
+                    .parse::<u64>()
+                    .map_err(|_| format!("Scheduler/notify {label} must be a whole number"))?;
+            }
+        }
+        if self.timezone.trim().is_empty() {
+            return Err("Notification timezone must not be empty".to_owned());
+        }
         for (index, row) in self.webhooks.iter().enumerate() {
             let url = row.url.trim();
             if url.is_empty() {
@@ -1345,8 +1462,95 @@ impl NotifyForm {
             array.push(entry);
         }
         table["webhook"] = Item::ArrayOfTables(array);
+        let mut telegram = ArrayOfTables::new();
+        for row in &self.telegram {
+            let mut entry = Table::new();
+            entry["bot_token"] = value(row.bot_token.trim());
+            entry["chat_id"] = value(row.chat_id.trim());
+            if !row.thread_id.trim().is_empty() {
+                entry["message_thread_id"] = value(row.thread_id.trim());
+            }
+            let events = row.event_list();
+            if !events.is_empty() {
+                let mut list = toml_edit::Array::new();
+                for event in events {
+                    list.push(event);
+                }
+                entry["events"] = value(list);
+            }
+            if !row.label.trim().is_empty() {
+                entry["label"] = value(row.label.trim());
+            }
+            entry["enabled"] = value(row.enabled);
+            entry["api_base"] = value(row.api_base.trim());
+            if let Ok(timeout) = row.timeout_ms.trim().parse::<i64>() {
+                entry["timeout_ms"] = value(timeout);
+            }
+            telegram.push(entry);
+        }
+        table["telegram"] = Item::ArrayOfTables(telegram);
+        if let Ok(events) = self.digest_events.trim().parse::<i64>() {
+            table["digest_events"] = value(events);
+        }
+        if let Ok(window) = self.digest_window.trim().parse::<i64>() {
+            table["digest_window_secs"] = value(window);
+        }
+        if !self.quiet_start.trim().is_empty() {
+            table["quiet_start"] = value(self.quiet_start.trim());
+        }
+        if !self.quiet_end.trim().is_empty() {
+            table["quiet_end"] = value(self.quiet_end.trim());
+        }
+        table["timezone"] = value(self.timezone.trim());
+        if !self.label_filter.trim().is_empty() {
+            table["label_filter"] = value(self.label_filter.trim());
+        }
         doc["notify"] = Item::Table(table);
         Ok(())
+    }
+
+    /// Replaces one digest scalar.
+    pub fn set_digest(&mut self, field: DigestField, text: String) {
+        match field {
+            DigestField::Events => self.digest_events = text,
+            DigestField::Window => self.digest_window = text,
+            DigestField::QuietStart => self.quiet_start = text,
+            DigestField::QuietEnd => self.quiet_end = text,
+            DigestField::Timezone => self.timezone = text,
+            DigestField::LabelFilter => self.label_filter = text,
+        }
+    }
+
+    /// Returns one digest scalar.
+    #[must_use]
+    pub fn digest_text(&self, field: DigestField) -> &str {
+        match field {
+            DigestField::Events => &self.digest_events,
+            DigestField::Window => &self.digest_window,
+            DigestField::QuietStart => &self.quiet_start,
+            DigestField::QuietEnd => &self.quiet_end,
+            DigestField::Timezone => &self.timezone,
+            DigestField::LabelFilter => &self.label_filter,
+        }
+    }
+
+    /// Adds an empty Telegram channel and returns its index.
+    pub fn add_telegram(&mut self) -> usize {
+        self.telegram.push(TelegramRow::default());
+        self.telegram.len() - 1
+    }
+
+    /// Removes one Telegram channel.
+    pub fn remove_telegram(&mut self, index: usize) {
+        if index < self.telegram.len() {
+            self.telegram.remove(index);
+        }
+    }
+
+    /// The selected Telegram channel.
+    #[must_use]
+    pub fn selected_telegram(&self, index: Option<usize>) -> Option<&TelegramRow> {
+        index.and_then(|index| self.telegram.get(index))
     }
 
     /// The selected webhook.
@@ -1365,6 +1569,124 @@ impl NotifyForm {
     pub fn remove(&mut self, index: usize) {
         if index < self.webhooks.len() {
             self.webhooks.remove(index);
+        }
+    }
+}
+
+/// One editable Telegram channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TelegramRow {
+    pub bot_token: String,
+    pub chat_id: String,
+    pub thread_id: String,
+    /// Comma separated event kinds; empty means every kind.
+    pub events: String,
+    pub label: String,
+    pub enabled: bool,
+    pub api_base: String,
+    pub timeout_ms: String,
+}
+
+impl Default for TelegramRow {
+    fn default() -> Self {
+        Self {
+            bot_token: String::new(),
+            chat_id: String::new(),
+            thread_id: String::new(),
+            events: String::new(),
+            label: String::new(),
+            enabled: true,
+            api_base: "https://api.telegram.org".to_owned(),
+            timeout_ms: "5000".to_owned(),
+        }
+    }
+}
+
+impl TelegramRow {
+    pub fn set(&mut self, field: TelegramField, text: String) {
+        match field {
+            TelegramField::Token => self.bot_token = text,
+            TelegramField::ChatId => self.chat_id = text,
+            TelegramField::ThreadId => self.thread_id = text,
+            TelegramField::Events => self.events = text,
+            TelegramField::Label => self.label = text,
+            TelegramField::ApiBase => self.api_base = text,
+            TelegramField::Timeout => self.timeout_ms = text,
+        }
+    }
+
+    #[must_use]
+    pub fn text(&self, field: TelegramField) -> &str {
+        match field {
+            TelegramField::Token => &self.bot_token,
+            TelegramField::ChatId => &self.chat_id,
+            TelegramField::ThreadId => &self.thread_id,
+            TelegramField::Events => &self.events,
+            TelegramField::Label => &self.label,
+            TelegramField::ApiBase => &self.api_base,
+            TelegramField::Timeout => &self.timeout_ms,
+        }
+    }
+
+    #[must_use]
+    pub fn event_list(&self) -> Vec<String> {
+        self.events
+            .split(',')
+            .map(str::trim)
+            .filter(|event| !event.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// One editable text of a Telegram channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelegramField {
+    Token,
+    ChatId,
+    ThreadId,
+    Events,
+    Label,
+    ApiBase,
+    Timeout,
+}
+
+impl TelegramField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Token => "Bot token",
+            Self::ChatId => "Chat id",
+            Self::ThreadId => "Message thread id",
+            Self::Events => "Events (comma separated; empty = all)",
+            Self::Label => "Only this label (empty = all)",
+            Self::ApiBase => "API base",
+            Self::Timeout => "Timeout (ms)",
+        }
+    }
+}
+
+/// One editable digest/quiet-hours scalar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigestField {
+    Events,
+    Window,
+    QuietStart,
+    QuietEnd,
+    Timezone,
+    LabelFilter,
+}
+
+impl DigestField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Events => "Digest events (0 = immediate)",
+            Self::Window => "Digest window (s)",
+            Self::QuietStart => "Quiet start (HH:MM)",
+            Self::QuietEnd => "Quiet end (HH:MM)",
+            Self::Timezone => "Timezone",
+            Self::LabelFilter => "Only this label (empty = all)",
         }
     }
 }
@@ -1562,6 +1884,7 @@ pub struct Settings {
     pub notify: NotifyForm,
     pub notify_baseline: NotifyForm,
     pub notify_selected: Option<usize>,
+    pub notify_telegram: Option<usize>,
     pub notify_status: Option<(u32, u32, u32)>,
     pub hooks_selected: Option<usize>,
     pub hook_runs: Vec<HookRunRow>,
@@ -1597,6 +1920,7 @@ impl Default for Settings {
             notify: NotifyForm::default(),
             notify_baseline: NotifyForm::default(),
             notify_selected: None,
+            notify_telegram: None,
             notify_status: None,
             hooks_selected: None,
             hook_runs: Vec::new(),
@@ -1639,6 +1963,7 @@ impl Settings {
         self.notify_baseline = notify.clone();
         self.notify = notify;
         self.notify_selected = None;
+        self.notify_telegram = None;
         self.hooks_selected = None;
         Ok(())
     }
