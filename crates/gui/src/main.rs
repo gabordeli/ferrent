@@ -75,6 +75,8 @@ enum ConnectionState {
     Connecting,
     Connected,
     Reconnecting,
+    /// No client; the status bar must not show the last poll's numbers.
+    Offline,
 }
 
 struct PendingPin {
@@ -518,8 +520,9 @@ impl App {
             Message::Disconnect => {
                 self.generation += 1;
                 self.client = None;
+                self.server_status = None;
                 self.reset_page();
-                self.state = ConnectionState::Idle;
+                self.state = ConnectionState::Offline;
                 self.status = "Disconnected".to_owned();
                 Task::none()
             }
@@ -1088,6 +1091,11 @@ impl App {
                 self.client = Some(handle.0);
                 self.state = ConnectionState::Connected;
                 self.retrying = false;
+                // The Servers modal opened from the connect screen must give
+                // way to the torrent list once the connection is up.
+                if matches!(self.modal, Some(Modal::Servers)) {
+                    self.modal = None;
+                }
                 self.reset_page();
                 self.status = "Connected; loading torrents...".to_owned();
                 self.measure_started = self.measure.then(Instant::now);
@@ -1101,6 +1109,7 @@ impl App {
             }
             Err(error) => {
                 self.client = None;
+                self.server_status = None;
                 self.status = format!("Connection failed: {error}");
                 if self.retrying {
                     self.state = ConnectionState::Reconnecting;
@@ -1112,7 +1121,7 @@ impl App {
                         Message::Reconnect,
                     )
                 } else {
-                    self.state = ConnectionState::Idle;
+                    self.state = ConnectionState::Offline;
                     Task::none()
                 }
             }
@@ -1205,6 +1214,7 @@ impl App {
 
     fn fail_connection(&mut self, error: String) -> Task<Message> {
         self.client = None;
+        self.server_status = None;
         self.page_in_flight = false;
         self.state = ConnectionState::Reconnecting;
         self.retrying = true;
@@ -4307,17 +4317,11 @@ impl App {
             .last_config
             .as_ref()
             .map_or("", |config| config.server.as_str());
-        let (down, up, active, total) =
-            self.server_status
-                .as_ref()
-                .map_or((0, 0, 0, self.page.total), |status| {
-                    (
-                        status.download_rate,
-                        status.upload_rate,
-                        status.active,
-                        status.torrent_count,
-                    )
-                });
+        let (down, up, active, total) = status_numbers(
+            self.client.is_some(),
+            self.server_status.as_ref(),
+            self.page.total,
+        );
         container(
             row![
                 text("●").size(9).color(color),
@@ -4946,12 +4950,30 @@ fn icon_nav(
         .into()
 }
 
+/// The status bar numbers; a missing client never shows a stale poll.
+fn status_numbers(
+    connected: bool,
+    status: Option<&ServerStatus>,
+    fallback_total: u32,
+) -> (u64, u64, u32, u32) {
+    match status.filter(|_| connected) {
+        Some(status) => (
+            status.download_rate,
+            status.upload_rate,
+            status.active,
+            status.torrent_count,
+        ),
+        None => (0, 0, 0, fallback_total),
+    }
+}
+
 fn state_style(state: ConnectionState) -> (&'static str, Color) {
     match state {
         ConnectionState::Idle => ("idle", theme::TEXT_MUTED),
         ConnectionState::Connecting => ("connecting", theme::CONNECTING),
         ConnectionState::Connected => ("connected", theme::DOWNLOADING),
         ConnectionState::Reconnecting => ("reconnecting", theme::CONNECTING),
+        ConnectionState::Offline => ("offline", theme::TEXT_MUTED),
     }
 }
 
@@ -5042,4 +5064,31 @@ fn main() -> iced::Result {
         ferrent_telemetry::capture_error(error);
     }
     result
+}
+
+#[cfg(test)]
+mod status_bar_tests {
+    use super::*;
+
+    fn status() -> ServerStatus {
+        ServerStatus {
+            torrent_count: 9,
+            download_rate: 100,
+            upload_rate: 50,
+            active: 3,
+            ..ServerStatus::default()
+        }
+    }
+
+    #[test]
+    fn a_disconnected_client_never_shows_a_stale_poll() {
+        let status = status();
+        assert_eq!(status_numbers(true, Some(&status), 0), (100, 50, 3, 9));
+        assert_eq!(
+            status_numbers(false, Some(&status), 7),
+            (0, 0, 0, 7),
+            "the last poll must not look live while offline"
+        );
+        assert_eq!(status_numbers(true, None, 7), (0, 0, 0, 7));
+    }
 }
