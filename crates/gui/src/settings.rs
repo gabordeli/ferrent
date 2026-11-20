@@ -18,15 +18,17 @@ pub enum Tab {
     Session,
     AutoAdd,
     Hooks,
+    Scheduler,
     Labels,
 }
 
 impl Tab {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
         Self::Hooks,
+        Self::Scheduler,
         Self::Labels,
     ];
 
@@ -37,6 +39,7 @@ impl Tab {
             Self::Session => "Session",
             Self::AutoAdd => "AutoAdd",
             Self::Hooks => "Hooks",
+            Self::Scheduler => "Scheduler",
             Self::Labels => "Labels",
         }
     }
@@ -50,6 +53,9 @@ impl Tab {
                 "Watch directories; a 1 s scan picks up new .torrent and .magnet files."
             }
             Self::Hooks => "Programs run on added, finished, removed and error events.",
+            Self::Scheduler => {
+                "A 24×7 weekly grid: green = session defaults, yellow = limits, red = pause."
+            }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
         }
     }
@@ -935,6 +941,198 @@ impl HookRunRow {
     }
 }
 
+/// One cell of the scheduler grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SchedulerLevel {
+    #[default]
+    Green,
+    Yellow,
+    Red,
+}
+
+impl SchedulerLevel {
+    #[must_use]
+    pub fn letter(self) -> char {
+        match self {
+            Self::Green => 'g',
+            Self::Yellow => 'y',
+            Self::Red => 'r',
+        }
+    }
+
+    #[must_use]
+    pub fn from_letter(letter: char) -> Option<Self> {
+        match letter {
+            'g' => Some(Self::Green),
+            'y' => Some(Self::Yellow),
+            'r' => Some(Self::Red),
+            _ => None,
+        }
+    }
+
+    /// Next level when the cell is clicked.
+    #[must_use]
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Green => Self::Yellow,
+            Self::Yellow => Self::Red,
+            Self::Red => Self::Green,
+        }
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Red => "red",
+        }
+    }
+}
+
+/// The `[scheduler]` table of the configuration document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerForm {
+    pub enabled: bool,
+    pub timezone: String,
+    pub download_rate_limit: String,
+    pub upload_rate_limit: String,
+    pub pause_seeding: bool,
+    /// Seven rows (Monday first) of 24 cells.
+    pub grid: Vec<Vec<SchedulerLevel>>,
+}
+
+impl Default for SchedulerForm {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timezone: "UTC".to_owned(),
+            download_rate_limit: "0".to_owned(),
+            upload_rate_limit: "0".to_owned(),
+            pause_seeding: true,
+            grid: vec![vec![SchedulerLevel::Green; 24]; 7],
+        }
+    }
+}
+
+impl SchedulerForm {
+    /// Reads the `[scheduler]` table.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("scheduler") else {
+            return Ok(Self::default());
+        };
+        let Item::Table(table) = item else {
+            return Err("scheduler must be a table".to_owned());
+        };
+        let text = |key: &str, fallback: &str| {
+            table
+                .get(key)
+                .and_then(Item::as_str)
+                .unwrap_or(fallback)
+                .to_owned()
+        };
+        let number = |key: &str| {
+            table
+                .get(key)
+                .and_then(Item::as_integer)
+                .unwrap_or(0)
+                .to_string()
+        };
+        let flag =
+            |key: &str, default: bool| table.get(key).and_then(Item::as_bool).unwrap_or(default);
+        let mut form = Self {
+            enabled: flag("enabled", false),
+            timezone: text("timezone", "UTC"),
+            download_rate_limit: number("download_rate_limit"),
+            upload_rate_limit: number("upload_rate_limit"),
+            pause_seeding: flag("pause_seeding", true),
+            grid: vec![vec![SchedulerLevel::Green; 24]; 7],
+        };
+        if let Some(week) = table.get("week").and_then(Item::as_array) {
+            if week.len() != 7 {
+                return Err("scheduler week must have 7 rows".to_owned());
+            }
+            for (day, row) in week.iter().enumerate() {
+                let Some(row) = row.as_str() else {
+                    return Err("scheduler week rows must be strings".to_owned());
+                };
+                let letters: Vec<char> = row.chars().collect();
+                if letters.len() != 24 {
+                    return Err("scheduler week rows must have 24 characters".to_owned());
+                }
+                for (hour, letter) in letters.into_iter().enumerate() {
+                    form.grid[day][hour] = SchedulerLevel::from_letter(letter)
+                        .ok_or_else(|| "scheduler cells must be g, y or r".to_owned())?;
+                }
+            }
+        }
+        Ok(form)
+    }
+
+    /// Checks the form before it is written back.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.timezone.trim().is_empty() {
+            return Err("Scheduler timezone must not be empty".to_owned());
+        }
+        if self.grid.len() != 7 || self.grid.iter().any(|row| row.len() != 24) {
+            return Err("Scheduler grid must be 7×24".to_owned());
+        }
+        for (label, text) in [
+            ("Download limit", &self.download_rate_limit),
+            ("Upload limit", &self.upload_rate_limit),
+        ] {
+            if !text.trim().is_empty() {
+                text.trim()
+                    .parse::<u64>()
+                    .map_err(|_| format!("Scheduler {label} must be a whole number"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes the form back into an already rendered document.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        let limits = (
+            self.download_rate_limit.trim().parse::<i64>().unwrap_or(0),
+            self.upload_rate_limit.trim().parse::<i64>().unwrap_or(0),
+        );
+        let mut table = Table::new();
+        table["enabled"] = value(self.enabled);
+        table["timezone"] = value(self.timezone.trim());
+        table["download_rate_limit"] = value(limits.0);
+        table["upload_rate_limit"] = value(limits.1);
+        table["pause_seeding"] = value(self.pause_seeding);
+        let mut week = toml_edit::Array::new();
+        for row in &self.grid {
+            week.push(row.iter().map(|cell| cell.letter()).collect::<String>());
+        }
+        table["week"] = value(week);
+        doc["scheduler"] = Item::Table(table);
+        Ok(())
+    }
+
+    /// Cycles one cell.
+    pub fn cycle(&mut self, day: usize, hour: usize) {
+        if let Some(cell) = self.grid.get_mut(day).and_then(|row| row.get_mut(hour)) {
+            *cell = cell.cycle();
+        }
+    }
+
+    /// Number of non-green cells, for the tab summary.
+    #[must_use]
+    pub fn marked_cells(&self) -> usize {
+        self.grid
+            .iter()
+            .flatten()
+            .filter(|cell| **cell != SchedulerLevel::Green)
+            .count()
+    }
+}
+
 /// One label row plus its assignment count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelRow {
@@ -1123,6 +1321,8 @@ pub struct Settings {
     pub autoadd_status: Vec<AutoAddStatusRow>,
     pub hooks: HookForm,
     pub hooks_baseline: HookForm,
+    pub scheduler: SchedulerForm,
+    pub scheduler_baseline: SchedulerForm,
     pub hooks_selected: Option<usize>,
     pub hook_runs: Vec<HookRunRow>,
     pub hook_pending: u32,
@@ -1152,6 +1352,8 @@ impl Default for Settings {
             autoadd_status: Vec::new(),
             hooks: HookForm::default(),
             hooks_baseline: HookForm::default(),
+            scheduler: SchedulerForm::default(),
+            scheduler_baseline: SchedulerForm::default(),
             hooks_selected: None,
             hook_runs: Vec::new(),
             hook_pending: 0,
@@ -1176,6 +1378,7 @@ impl Settings {
         let form = ConfigForm::from_toml(toml)?;
         let autoadd = AutoAddForm::from_toml(toml)?;
         let hooks = HookForm::from_toml(toml)?;
+        let scheduler = SchedulerForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
@@ -1186,6 +1389,8 @@ impl Settings {
         self.autoadd_selected = None;
         self.hooks_baseline = hooks.clone();
         self.hooks = hooks;
+        self.scheduler_baseline = scheduler.clone();
+        self.scheduler = scheduler;
         self.hooks_selected = None;
         Ok(())
     }
@@ -1201,6 +1406,7 @@ impl Settings {
         match tab {
             Tab::AutoAdd => self.autoadd != self.autoadd_baseline,
             Tab::Hooks => self.hooks != self.hooks_baseline,
+            Tab::Scheduler => self.scheduler != self.scheduler_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
         }
@@ -1216,6 +1422,7 @@ impl Settings {
             .map_err(|error| format!("invalid TOML: {error}"))?;
         self.autoadd.render_into(&mut doc)?;
         self.hooks.render_into(&mut doc)?;
+        self.scheduler.render_into(&mut doc)?;
         Ok(doc.to_string())
     }
 

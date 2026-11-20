@@ -101,7 +101,7 @@ pub struct AppState {
     pub(crate) watch: broadcast::Sender<EngineEvent>,
     pub config: ConfigStore,
     pub(crate) config_watch: broadcast::Sender<u64>,
-    pub(crate) control: Arc<Mutex<TorrentControl>>,
+    pub control: Arc<Mutex<TorrentControl>>,
     pub labels: Arc<Mutex<LabelState>>,
     pub store: Arc<Mutex<Box<dyn StateStore>>>,
     pub(crate) auth: Auth,
@@ -109,6 +109,8 @@ pub struct AppState {
     pub(crate) download_dir: PathBuf,
     /// AutoAdd scanner counters, shared with `GetAutoAddStatus`.
     pub(crate) autoadd: Mutex<crate::autoadd::AutoAddStatus>,
+    /// Scheduler runtime state, shared with `GetStatus`.
+    pub(crate) scheduler: Mutex<crate::scheduler::SchedulerState>,
 }
 
 impl AppState {
@@ -140,6 +142,7 @@ impl AppState {
             data_dir,
             download_dir,
             autoadd: Mutex::new(crate::autoadd::AutoAddStatus::default()),
+            scheduler: Mutex::new(crate::scheduler::SchedulerState::default()),
         }
     }
 
@@ -967,6 +970,7 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let status = self.state.aggregate_status();
+        let scheduler = self.state.scheduler_status();
         Ok(Response::new(GetStatusResponse {
             torrent_count: status.torrent_count,
             download_rate: status.download_rate,
@@ -980,6 +984,15 @@ impl Ferrent for FerrentService {
             checking_count: status.checking,
             active_count: status.active,
             moving_count: status.moving,
+            scheduler_enabled: self
+                .state
+                .config
+                .resolved()
+                .is_ok_and(|config| config.scheduler.enabled),
+            scheduler_level: scheduler
+                .level
+                .map_or_else(String::new, |level| level.label().to_owned()),
+            scheduler_next_unix: scheduler.next_unix,
         }))
     }
 
@@ -1058,6 +1071,7 @@ pub async fn serve(
     spawn_engine_watcher(Arc::clone(&state));
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
+    crate::scheduler::spawn_scheduler(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),

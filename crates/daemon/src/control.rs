@@ -136,6 +136,14 @@ impl TorrentControl {
         self.reasons.clone()
     }
 
+    /// Ids that carry the scheduler pause reason.
+    pub fn scheduler_paused(&self) -> impl Iterator<Item = TorrentId> + '_ {
+        self.reasons
+            .iter()
+            .filter(|(_, reasons)| reasons.contains(PauseReasons::SCHEDULER))
+            .map(|(id, _)| *id)
+    }
+
     /// Ids that carry the manual pause reason.
     pub fn user_paused(&self) -> impl Iterator<Item = TorrentId> + '_ {
         self.reasons

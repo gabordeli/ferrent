@@ -12,7 +12,8 @@ use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
-    self, ConfigField, HookEvent, HookField, LabelField, Settings, SuccessAction, Tab, WatchField,
+    self, ConfigField, HookEvent, HookField, LabelField, SchedulerLevel, Settings, SuccessAction,
+    Tab, WatchField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -25,8 +26,8 @@ use ferrent_protocol::v1::{
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    Column as WidgetColumn, button, checkbox, column, container, horizontal_space, mouse_area, row,
-    scrollable, text, text_input, tooltip, vertical_space,
+    Column as WidgetColumn, Row as WidgetRow, button, checkbox, column, container,
+    horizontal_space, mouse_area, row, scrollable, text, text_input, tooltip, vertical_space,
 };
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, mouse};
 
@@ -211,6 +212,10 @@ enum Message {
     HooksEnabled(bool),
     HooksRefresh,
     HooksStatusLoaded(Result<connection::HookStatus, String>),
+    SchedulerEnabled(bool),
+    SchedulerPauseSeeding(bool),
+    SchedulerField(SchedulerField, String),
+    SchedulerCell(usize, usize),
     SelectLabelFilter(String),
     ChooseLabel(Option<String>),
     LabelsAssigned(Result<usize, String>),
@@ -763,6 +768,30 @@ impl App {
                 if let Some(row) = self.settings.selected_hook_mut() {
                     row.enabled = value;
                 }
+                Task::none()
+            }
+            Message::SchedulerEnabled(value) => {
+                self.settings.scheduler.enabled = value;
+                Task::none()
+            }
+            Message::SchedulerPauseSeeding(value) => {
+                self.settings.scheduler.pause_seeding = value;
+                Task::none()
+            }
+            Message::SchedulerField(field, value) => {
+                match field {
+                    SchedulerField::Timezone => self.settings.scheduler.timezone = value,
+                    SchedulerField::DownloadLimit => {
+                        self.settings.scheduler.download_rate_limit = value;
+                    }
+                    SchedulerField::UploadLimit => {
+                        self.settings.scheduler.upload_rate_limit = value;
+                    }
+                }
+                Task::none()
+            }
+            Message::SchedulerCell(day, hour) => {
+                self.settings.scheduler.cycle(day, hour);
                 Task::none()
             }
             Message::HooksRefresh => self.load_hook_status(),
@@ -2177,6 +2206,7 @@ impl App {
                 self.settings.baseline = self.settings.form.clone();
                 self.settings.autoadd_baseline = self.settings.autoadd.clone();
                 self.settings.hooks_baseline = self.settings.hooks.clone();
+                self.settings.scheduler_baseline = self.settings.scheduler.clone();
                 self.settings.error = None;
                 self.settings.message = format!("Saved revision {revision}");
                 Task::batch([self.refresh_page(), self.load_labels()])
@@ -2420,6 +2450,7 @@ impl App {
             Tab::Session => self.settings_session_view(),
             Tab::AutoAdd => self.settings_auto_add_view(),
             Tab::Hooks => self.settings_hooks_view(),
+            Tab::Scheduler => self.settings_scheduler_view(),
             Tab::Labels => self.settings_labels_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
@@ -2447,12 +2478,14 @@ impl App {
 
         let save = match settings.tab {
             Tab::Labels => Message::LabelSave,
-            Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks => Message::SettingsSave,
+            Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks | Tab::Scheduler => {
+                Message::SettingsSave
+            }
         };
         let can_save = !settings.loading
             && match settings.tab {
                 Tab::Labels => settings.label_new || settings.label_selected.is_some(),
-                Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks => true,
+                Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks | Tab::Scheduler => true,
             };
         let footer = row![
             summary,
@@ -2982,6 +3015,97 @@ impl App {
         ]
         .spacing(10)
         .max_width(560.0)
+        .into()
+    }
+
+    fn settings_scheduler_view(&self) -> Element<'_, Message> {
+        let form = &self.settings.scheduler;
+        let days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        let mut rows: Vec<Element<Message>> = Vec::with_capacity(7);
+        for (day, label) in days.iter().enumerate() {
+            let mut cells: Vec<Element<Message>> = Vec::with_capacity(24);
+            for (hour, level) in form.grid[day].iter().enumerate() {
+                cells.push(scheduler_cell(day, hour, *level));
+            }
+            rows.push(
+                row![
+                    text(*label)
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .width(Length::Fixed(32.0)),
+                    WidgetRow::with_children(cells).spacing(1),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+        }
+        let header = row![
+            text("").width(Length::Fixed(36.0)),
+            text("00").size(9).color(theme::TEXT_MUTED),
+            horizontal_space(),
+            text("06").size(9).color(theme::TEXT_MUTED),
+            horizontal_space(),
+            text("12").size(9).color(theme::TEXT_MUTED),
+            horizontal_space(),
+            text("18").size(9).color(theme::TEXT_MUTED),
+            horizontal_space(),
+            text("23").size(9).color(theme::TEXT_MUTED),
+        ];
+
+        let field = |field: SchedulerField, placeholder: &'static str| {
+            let value = match field {
+                SchedulerField::Timezone => form.timezone.clone(),
+                SchedulerField::DownloadLimit => form.download_rate_limit.clone(),
+                SchedulerField::UploadLimit => form.upload_rate_limit.clone(),
+            };
+            column![
+                text(match field {
+                    SchedulerField::Timezone => "Timezone",
+                    SchedulerField::DownloadLimit => "Yellow download limit (B/s)",
+                    SchedulerField::UploadLimit => "Yellow upload limit (B/s)",
+                })
+                .size(11)
+                .color(theme::TEXT_MUTED),
+                text_input(placeholder, &value)
+                    .style(muted_input_style)
+                    .width(Length::Fill)
+                    .on_input(move |text| Message::SchedulerField(field, text)),
+            ]
+            .spacing(3)
+        };
+
+        column![
+            row![
+                checkbox("Enabled", form.enabled)
+                    .on_toggle(Message::SchedulerEnabled)
+                    .size(14)
+                    .text_size(12),
+                checkbox("Red pauses seeding too", form.pause_seeding)
+                    .on_toggle(Message::SchedulerPauseSeeding)
+                    .size(14)
+                    .text_size(12),
+            ]
+            .spacing(16),
+            row![
+                field(SchedulerField::Timezone, "Europe/Budapest"),
+                field(SchedulerField::DownloadLimit, "0"),
+                field(SchedulerField::UploadLimit, "0"),
+            ]
+            .spacing(8),
+            text("Monday first. Click a cell to cycle green → yellow → red.")
+                .size(10)
+                .color(theme::TEXT_MUTED),
+            header,
+            WidgetColumn::with_children(rows).spacing(1),
+            text(format!(
+                "{} non-green hour(s) · green = session defaults, yellow = limits, red = scheduler pause",
+                form.marked_cells()
+            ))
+            .size(10)
+            .color(theme::TEXT_MUTED),
+        ]
+        .spacing(8)
         .into()
     }
 
@@ -4361,6 +4485,44 @@ fn settings_field<'a>(
     ]
     .spacing(3)
     .into()
+}
+
+/// One scheduler grid cell.
+fn scheduler_cell(day: usize, hour: usize, level: SchedulerLevel) -> Element<'static, Message> {
+    let color = match level {
+        SchedulerLevel::Green => Color::from_rgb8(0x21, 0xc5, 0x5d),
+        SchedulerLevel::Yellow => Color::from_rgb8(0xf2, 0xcc, 0x15),
+        SchedulerLevel::Red => Color::from_rgb8(0xef, 0x44, 0x44),
+    };
+    button(text("").size(1))
+        .on_press(Message::SchedulerCell(day, hour))
+        .width(Length::Fixed(15.0))
+        .height(Length::Fixed(18.0))
+        .padding(0)
+        .style(move |_theme: &iced::Theme, status| button::Style {
+            background: Some(
+                match status {
+                    button::Status::Hovered => color.scale_alpha(0.8),
+                    _ => color,
+                }
+                .into(),
+            ),
+            text_color: theme::BG,
+            border: iced::Border {
+                color: theme::BORDER,
+                width: 0.0,
+                radius: 2.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchedulerField {
+    Timezone,
+    DownloadLimit,
+    UploadLimit,
 }
 
 /// Splits a fingerprint into two lines so the last group is never wrapped

@@ -68,3 +68,5 @@ tokio = { version = "1", features = ["macros", "net", "process", "rt", "rt-multi
 tokio-stream = { version = "0.1", features = ["net", "sync"] }
 toml = "0.8"
 tonic = { version = "0.14", features = ["tls-ring"] }
+chrono = "0.4.45"
+chrono-tz = "0.10.4"

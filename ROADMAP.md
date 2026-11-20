@@ -442,13 +442,13 @@
 
 **Acceptance**
 
-- [ ] tick ≤ 1 s pontossággal a határnál; suspend után újraszámol.
-- [ ] zöld = session default; sárga = limitek; piros = scheduler pause, csak a futókat resume-olja.
-- [ ] kézi pause megmarad; a guard pause-t nem írja felül.
-- [ ] DST tavasz/ősz teszt `chrono-tz` + fake clock; státusz `GetStatus`-ban.
-- [ ] 10 000 torrenten a váltás < 1 s.
+- [x] tick ≤ 1 s pontossággal a határnál; suspend után újraszámol (abszolút óra-határ, max 30 s-es újraértékelés).
+- [x] zöld = session default; sárga = limitek; piros = scheduler pause, csak a futókat resume-olja (`set_many` → csak a tényleg változók).
+- [x] kézi pause megmarad (a `USER` reason marad); a guard reason-t nem bántja.
+- [x] DST tavasz/ősz teszt `chrono-tz`-vel (2026-03-29 és 2026-10-25, Budapest); státusz `GetStatus`-ban (`scheduler_enabled/level/next_unix`).
+- [x] 10 000 torrenten a váltás < 1 s (integration teszt méri, pause és resume).
 
-**Files:** `crates/daemon/src/scheduler.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/scheduler.rs`, `tests/`
+**Files:** `crates/daemon/src/scheduler.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/config/schema.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `crates/daemon/tests/scheduler.rs`
 
 ### M5-T4 – Notification router + webhook 🤖
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5, M5-T1 és M5-T2 kész; a következő szelet **M5-T3 Scheduler**.
+**Állapot (2026-11-20):** M4-T1–T5, M5-T1, M5-T2 és M5-T3 kész; a következő szelet **M5-T4 Notification router + webhook**.

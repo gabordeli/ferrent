@@ -244,6 +244,16 @@ impl StateMirror {
         std::mem::take(&mut data.dirty)
     }
 
+    /// Every known torrent, in id order.
+    #[must_use]
+    pub fn all(&self) -> Vec<TorrentStatus> {
+        self.snapshot
+            .load()
+            .values()
+            .map(|status| (**status).clone())
+            .collect()
+    }
+
     /// Returns a torrent snapshot.
     #[must_use]
     pub fn get(&self, id: TorrentId) -> Option<TorrentStatus> {

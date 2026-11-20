@@ -143,6 +143,12 @@ message GetStatusResponse {
   uint32 active_count = 11;
   // Torrents whose payload is being moved.
   uint32 moving_count = 12;
+  // Scheduler state (M5-T3).
+  bool scheduler_enabled = 13;
+  // Current slot: "green", "yellow", "red"; empty when disabled.
+  string scheduler_level = 14;
+  // Unix seconds of the next hour boundary; `0` when disabled.
+  int64 scheduler_next_unix = 15;
 }
 
 // Request to add a torrent.

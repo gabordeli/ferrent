@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::ConfigError;
 use crate::autoadd::WatchDir;
 use crate::hooks::HookSpec;
+use crate::scheduler::Grid;
 
 const DEFAULT_DATA_DIR: &str = "./ferrent-data";
 const DEFAULT_BIND: &str = "127.0.0.1:50051";
@@ -36,6 +37,55 @@ pub struct FileConfig {
     pub autoadd: Vec<WatchDir>,
     /// Execute hooks (M5-T2).
     pub hook: Vec<HookSpec>,
+    /// 24x7 scheduler (M5-T3).
+    pub scheduler: SchedulerConfig,
+}
+
+/// The weekly scheduler grid and its limits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SchedulerConfig {
+    pub enabled: bool,
+    /// IANA timezone name, e.g. `Europe/Budapest`.
+    pub timezone: String,
+    /// Yellow-slot download limit in bytes per second.
+    pub download_rate_limit: u64,
+    /// Yellow-slot upload limit in bytes per second.
+    pub upload_rate_limit: u64,
+    /// Whether red slots pause seeding torrents too.
+    pub pause_seeding: bool,
+    /// Seven rows of 24 `g`/`y`/`r` characters, Monday first.
+    pub week: Vec<String>,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timezone: "UTC".to_owned(),
+            download_rate_limit: 0,
+            upload_rate_limit: 0,
+            pause_seeding: true,
+            week: Grid::default().render(),
+        }
+    }
+}
+
+impl SchedulerConfig {
+    /// Checks the timezone and the grid before the config is applied.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.timezone.trim().is_empty() {
+            return Err("scheduler timezone must not be empty".to_owned());
+        }
+        if self.timezone.trim().parse::<chrono_tz::Tz>().is_err() {
+            return Err(format!(
+                "unknown scheduler timezone {:?}",
+                self.timezone.trim()
+            ));
+        }
+        Grid::parse(&self.week).map_err(|error| format!("scheduler: {error}"))?;
+        Ok(())
+    }
 }
 
 /// Session-wide engine limits. `0` means unlimited.
@@ -98,6 +148,7 @@ impl FileConfig {
         if let Some(bind) = self.bind.as_deref() {
             validate_bind(bind)?;
         }
+        self.scheduler.validate().map_err(ConfigError::invalid)?;
         for (index, hook) in self.hook.iter().enumerate() {
             hook.validate()
                 .map_err(|message| ConfigError::invalid(format!("hook[{index}]: {message}")))?;
@@ -159,6 +210,7 @@ impl FileConfig {
             queue: self.queue.clone(),
             autoadd: self.autoadd.clone(),
             hook: self.hook.clone(),
+            scheduler: self.scheduler.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -177,6 +229,7 @@ pub struct ResolvedConfig {
     pub queue: QueueConfig,
     pub autoadd: Vec<WatchDir>,
     pub hook: Vec<HookSpec>,
+    pub scheduler: SchedulerConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
