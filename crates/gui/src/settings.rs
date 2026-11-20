@@ -20,17 +20,19 @@ pub enum Tab {
     Hooks,
     Scheduler,
     Notifications,
+    Storage,
     Labels,
 }
 
 impl Tab {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
         Self::Hooks,
         Self::Scheduler,
         Self::Notifications,
+        Self::Storage,
         Self::Labels,
     ];
 
@@ -43,6 +45,7 @@ impl Tab {
             Self::Hooks => "Hooks",
             Self::Scheduler => "Scheduler",
             Self::Notifications => "Notifications",
+            Self::Storage => "Storage",
             Self::Labels => "Labels",
         }
     }
@@ -61,6 +64,9 @@ impl Tab {
             }
             Self::Notifications => {
                 "Webhook channels fed by the event journal, with retry and a dead-letter box."
+            }
+            Self::Storage => {
+                "Filesystem zones: each label's library folder and the staging folder per disk."
             }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
         }
@@ -1879,6 +1885,288 @@ impl LabelForm {
     }
 }
 
+/// Numeric fields of the storage tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageField {
+    MinFree,
+    Margin,
+    Poll,
+}
+
+impl StorageField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MinFree => "Minimum free (bytes)",
+            Self::Margin => "Recovery margin (bytes)",
+            Self::Poll => "Poll interval (s)",
+        }
+    }
+}
+
+/// One editable storage zone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoneRow {
+    pub path: String,
+    /// Label of a library zone; empty for a staging zone.
+    pub label: String,
+    pub staging: bool,
+    pub enabled: bool,
+}
+
+impl ZoneRow {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            path: String::new(),
+            label: String::new(),
+            staging: false,
+            enabled: true,
+        }
+    }
+
+    /// Shorthand for the zone list.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        if self.staging {
+            "staging".to_owned()
+        } else if self.label.trim().is_empty() {
+            "library".to_owned()
+        } else {
+            self.label.trim().to_owned()
+        }
+    }
+}
+
+impl Default for ZoneRow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `[diskguard]`: the zone list and the guard thresholds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageForm {
+    pub enabled: bool,
+    pub min_free: String,
+    pub margin: String,
+    pub poll_secs: String,
+    /// `true` allows an add below the floor, `false` rejects it.
+    pub on_low_notify: bool,
+    pub zones: Vec<ZoneRow>,
+}
+
+impl Default for StorageForm {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_free: "0".to_owned(),
+            margin: "0".to_owned(),
+            poll_secs: "30".to_owned(),
+            on_low_notify: false,
+            zones: Vec::new(),
+        }
+    }
+}
+
+impl StorageForm {
+    /// Reads the `[diskguard]` table and its zones.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("diskguard") else {
+            return Ok(Self::default());
+        };
+        let Item::Table(table) = item else {
+            return Err("diskguard must be a table".to_owned());
+        };
+        let number = |key: &str, fallback: u64| {
+            table
+                .get(key)
+                .and_then(Item::as_integer)
+                .map_or_else(|| fallback.to_string(), |value| value.to_string())
+        };
+        let mut form = Self {
+            enabled: table
+                .get("enabled")
+                .and_then(Item::as_bool)
+                .unwrap_or(false),
+            min_free: number("min_free_bytes", 0),
+            margin: number("margin_bytes", 0),
+            poll_secs: number("poll_secs", 30),
+            on_low_notify: table
+                .get("on_low")
+                .and_then(Item::as_str)
+                .is_some_and(|value| value == "notify"),
+            zones: Vec::new(),
+        };
+        if let Some(Item::ArrayOfTables(array)) = table.get("zone") {
+            for entry in array.iter() {
+                form.zones.push(ZoneRow {
+                    path: entry
+                        .get("path")
+                        .and_then(Item::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    label: entry
+                        .get("label")
+                        .and_then(Item::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    staging: entry
+                        .get("staging")
+                        .and_then(Item::as_bool)
+                        .unwrap_or(false),
+                    enabled: entry.get("enabled").and_then(Item::as_bool).unwrap_or(true),
+                });
+            }
+        }
+        Ok(form)
+    }
+
+    /// Checks the thresholds and the zone roles before writing back.
+    pub fn validate(&self) -> Result<(), String> {
+        let poll = self.poll_secs.trim().parse::<u64>().unwrap_or(0);
+        if !(1..=3_600).contains(&poll) {
+            return Err("Storage poll must be between 1 and 3600 seconds".to_owned());
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        let mut labels = std::collections::BTreeSet::new();
+        for (index, zone) in self.zones.iter().enumerate() {
+            let path = zone.path.trim();
+            if path.is_empty() {
+                return Err(format!("Zone {}: path must not be empty", index + 1));
+            }
+            if !path.starts_with('/') {
+                return Err(format!("Zone {}: path must be absolute", index + 1));
+            }
+            if !paths.insert(path.to_owned()) {
+                return Err(format!("Zone {}: duplicate path {path}", index + 1));
+            }
+            if zone.staging {
+                if !zone.label.trim().is_empty() {
+                    return Err(format!("Zone {}: a staging zone has no label", index + 1));
+                }
+            } else {
+                let label = zone.label.trim();
+                if label.is_empty() {
+                    return Err(format!("Zone {}: a library zone needs a label", index + 1));
+                }
+                if !labels.insert(label.to_lowercase()) {
+                    return Err(format!(
+                        "Zone {}: label {label} already has a library zone",
+                        index + 1
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes `[diskguard]` and the zone array back.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        let mut table = Table::new();
+        table["enabled"] = value(self.enabled);
+        table["min_free_bytes"] = value(
+            self.min_free
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| "Storage minimum free must be a whole number".to_owned())?,
+        );
+        table["margin_bytes"] = value(
+            self.margin
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| "Storage margin must be a whole number".to_owned())?,
+        );
+        table["poll_secs"] = value(
+            self.poll_secs
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| "Storage poll must be a whole number".to_owned())?,
+        );
+        table["on_low"] = value(if self.on_low_notify {
+            "notify"
+        } else {
+            "reject"
+        });
+        if !self.zones.is_empty() {
+            let mut array = ArrayOfTables::new();
+            for zone in &self.zones {
+                let mut entry = Table::new();
+                entry["path"] = value(zone.path.trim());
+                if zone.staging {
+                    entry["staging"] = value(true);
+                } else {
+                    entry["label"] = value(zone.label.trim());
+                }
+                if !zone.enabled {
+                    entry["enabled"] = value(false);
+                }
+                array.push(entry);
+            }
+            table["zone"] = Item::ArrayOfTables(array);
+        }
+        doc["diskguard"] = Item::Table(table);
+        Ok(())
+    }
+
+    /// Reads one numeric field.
+    #[must_use]
+    pub fn text(&self, field: StorageField) -> &str {
+        match field {
+            StorageField::MinFree => &self.min_free,
+            StorageField::Margin => &self.margin,
+            StorageField::Poll => &self.poll_secs,
+        }
+    }
+
+    /// Writes one numeric field.
+    pub fn set_text(&mut self, field: StorageField, text: String) {
+        match field {
+            StorageField::MinFree => self.min_free = text,
+            StorageField::Margin => self.margin = text,
+            StorageField::Poll => self.poll_secs = text,
+        }
+    }
+
+    /// Adds an empty zone and returns its index.
+    pub fn add_zone(&mut self) -> usize {
+        self.zones.push(ZoneRow::new());
+        self.zones.len() - 1
+    }
+
+    /// Removes one zone.
+    pub fn remove_zone(&mut self, index: usize) {
+        if index < self.zones.len() {
+            self.zones.remove(index);
+        }
+    }
+}
+
+/// One zone as the daemon reported it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ZoneView {
+    pub path: String,
+    pub label: String,
+    pub staging: bool,
+    pub enabled: bool,
+}
+
+/// One filesystem as the daemon reported it (read-only in the form).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiskRow {
+    pub mount: String,
+    pub fs: String,
+    pub free: u64,
+    pub total: u64,
+    pub torrents: u32,
+    pub low: bool,
+    pub zones: Vec<ZoneView>,
+}
+
 /// Everything the settings modal shows.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -1904,6 +2192,10 @@ pub struct Settings {
     pub notify_selected: Option<usize>,
     pub notify_telegram: Option<usize>,
     pub notify_status: Option<(u32, u32, u32)>,
+    pub storage: StorageForm,
+    pub storage_baseline: StorageForm,
+    pub storage_disks: Vec<DiskRow>,
+    pub zone_selected: Option<usize>,
     pub hooks_selected: Option<usize>,
     pub hook_runs: Vec<HookRunRow>,
     pub hook_pending: u32,
@@ -1940,6 +2232,10 @@ impl Default for Settings {
             notify_selected: None,
             notify_telegram: None,
             notify_status: None,
+            storage: StorageForm::default(),
+            storage_baseline: StorageForm::default(),
+            storage_disks: Vec::new(),
+            zone_selected: None,
             hooks_selected: None,
             hook_runs: Vec::new(),
             hook_pending: 0,
@@ -1966,6 +2262,7 @@ impl Settings {
         let hooks = HookForm::from_toml(toml)?;
         let scheduler = SchedulerForm::from_toml(toml)?;
         let notify = NotifyForm::from_toml(toml)?;
+        let storage = StorageForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
@@ -1980,6 +2277,9 @@ impl Settings {
         self.scheduler = scheduler;
         self.notify_baseline = notify.clone();
         self.notify = notify;
+        self.storage_baseline = storage.clone();
+        self.storage = storage;
+        self.zone_selected = None;
         self.notify_selected = None;
         self.notify_telegram = None;
         self.hooks_selected = None;
@@ -1999,6 +2299,7 @@ impl Settings {
             Tab::Hooks => self.hooks != self.hooks_baseline,
             Tab::Scheduler => self.scheduler != self.scheduler_baseline,
             Tab::Notifications => self.notify != self.notify_baseline,
+            Tab::Storage => self.storage != self.storage_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
         }
@@ -2016,6 +2317,7 @@ impl Settings {
         self.hooks.render_into(&mut doc)?;
         self.scheduler.render_into(&mut doc)?;
         self.notify.render_into(&mut doc)?;
+        self.storage.render_into(&mut doc)?;
         Ok(doc.to_string())
     }
 
@@ -2520,5 +2822,87 @@ mod tests {
         settings.remove_row("movies");
         assert!(settings.current_label().is_none());
         assert!(settings.labels.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+
+    const RAW: &str = r#"
+download_dir = "/data/downloads"
+
+[diskguard]
+enabled = true
+min_free_bytes = 1073741824
+margin_bytes = 536870912
+poll_secs = 30
+on_low = "notify"
+
+[[diskguard.zone]]
+path = "/mnt/usbhdd2/Filmek"
+label = "Filmek"
+
+[[diskguard.zone]]
+path = "/mnt/usbhdd2/_progress"
+staging = true
+"#;
+
+    #[test]
+    fn zones_and_thresholds_roundtrip() {
+        let mut settings = Settings::default();
+        settings
+            .apply_snapshot(RAW, 1, Vec::new())
+            .expect("snapshot");
+        assert!(settings.storage.enabled);
+        assert_eq!(settings.storage.min_free, "1073741824");
+        assert_eq!(settings.storage.margin, "536870912");
+        assert!(settings.storage.on_low_notify);
+        assert_eq!(settings.storage.zones.len(), 2);
+        assert!(settings.storage.zones[1].staging);
+
+        let index = settings.storage.add_zone();
+        settings.storage.zones[index].path = "/mnt/usbhdd3/for-seed".to_owned();
+        settings.storage.zones[index].label = "seed".to_owned();
+        let rendered = settings.render().expect("render");
+        let reparsed = StorageForm::from_toml(&rendered).expect("reparse");
+        assert_eq!(reparsed.zones.len(), 3);
+        assert_eq!(reparsed.zones[2].label, "seed");
+        assert!(reparsed.zones[2].enabled);
+        assert_eq!(reparsed.poll_secs, "30");
+    }
+
+    #[test]
+    fn role_mistakes_are_rejected() {
+        let mut settings = Settings::default();
+        settings
+            .apply_snapshot(RAW, 1, Vec::new())
+            .expect("snapshot");
+
+        settings.storage.zones[1].label = "Filmek".to_owned();
+        let error = settings.render().expect_err("staging with a label");
+        assert!(error.contains("staging"), "{error}");
+
+        settings.storage.zones[1].label.clear();
+        settings.storage.zones[0].label = "movie".to_owned();
+        let index = settings.storage.add_zone();
+        settings.storage.zones[index].path = "/mnt/usbhdd1/Filmek".to_owned();
+        settings.storage.zones[index].label = "MOVIE".to_owned();
+        let error = settings.render().expect_err("duplicate label");
+        assert!(error.contains("already"), "{error}");
+
+        settings.storage.zones[index].label = "other".to_owned();
+        settings.storage.zones[index].path = "/mnt/usbhdd2/Filmek".to_owned();
+        let error = settings.render().expect_err("duplicate path");
+        assert!(error.contains("duplicate path"), "{error}");
+
+        settings.storage.zones[index].path = "relative/Filmek".to_owned();
+        let error = settings.render().expect_err("relative path");
+        assert!(error.contains("absolute"), "{error}");
+
+        settings.storage.zones[index].path = "/mnt/usbhdd1/Other".to_owned();
+        settings.storage.poll_secs = "0".to_owned();
+        let error = settings.render().expect_err("bad poll");
+        assert!(error.contains("poll"), "{error}");
     }
 }

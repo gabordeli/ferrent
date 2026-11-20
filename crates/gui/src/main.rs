@@ -12,8 +12,8 @@ use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
-    self, ConfigField, DigestField, HookEvent, HookField, LabelField, SchedulerLevel, Settings,
-    SuccessAction, Tab, WatchField, WebhookField,
+    self, ConfigField, DigestField, DiskRow, HookEvent, HookField, LabelField, SchedulerLevel,
+    Settings, StorageField, SuccessAction, Tab, WatchField, WebhookField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -161,6 +161,7 @@ enum Message {
     FileDropped(PathBuf),
     OpenServers,
     OpenSettings,
+    OpenStorage,
     SettingsTab(Tab),
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
@@ -227,6 +228,17 @@ enum Message {
     NotifyTest,
     NotifyTested(Result<u32, String>),
     NotifyStatusLoaded(Result<connection::NotifyStatus, String>),
+    DisksLoaded(Result<Vec<DiskRow>, String>),
+    AddLabelChanged(String),
+    StorageEnabled(bool),
+    StorageOnLow(bool),
+    StorageNumber(StorageField, String),
+    ZonePath(usize, String),
+    ZoneLabel(usize, String),
+    ZoneStaging(usize, bool),
+    ZoneEnabled(usize, bool),
+    ZoneAdd,
+    ZoneRemove(usize),
     NotifyTelegramSelected(usize),
     NotifyTelegramAdd,
     NotifyTelegramRemove,
@@ -311,7 +323,7 @@ impl Modal {
         match self {
             Self::Servers => (880.0, 620.0),
             Self::Settings => (settings::MODAL_WIDTH, settings::MODAL_HEIGHT),
-            Self::AddTorrent => (620.0, 320.0),
+            Self::AddTorrent => (620.0, 470.0),
             Self::Remove => (480.0, 260.0),
             Self::SetLabel => (420.0, 420.0),
         }
@@ -350,6 +362,8 @@ struct App {
     add_path: String,
     add_save_path: String,
     add_name: String,
+    add_label: String,
+    disks: Vec<DiskRow>,
     add_in_flight: bool,
     action_in_flight: bool,
     sidebar_collapsed: bool,
@@ -439,6 +453,8 @@ impl Default for App {
             add_path: String::new(),
             add_save_path: String::new(),
             add_name: String::new(),
+            add_label: String::new(),
+            disks: Vec::new(),
             add_in_flight: false,
             action_in_flight: false,
             sidebar_collapsed: false,
@@ -654,12 +670,85 @@ impl App {
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenServers => self.open_servers(),
             Message::OpenSettings => self.open_settings(),
+            Message::OpenStorage => {
+                self.settings.tab = Tab::Storage;
+                Task::batch([self.open_settings(), self.load_disks()])
+            }
             Message::SettingsTab(tab) => {
                 self.settings.tab = tab;
                 self.settings.message.clear();
                 if tab == Tab::Notifications {
                     return self.load_notify_status();
                 }
+                if tab == Tab::Storage {
+                    return self.load_disks();
+                }
+                Task::none()
+            }
+            Message::DisksLoaded(result) => {
+                match result {
+                    Ok(rows) => {
+                        self.disks = rows.clone();
+                        self.settings.storage_disks = rows;
+                    }
+                    Err(error) => {
+                        if self.settings.error.is_none() {
+                            self.settings.error = Some(format!("storage: {error}"));
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::AddLabelChanged(label) => {
+                self.add_label = label.clone();
+                if let Some(staging) = self.staging_for(&label) {
+                    self.add_save_path = staging;
+                }
+                Task::none()
+            }
+            Message::StorageEnabled(value) => {
+                self.settings.storage.enabled = value;
+                Task::none()
+            }
+            Message::StorageOnLow(notify) => {
+                self.settings.storage.on_low_notify = notify;
+                Task::none()
+            }
+            Message::StorageNumber(field, value) => {
+                self.settings.storage.set_text(field, value);
+                Task::none()
+            }
+            Message::ZonePath(index, value) => {
+                if let Some(zone) = self.settings.storage.zones.get_mut(index) {
+                    zone.path = value;
+                }
+                Task::none()
+            }
+            Message::ZoneLabel(index, value) => {
+                if let Some(zone) = self.settings.storage.zones.get_mut(index) {
+                    zone.label = value;
+                }
+                Task::none()
+            }
+            Message::ZoneStaging(index, value) => {
+                if let Some(zone) = self.settings.storage.zones.get_mut(index) {
+                    zone.staging = value;
+                }
+                Task::none()
+            }
+            Message::ZoneEnabled(index, value) => {
+                if let Some(zone) = self.settings.storage.zones.get_mut(index) {
+                    zone.enabled = value;
+                }
+                Task::none()
+            }
+            Message::ZoneAdd => {
+                self.settings.zone_selected = Some(self.settings.storage.add_zone());
+                Task::none()
+            }
+            Message::ZoneRemove(index) => {
+                self.settings.storage.remove_zone(index);
+                self.settings.zone_selected = None;
                 Task::none()
             }
             Message::SettingsField(field, value) => {
@@ -676,7 +765,7 @@ impl App {
                 self.settings.form.queue_enabled = value;
                 Task::none()
             }
-            Message::SettingsReload => self.load_settings(),
+            Message::SettingsReload => Task::batch([self.load_settings(), self.load_disks()]),
             Message::SettingsSave => self.save_settings(),
             Message::SettingsLoaded {
                 request,
@@ -1228,6 +1317,7 @@ impl App {
                     self.request_page(0),
                     self.load_labels(),
                     self.schedule_poll(),
+                    self.load_disks(),
                 ])
             }
             Err(error) => {
@@ -1723,8 +1813,9 @@ impl App {
         self.status = format!("Adding {path}...");
         let path = PathBuf::from(path);
         let name = self.add_name.trim().to_owned();
+        let label = self.add_label.trim().to_owned();
         Task::perform(
-            async move { actions::add(&client, &path, &save_path, &name).await },
+            async move { actions::add(&client, &path, &save_path, &name, &label).await },
             Message::TorrentAdded,
         )
     }
@@ -1762,6 +1853,25 @@ impl App {
     }
 
     /// Prefills the add form and opens the confirmation modal.
+    /// The staging folder of the label's filesystem, from the disk payload.
+    fn staging_for(&self, label: &str) -> Option<String> {
+        if label.trim().is_empty() {
+            return None;
+        }
+        for disk in &self.disks {
+            let library = disk.zones.iter().any(|zone| {
+                !zone.staging && zone.enabled && zone.label.eq_ignore_ascii_case(label.trim())
+            });
+            if !library {
+                continue;
+            }
+            if let Some(staging) = disk.zones.iter().find(|zone| zone.staging && zone.enabled) {
+                return Some(staging.path.clone());
+            }
+        }
+        None
+    }
+
     fn prepare_add(&mut self, path: PathBuf) {
         self.add_name = path
             .file_stem()
@@ -2249,6 +2359,16 @@ impl App {
         Task::none()
     }
 
+    fn load_disks(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { connection::disks(&client).await },
+            Message::DisksLoaded,
+        )
+    }
+
     fn load_notify_status(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
@@ -2609,6 +2729,7 @@ impl App {
             Tab::Hooks => self.settings_hooks_view(),
             Tab::Scheduler => self.settings_scheduler_view(),
             Tab::Notifications => self.settings_notifications_view(),
+            Tab::Storage => self.settings_storage_view(),
             Tab::Labels => self.settings_labels_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
@@ -2641,7 +2762,8 @@ impl App {
             | Tab::AutoAdd
             | Tab::Hooks
             | Tab::Scheduler
-            | Tab::Notifications => Message::SettingsSave,
+            | Tab::Notifications
+            | Tab::Storage => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
@@ -2651,7 +2773,8 @@ impl App {
                 | Tab::AutoAdd
                 | Tab::Hooks
                 | Tab::Scheduler
-                | Tab::Notifications => true,
+                | Tab::Notifications
+                | Tab::Storage => true,
             };
         let footer = row![
             summary,
@@ -3524,6 +3647,196 @@ impl App {
         .into()
     }
 
+    fn settings_storage_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let storage = &settings.storage;
+
+        let mut disks = column![row![
+            text("MOUNT")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(4)),
+            text("FS")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(2)),
+            text("FREE / TOTAL")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(3)),
+            text("TORRENTS")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(2)),
+            text("STATUS")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(2)),
+            text("ZONES")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(2)),
+        ]]
+        .spacing(4);
+        if settings.storage_disks.is_empty() {
+            disks = disks.push(
+                text("Connect and open this tab to see the filesystems.")
+                    .size(11)
+                    .color(theme::TEXT_MUTED),
+            );
+        }
+        for disk in &settings.storage_disks {
+            disks = disks.push(
+                row![
+                    text(disk.mount.clone())
+                        .size(11)
+                        .width(Length::FillPortion(4)),
+                    text(disk.fs.clone())
+                        .size(11)
+                        .color(theme::TEXT_MUTED)
+                        .width(Length::FillPortion(2)),
+                    text(format!(
+                        "{} / {}",
+                        format_size(disk.free),
+                        format_size(disk.total)
+                    ))
+                    .size(11)
+                    .width(Length::FillPortion(3)),
+                    text(disk.torrents.to_string())
+                        .size(11)
+                        .width(Length::FillPortion(2)),
+                    text(if disk.low { "LOW" } else { "ok" })
+                        .size(11)
+                        .color(if disk.low {
+                            theme::ERROR
+                        } else {
+                            theme::TEXT_MUTED
+                        })
+                        .width(Length::FillPortion(2)),
+                    text(disk.zones.len().to_string())
+                        .size(11)
+                        .width(Length::FillPortion(2)),
+                ]
+                .spacing(4),
+            );
+        }
+
+        let thresholds = row![
+            checkbox("Guard enabled", storage.enabled)
+                .on_toggle(Message::StorageEnabled)
+                .size(14)
+                .text_size(12),
+            text_input("0", storage.text(StorageField::MinFree))
+                .style(muted_input_style)
+                .on_input(|value| Message::StorageNumber(StorageField::MinFree, value))
+                .width(Length::Fixed(140.0)),
+            text_input("0", storage.text(StorageField::Margin))
+                .style(muted_input_style)
+                .on_input(|value| Message::StorageNumber(StorageField::Margin, value))
+                .width(Length::Fixed(140.0)),
+            text_input("30", storage.text(StorageField::Poll))
+                .style(muted_input_style)
+                .on_input(|value| Message::StorageNumber(StorageField::Poll, value))
+                .width(Length::Fixed(80.0)),
+            checkbox("Allow low add", storage.on_low_notify)
+                .on_toggle(Message::StorageOnLow)
+                .size(14)
+                .text_size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        let mut zones = column![row![
+            text("PATH")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(6)),
+            text("LABEL")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(3)),
+            text("STAGING")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(2)),
+            text("ON")
+                .size(10)
+                .color(theme::TEXT_MUTED)
+                .width(Length::FillPortion(1)),
+            text("").width(Length::FillPortion(1)),
+        ]]
+        .spacing(4);
+        if storage.zones.is_empty() {
+            zones = zones.push(
+                text("No zones yet: add the label folders and one staging folder per disk.")
+                    .size(11)
+                    .color(theme::TEXT_MUTED),
+            );
+        }
+        for (index, zone) in storage.zones.iter().enumerate() {
+            let selected = settings.zone_selected == Some(index);
+            let path = text_input("/mnt/usbhdd2/Filmek", &zone.path)
+                .style(muted_input_style)
+                .on_input(move |value| Message::ZonePath(index, value))
+                .width(Length::FillPortion(6));
+            let label: Element<Message> = if zone.staging {
+                text("staging")
+                    .size(11)
+                    .color(theme::TEXT_MUTED)
+                    .width(Length::FillPortion(3))
+                    .into()
+            } else {
+                text_input("Filmek", &zone.label)
+                    .style(muted_input_style)
+                    .on_input(move |value| Message::ZoneLabel(index, value))
+                    .width(Length::FillPortion(3))
+                    .into()
+            };
+            zones = zones.push(
+                row![
+                    path,
+                    label,
+                    checkbox("", zone.staging)
+                        .on_toggle(move |value| Message::ZoneStaging(index, value))
+                        .size(14)
+                        .width(Length::FillPortion(2)),
+                    checkbox("", zone.enabled)
+                        .on_toggle(move |value| Message::ZoneEnabled(index, value))
+                        .size(14)
+                        .width(Length::FillPortion(1)),
+                    button(text("×").size(14))
+                        .on_press(Message::ZoneRemove(index))
+                        .padding([2, 8])
+                        .style(if selected {
+                            iced::widget::button::primary
+                        } else {
+                            iced::widget::button::text
+                        }),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+
+        let body = column![
+            text("Filesystems").size(12).font(theme::medium()),
+            disks,
+            text("Guard").size(12).font(theme::medium()),
+            thresholds,
+            row![
+                text("Minimum free and margin apply per filesystem; the guard pauses writers only, never seeds.")
+                    .size(10)
+                    .color(theme::TEXT_MUTED),
+            ],
+            text("Zones").size(12).font(theme::medium()),
+            zones,
+            row![action_button("Add zone", Message::ZoneAdd, true)].spacing(8),
+        ]
+        .spacing(10);
+
+        scrollable(body).height(Length::Fill).into()
+    }
+
     fn settings_labels_view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let rows: Vec<Element<Message>> = settings
@@ -3753,12 +4066,48 @@ impl App {
     }
 
     fn add_torrent_view(&self) -> Element<'_, Message> {
+        let mut labels: Vec<Element<Message>> = vec![label_choice(
+            "None".to_owned(),
+            self.add_label.is_empty(),
+            Message::AddLabelChanged(String::new()),
+        )];
+        labels.extend(self.settings.labels.iter().map(|row| {
+            label_choice(
+                row.label.name.clone(),
+                self.add_label == row.label.name,
+                Message::AddLabelChanged(row.label.name.clone()),
+            )
+        }));
+        let warning: Element<Message> = if self.add_label.trim().is_empty() {
+            text("No label: the payload goes to the global download directory.")
+                .size(10)
+                .color(theme::QUEUED)
+                .into()
+        } else if self.staging_for(&self.add_label).is_some() {
+            text(format!(
+                "Staging folder of the label's filesystem: {}",
+                self.staging_for(&self.add_label).unwrap_or_default()
+            ))
+            .size(10)
+            .color(theme::TEXT_MUTED)
+            .into()
+        } else {
+            text("This label has no storage zone yet; the path stays editable.")
+                .size(10)
+                .color(theme::QUEUED)
+                .into()
+        };
         let body = column![
             detail_row("File", self.add_path.clone(), theme::TEXT_MUTED),
             text("Name").size(11).color(theme::TEXT_MUTED),
             text_input("Torrent name", &self.add_name)
                 .on_input(Message::AddNameChanged)
                 .width(Length::Fill),
+            text("Label").size(11).color(theme::TEXT_MUTED),
+            scrollable(column(labels).spacing(2).width(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0)),
+            warning,
             text("Save path").size(11).color(theme::TEXT_MUTED),
             text_input("Save path (daemon default)", &self.add_save_path)
                 .on_input(Message::AddSavePathChanged)
@@ -4163,7 +4512,30 @@ impl App {
         let error = TorrentState::Error as i32;
         let moving = TorrentState::Moving as i32;
 
+        let free: u64 = self.disks.iter().map(|disk| disk.free).sum();
+        let low = self.disks.iter().any(|disk| disk.low);
+        let disks_line: Element<Message> = if expanded && !self.disks.is_empty() {
+            button(
+                column![
+                    text(format!("{} disks", self.disks.len()))
+                        .size(10)
+                        .color(theme::TEXT_MUTED),
+                    text(format!("{} free", format_size(free)))
+                        .size(10)
+                        .color(if low { theme::ERROR } else { theme::TEXT_MUTED }),
+                ]
+                .spacing(1),
+            )
+            .on_press(Message::OpenStorage)
+            .width(Length::Fill)
+            .padding([4, 12])
+            .style(iced::widget::button::text)
+            .into()
+        } else {
+            text("").size(1).into()
+        };
         let bottom: Element<Message> = WidgetColumn::with_children(vec![
+            disks_line,
             icon_nav(
                 expanded,
                 glyph::SETTINGS,

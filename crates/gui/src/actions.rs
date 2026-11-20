@@ -79,6 +79,7 @@ pub async fn add(
     path: &Path,
     save_path: &str,
     display_name: &str,
+    label: &str,
 ) -> Result<u64, String> {
     let metainfo =
         std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -97,7 +98,7 @@ pub async fn add(
             metainfo,
             save_path: save_path.to_owned(),
             total_bytes: 0,
-            label: String::new(),
+            label: label.to_owned(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;

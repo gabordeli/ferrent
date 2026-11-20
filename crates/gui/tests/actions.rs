@@ -42,13 +42,13 @@ async fn adds_pages_and_mutates_torrents() {
     let client = connect_to(&server, ca).await;
 
     let save_path = dir.join("downloads").display().to_string();
-    let first = actions::add(&client, &fixture_variant(&dir, 1), &save_path, "")
+    let first = actions::add(&client, &fixture_variant(&dir, 1), &save_path, "", "")
         .await
         .expect("add first");
-    let second = actions::add(&client, &fixture_variant(&dir, 2), &save_path, "")
+    let second = actions::add(&client, &fixture_variant(&dir, 2), &save_path, "", "")
         .await
         .expect("add second");
-    let third = actions::add(&client, &fixture_variant(&dir, 3), &save_path, "")
+    let third = actions::add(&client, &fixture_variant(&dir, 3), &save_path, "", "")
         .await
         .expect("add third");
     tokio::time::sleep(Duration::from_millis(250)).await;

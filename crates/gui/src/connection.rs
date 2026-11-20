@@ -7,14 +7,15 @@ use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
     CreateLabelRequest, DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest,
-    GetHookStatusRequest, GetNotificationStatusRequest, GetStatusRequest, GetTorrentFilesRequest,
-    GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest,
-    ListTorrentsRequest, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
-    SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
-    UpdateLabelRequest,
+    GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest, GetStatusRequest,
+    GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry,
+    ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest, SendTestNotificationRequest,
+    SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
+    TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
+use crate::settings::{DiskRow, ZoneView};
 
 /// Number of rows fetched per server-side page request.
 pub const PAGE_SIZE: u32 = 100;
@@ -397,6 +398,38 @@ pub async fn notification_status(client: &AuthClient) -> Result<NotifyStatus, St
         dead: response.dead,
         channels: response.channels,
     })
+}
+
+/// The storage payload, flattened for the settings table.
+pub async fn disks(client: &AuthClient) -> Result<Vec<DiskRow>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_disks(GetDisksRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response
+        .disks
+        .into_iter()
+        .map(|disk| DiskRow {
+            mount: disk.mount,
+            fs: disk.fs,
+            free: disk.free_bytes,
+            total: disk.total_bytes,
+            torrents: disk.torrents,
+            low: disk.low,
+            zones: disk
+                .zones
+                .into_iter()
+                .map(|zone| ZoneView {
+                    path: zone.path,
+                    label: zone.label,
+                    staging: zone.staging,
+                    enabled: zone.enabled,
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 /// Queues a test delivery to every enabled webhook.

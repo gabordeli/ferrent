@@ -51,32 +51,39 @@ cargo test --release -p ferrent-daemon --lib a_thousand_zones -- --nocapture
 | Move retry tele cél esetén | 300 s, max 5 próba, utána `Error` event |
 | Add-kapu (alacsony staging) | azonnali `FAILED_PRECONDITION` (nincs poll) |
 
-## M4 – Éles, több lemezes ellenőrzés (nyitott)
+## M4 – Éles, több lemezes ellenőrzés (2026-11-20)
 
-A `.27` hoston a `/mnt/usbhdd1..3` három külön fájlrendszer, de a jelen
-sessionből SSH nem elérhető (`gabor@192.168.2.27` → publickey denied), ezért
-a három lemezes éles ellenőrzés még nyitott. A lépések, ha a hozzáférés megvan:
+A `.27` hoston (root SSH) a három lemez külön ext4 fájlrendszer, a laptop
+pedig NFS-en látja őket (`/home/gabor/Storagebox/usbhdd{1,2,3}`, külön
+`st_dev`). A payloadot a valódi lemezekre állított zónákkal futtatva:
 
-```bash
-# 1. a valós mount-tábla és a zónák
-findmnt -l -o TARGET,SOURCE,FSTYPE,SIZE,AVAIL /mnt/usbhdd1 /mnt/usbhdd2 /mnt/usbhdd3
-ls -1d /mnt/usbhdd*/*/
+| Lemez | Eszköz | Méret | Szabad | Zónák |
+|---|---|---:|---:|---|
+| usbhdd1 | `/dev/sdc1` (st_dev 2081) | 2,7 TiB | 1,4 TiB | `Zene` (library) |
+| usbhdd2 | `/dev/sdb1` (st_dev 2065) | 5,4 TiB | 1,9–2,0 TiB | `Filmek`, `Sorozatok` (library), `_progress` (staging) |
+| usbhdd3 | `/dev/sdd1` (st_dev 2097) | 5,4 TiB | 1,4 TiB | `xxx_pic`, `xxx-for_seed` (library), `_progress` (staging) |
 
-# 2. a payload
-ferrent disks --json   # vagy: grpcurl a GetDisks-re
+A `GetDisks` payload a három lemezt külön adta vissza, a zónákat a helyes
+lemezhez rendelve; a helyi lemezek (`/`, `/boot`, `/boot/efi` LOW) mellett.
 
-# 3. low szimuláció: egy lemezre dd-vel tölteni, majd figyelni a
-#    DiskLow eventet és a csak-írók pause-olását
-```
+**Éles feloldás:** `ferrent add /tmp/label-test.torrent --label movies` →
+`save_path = /home/gabor/Storagebox/usbhdd2/_progress`, azaz a `Filmek`
+zóna **azonos lemezén** lévő staging (a `.27`-en `/mnt/usbhdd2/_progress`).
+Ez pontosan a kért viselkedés: befejezéskor a move ugyanazon a fájlrendszeren
+rename.
 
-A zóna-feloldás helyességét a T1/T2 tesztjei fedik (valós `st_dev`,
-cross-device `MissingStaging`), a guard viselkedését a T3 tesztje két
-fájlrendszerrel (build FS + tmpfs).
+**Megfigyelés:** a valós névhasználat eltér a korábbi példáktól
+(`xxx_pic`, `xxx-for_seed`, `Zene`; nincs `for-seed`/`xxx-hd` a gyökérben),
+és a `usbhdd1`-en **nincs `_progress`** — ha oda címkézett torrent kerül, a
+feloldás `MissingStaging`-et ad, amíg a staging zóna létre nem jön. Ez a
+modell szándékos viselkedése, nem hiba.
 
 ## Korlátok
 
 - A guard `MockEngine`-en fut: a valódi libtorrent pause/resume hívás
   költsége nem benne van (a `TorrentControl` és a döntés igen).
-- A 3 FS-es, valódi lemezes mérés a `.27` hoston még hátra van (M4).
+- A 3 FS-es éles ellenőrzés megvan (M4), de NFS-en keresztül; a `.27`-en futó
+  daemon saját `statvfs`-e ugyanazokat a számokat adja (a host `df`-je és a
+  payload 1–5%-on belül egyezett).
 - A mérés egy hoszton, egy felhasználó alatt készült; a `statvfs` hálózati
   FS-en (NFS) lassabb lehet — ezt a timeout fogja le.

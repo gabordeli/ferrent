@@ -25,14 +25,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut torrents = 4_000usize;
     let mut port = 50_129u16;
     let mut data_dir = PathBuf::from("/tmp/ferrent-demo-data");
+    // `--zone PATH:LABEL` adds a library zone, `--staging PATH` a staging
+    // zone; without them the demo builds its own folders under the data dir.
+    let mut configured: Vec<(PathBuf, Option<String>)> = Vec::new();
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--torrents" => torrents = args.next().expect("--torrents value").parse()?,
             "--port" => port = args.next().expect("--port value").parse()?,
             "--data-dir" => data_dir = PathBuf::from(args.next().expect("--data-dir value")),
+            "--zone" => {
+                let spec = args.next().expect("--zone value");
+                let (path, label) = spec
+                    .rsplit_once(':')
+                    .map_or((spec.as_str(), "movies"), |(path, label)| (path, label));
+                configured.push((PathBuf::from(path), Some(label.to_owned())));
+            }
+            "--staging" => {
+                configured.push((PathBuf::from(args.next().expect("--staging value")), None))
+            }
             "--help" | "-h" => {
-                println!("usage: demo_server [--torrents N] [--port PORT] [--data-dir DIR]");
+                println!(
+                    "usage: demo_server [--torrents N] [--port PORT] [--data-dir DIR] \
+                     [--zone PATH:LABEL]... [--staging PATH]..."
+                );
                 return Ok(());
             }
             other => return Err(format!("unknown argument: {other}").into()),
@@ -104,10 +120,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         watch_dir.join("demo-auto.torrent"),
         b"d4:infod6:lengthi9e4:name8:demo.mkvee",
     )?;
+    // Storage zones: configured ones or one library folder per label plus a
+    // staging folder under the data dir.
+    if configured.is_empty() {
+        let media = data_dir.join("media");
+        let staging = data_dir.join("progress");
+        for (label, folder) in [
+            ("movies", "Filmek"),
+            ("series", "Sorozatok"),
+            ("music", "Zene"),
+            ("archive", "Archiv"),
+        ] {
+            let path = media.join(folder);
+            std::fs::create_dir_all(&path)?;
+            configured.push((path, Some(label.to_owned())));
+        }
+        std::fs::create_dir_all(&staging)?;
+        configured.push((staging, None));
+    }
+    let mut zones = String::new();
+    for (path, label) in &configured {
+        match label {
+            Some(label) => zones.push_str(&format!(
+                "[[diskguard.zone]]\npath = {:?}\nlabel = \"{label}\"\n\n",
+                path.display().to_string()
+            )),
+            None => zones.push_str(&format!(
+                "[[diskguard.zone]]\npath = {:?}\nstaging = true\n\n",
+                path.display().to_string()
+            )),
+        }
+    }
     let config = ConfigStore::default();
     config.apply_toml(
         &format!(
-            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"true\"]\n",
+            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"true\"]\n\n[diskguard]\nenabled = true\nmin_free_bytes = 2147483648\nmargin_bytes = 1073741824\npoll_secs = 30\n\n{zones}",
             watch_dir.display().to_string()
         ),
         0,

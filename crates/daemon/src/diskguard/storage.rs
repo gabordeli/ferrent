@@ -156,8 +156,10 @@ pub fn mount_for_device_with(
     mounts: &[Mount],
     device_of: impl Fn(&Path) -> Option<u64>,
 ) -> Option<&Mount> {
-    real_mounts(mounts)
-        .into_iter()
+    // A zone may live on a tmpfs (for example `/dev/shm`); only the extra
+    // "offer every filesystem" list filters pseudo filesystems.
+    mounts
+        .iter()
         .filter(|mount| device_of(&mount.mountpoint) == Some(device))
         .max_by_key(|mount| mount.mountpoint.as_os_str().len())
 }
@@ -265,6 +267,17 @@ tmpfs /run tmpfs rw 0 0
 
         let mount = canonical_mount(Path::new("/etc"), &mounts).expect("mount");
         assert_eq!(mount.mountpoint, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn a_zone_on_a_tmpfs_still_finds_its_mount() {
+        let mounts = parse_mounts(TABLE);
+        let device_of = |path: &Path| match path.to_string_lossy().as_ref() {
+            "/run" => Some(42),
+            _ => None,
+        };
+        let mount = mount_for_device_with(42, &mounts, device_of).expect("tmpfs mount");
+        assert_eq!(mount.mountpoint, PathBuf::from("/run"));
     }
 
     #[test]
