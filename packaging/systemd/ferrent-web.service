@@ -1,0 +1,26 @@
+[Unit]
+Description=Ferrent web gateway
+Documentation=https://cirice-gitlab.ddns.net/gabor/ferrent
+After=network-online.target ferrentd.service
+Wants=network-online.target
+PartOf=ferrentd.service
+
+[Service]
+Type=simple
+User=ferrent
+Group=ferrent
+ExecStart=/usr/bin/ferrent-web --config /etc/ferrent/web.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/ferrent
+
+[Install]
+WantedBy=multi-user.target

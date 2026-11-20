@@ -9,6 +9,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod sse;
+pub mod tls;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,7 +27,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-pub use config::{DaemonConfig, WebConfig};
+pub use config::{DaemonConfig, TlsConfig, WebConfig};
 
 /// Shared state of the gateway.
 pub struct AppState {
@@ -39,6 +40,8 @@ pub struct AppState {
     pub client: Mutex<Option<AuthClient>>,
     /// Whether the daemon connection is up (for `/health`).
     pub daemon_up: AtomicBool,
+    /// Whether the session cookie needs `Secure` (the listener is HTTPS).
+    pub secure: bool,
 }
 
 impl AppState {
@@ -52,6 +55,7 @@ impl AppState {
             hub,
             client: Mutex::new(None),
             daemon_up: AtomicBool::new(false),
+            secure: config.tls.is_some(),
             config,
         })
     }
@@ -165,9 +169,10 @@ async fn login(
     }
     let token = state.sessions.issue(now);
     let cookie = format!(
-        "{}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        "{}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}{}",
         auth::COOKIE,
-        state.config.session_ttl_secs
+        state.config.session_ttl_secs,
+        if state.secure { "; Secure" } else { "" }
     );
     (
         StatusCode::OK,
@@ -186,8 +191,9 @@ async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Respo
         state.sessions.revoke(token);
     }
     let cookie = format!(
-        "{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        auth::COOKIE
+        "{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{}",
+        auth::COOKIE,
+        if state.secure { "; Secure" } else { "" }
     );
     (StatusCode::OK, [(header::SET_COOKIE, cookie)]).into_response()
 }

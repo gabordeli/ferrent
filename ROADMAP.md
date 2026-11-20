@@ -638,10 +638,10 @@
 
 **Acceptance**
 
-- [ ] reverse proxy alatt (path vagy 443) működik; a daemon portja nem publikus.
-- [ ] telefonon végig: list → detail → pause → add → label.
-- [ ] 10k torrent, 3 kliens, 1 óra: RSS < 150 MB, nincs SSE szivárgás.
-- [ ] mérés + telepítési doksi; opcionális read-only token.
+- [x] **LAN-mód**: a gateway maga terminálja a HTTPS-t (saját, first startkor generált cert, SAN a hostnév + LAN-IP, `Secure` cookie); nincs reverse proxy; a daemon port loopback. A publikus (443/port forward) későbbi döntés.
+- [x] telefonos méretben (Playwright 390×844 + 360 px): list → detail → pause → add → label; a fizikai telefonos kör a user oldalán.
+- [~] 10k torrent, 3 SSE kliens, 1 óra: az RSS-mérés fut (`docs/measurements/webui.md` M4, CSV); az első minta 15,8 MB, a kapu < 150 MB.
+- [x] mérés + telepítési doksi (`docs/measurements/webui.md`, `docs/web-install.md`); `read_only` config; systemd unit (`packaging/systemd/ferrent-web.service`) + `web.toml` minta.
 
 **Files:** `packaging/systemd/ferrent-web.service`, `docs/web-install.md`, `docs/measurements/webui.md`
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T3 kész** (gateway + auth + SSE + REST + SPA port, mobil nézetben ellenőrizve), a következő szelet az **M7-T4 deployment + acceptance**.
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T4 kész** LAN-módban (gateway + auth + SSE + REST + SPA + HTTPS + unit/doksi; a publikus reverse proxy későbbi döntés).

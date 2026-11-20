@@ -17,6 +17,9 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 base64 = "0.22"
 ferrent-protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }

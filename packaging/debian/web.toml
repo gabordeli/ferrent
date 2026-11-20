@@ -1,0 +1,27 @@
+# Ferrent web gateway – LAN profile.
+#
+# HTTPS is terminated by ferrent-web itself; no reverse proxy is needed while
+# the UI is used inside the LAN. The certificate is generated on first start
+# with the names below and reused afterwards.
+
+listen = "0.0.0.0:8443"
+password = "change-me"
+read_only = false
+spa_dir = "/usr/share/ferrent-web"
+
+session_ttl_secs = 86400
+heartbeat_secs = 15
+coalesce_ms = 1000
+login_per_minute = 5
+
+[tls]
+cert = "/var/lib/ferrent/web-cert.pem"
+key = "/var/lib/ferrent/web-key.pem"
+# The host name and the LAN address the phone will open.
+names = ["ferrent.local", "192.168.2.65"]
+
+[daemon]
+# The daemon keeps listening on loopback; only the gateway faces the LAN.
+url = "https://127.0.0.1:50129"
+ca = "/var/lib/ferrent/tls-cert.pem"
+token = "replace-with-the-daemon-token"

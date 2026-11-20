@@ -27,7 +27,22 @@ pub struct WebConfig {
     pub login_per_minute: u32,
     /// Optional directory with the built SPA; a placeholder is served without it.
     pub spa_dir: Option<PathBuf>,
+    /// HTTPS for the gateway itself; without it the listener is plain HTTP.
+    pub tls: Option<TlsConfig>,
     pub daemon: DaemonConfig,
+}
+
+/// The gateway's own certificate.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsConfig {
+    /// PEM certificate; generated when the file (or the key) is missing.
+    pub cert: PathBuf,
+    /// PEM private key, kept 0600.
+    pub key: PathBuf,
+    /// Extra subject alternative names (host name, LAN address).
+    #[serde(default)]
+    pub names: Vec<String>,
 }
 
 /// Daemon connection: TLS trust anchor and API token.
@@ -55,6 +70,7 @@ impl Default for WebConfig {
             coalesce_ms: 1_000,
             login_per_minute: 5,
             spa_dir: None,
+            tls: None,
             daemon: DaemonConfig::default(),
         }
     }
@@ -106,6 +122,14 @@ impl WebConfig {
             return Err(
                 "session_ttl_secs, heartbeat_secs and coalesce_ms must be positive".to_owned(),
             );
+        }
+        if let Some(tls) = &self.tls {
+            if tls.cert == tls.key {
+                return Err("web.tls cert and key must be different files".to_owned());
+            }
+            if !crate::tls::is_pem(&tls.cert) || !crate::tls::is_pem(&tls.key) {
+                return Err("web.tls cert and key must be .pem files".to_owned());
+            }
         }
         if self.login_per_minute == 0 {
             return Err("web.login_per_minute must be positive".to_owned());

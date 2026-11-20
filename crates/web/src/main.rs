@@ -38,16 +38,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let tls = match &config.tls {
+        Some(settings) => Some(ferrent_web::tls::load_or_generate(settings).await?),
+        None => None,
+    };
+
     let (state, router) = app(config.clone());
     sse::spawn_watch(Arc::clone(&state));
-    let listener = tokio::net::TcpListener::bind(&config.listen).await?;
-    eprintln!(
-        "ferrent-web listening on {} (read_only={}, daemon={})",
-        config.listen, config.read_only, config.daemon.url
-    );
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown())
-        .await?;
+
+    match tls {
+        Some(tls) => {
+            let address: std::net::SocketAddr = config.listen.parse()?;
+            eprintln!(
+                "ferrent-web https://{} (read_only={}, daemon={}, cert={}, fingerprint={})",
+                config.listen,
+                config.read_only,
+                config.daemon.url,
+                tls.cert_path.display(),
+                tls.fingerprint
+            );
+            axum_server::bind_rustls(address, tls.config)
+                .serve(router.into_make_service())
+                .await?;
+        }
+        None => {
+            let listener = tokio::net::TcpListener::bind(&config.listen).await?;
+            eprintln!(
+                "ferrent-web http://{} (read_only={}, daemon={})",
+                config.listen, config.read_only, config.daemon.url
+            );
+            axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown())
+                .await?;
+        }
+    }
     Ok(())
 }
 
