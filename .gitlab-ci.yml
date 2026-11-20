@@ -118,3 +118,17 @@ release-deb:
     paths:
       - target/debian-dist/*.deb
     expire_in: 30 days
+
+probe-debian-api:
+  stage: quality
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - echo "API=$CI_API_V4_URL PROJECT=$CI_PROJECT_ID"
+    - |
+      for u in "$CI_API_V4_URL/projects/$CI_PROJECT_ID/debian_distributions" \
+               "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/debian"; do
+        echo "== $u"
+        curl -sS -o /tmp/out -w 'HTTP %{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" "$u"
+        head -c 300 /tmp/out; echo
+      done
