@@ -304,6 +304,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }));
             } else {
                 output::print_torrents(&response.torrents);
+                // A paged answer must say so: 50 rows of 10 000 otherwise
+                // looks like the daemon lost the rest.
+                let shown = response.torrents.len() as u32;
+                if shown < response.total {
+                    let first = offset + 1;
+                    let last = offset + shown;
+                    output::print_page_note(first, last, response.total);
+                }
             }
         }
         Command::Show { id } => {

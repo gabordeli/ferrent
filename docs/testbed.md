@@ -1,45 +1,52 @@
-# Teszt-háló (LAN) – beüzemelési sorrend
+# Teszt-háló (LAN) – szerepek és beüzemelés
 
 Cél: a `ferrentd` valódi peer-forgalommal, publikus trackerek nélkül
-igazolható legyen, és a kiadási kapu (≥5 torrent, ≥7 nap) teljesüljön.
+igazolható legyen, és a kiadási kapu (**≥6 hónap éles, stabil futás**)
+teljesüljön.
 
-## Szerepek
+## Szerepek (mérve 2026-11-20)
 
 | Gép | Szerep | Arch | Megjegyzés |
 |---|---|---|---|
-| Orange Pi | tracker + minimális web UI | bármilyen (a tracker nem a mi csomagunk) | 256 MB RAM elég; a UI csak státuszt mutat |
-| régi laptop (1 GB) | seed server | valószínűleg amd64 | a 72 h soak ide kerül, nem a munkaállomásra |
-| a laptopod | `ferrentd` + GUI + `ferrent-web` | amd64 | a .27-en közben Deluge marad |
-| .27 | Deluge (változatlan) | amd64 | később `import-deluge` valós forrása |
+| **tracker** `192.168.2.116` | saját C tracker (`ferrent-tracker`) + katalógus-UI | armv7l (Orange Pi, Debian 9) | 238 MB RAM, nincs Python; a role csak `raw` modulokat használ |
+| **seed** `192.168.2.28` (caprice) | `ferrentd` 0.1.2 (fő daemon 6881) + `ferrent-load` (10 000 torrent, 6882) | amd64 (M910q, 4 mag/32 GB) | ufw: `6881:6891` TCP+UDP a `192.168.2.0/24`-ről |
+| **kliens (terhelés)** `192.168.2.26` (cerebellum) | `ferrentd` + 1 000 `.torrent` AutoAdd-dal | amd64 | 8 GB szabad, ezért csak ~1 GB payload |
+| **laptop** | `ferrentd` + GUI + `ferrent-web` | amd64 | a `.27`-en közben Deluge marad; a GUI innen validál |
 
 A telepítés **csak** Debian 13 + SSH; minden más playbookból megy, az
-`~/docker-images/infra` repóban (ott vannak a szerverek playbookjai).
+`~/docker-images/infra` repóban (`deploy_ferrent_tracker.yml`,
+`deploy_ferrent_seed.yml`).
 
 ## Sorrend
 
-1. **Verziózás + release pipeline** (ez a commit): a tag → `.deb` verzió, GitLab
-   release job, Debian Package Registry.
-2. **Gépek**: Debian 13, SSH (user + sudo), fix DHCP-rezerváció, hostnevek.
-3. **Tracker a Pi-n**: opentracker vagy egy kis Node-os tracker konténerben,
-   `/announce` + egy státusz HTML; port 6969 TCP/UDP a LAN-on.
-4. **Seed a régi laptopon**: `ferrentd` a registryből (`apt install ferrentd`),
-   token, egy teszt-torrent elkészítése (`mktorrent`), seed indítása.
-5. **Kliens a laptopon**: a meglévő `ferrentd` + GUI, a tracker
-   `http://<pi>:6969/announce` címével, a seed-től letöltés.
-6. **Forgatókönyvek** (mindegyik rögzítve a `docs/measurements/` alá):
+1. **Verziózás + release pipeline**: tag → `.deb` verzió, GitLab release job,
+   generic registry (`ferrentd 0.1.2-1`).
+2. **Gépek**: Debian + SSH, fix DHCP-rezerváció, hostnevek.
+3. **Tracker a Pi-n**: `deploy_ferrent_tracker.yml` → `/announce`, `/scrape`,
+   `/api/torrents`, `/upload`, `/t/<hash>.torrent`, `/health`, a UI a 6969-en.
+4. **Seed a caprice-on**: `deploy_ferrent_seed.yml` → `.deb` a registryből,
+   `mktorrent` payloadok, `ferrent-load` a 10 000 torrenttel.
+5. **Kliens**: a laptop `ferrentd` + GUI, illetve a cerebellum a terheléshez,
+   a tracker `http://192.168.2.116:6969/announce` címével.
+6. **Forgatókönyvek** (rögzítve a `docs/measurements/` alá):
    - letöltés → befejezés → seeding, valódi seeds/peers szám;
    - restart recheck nélkül mindkét oldalon;
    - label move-on-complete + DiskGuard staging → library rename;
    - AutoAdd watch dir-ből;
-   - 72 h soak a seed laptopon (RSS, fd, crash);
+   - 10 000 torrentes soak (lásd `docs/measurements/mvp.md`);
    - később: ratio auto-remove (M8-T3), VPN-kötés (M8-T4).
 
-## Amit a Pi-n érdemes mérni
+## Mért tracker-viselkedés
 
-- tracker RAM/CPU (elvárás: < 20 MB, ~0% CPU);
-- announce-latencia a LAN-on (< 5 ms);
-- a tracker újraindítható-e a peers megszakítása nélkül (a kliensek
-  újra-announce-olnak).
+- **Kapacitás:** 10 003 torrent / 12 400 peer mellett **~10 MB RSS, ~3% CPU**
+  (a 238 MB-os Pi-n); a katalógus betöltése ~26 s, a bind csak utána jön.
+- **Peer-tábla perzisztálás:** `<state_dir>/peers.db`, 30 s-onként atomikusan
+  írva, `SIGTERM`-re azonnal flush-olva; restart után a peer-ek visszatöltenek
+  (mért: 1 540 peer a restart után 20 s-mal) — a kliensek nem esnek ki.
+- **UI:** keresés, mind a hat oszlopra rendezés, **lapozás** (100/200/500/1000
+  sor), `.torrent` feltöltés/letöltés (a mentett fájlnév a torrent neve),
+  magnet másolás, törlés. 10 000 sornál a lapozott render ~10 ms
+  (a korábbi, teljes újraépítés 498 ms volt).
 
 ## Nyitott kérdés
 

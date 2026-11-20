@@ -64,6 +64,16 @@ pub fn print_torrents(torrents: &[Torrent]) {
     }
 }
 
+/// Says which slice of the match set the table above shows.
+pub fn print_page_note(first: u32, last: u32, total: u32) {
+    outln!(
+        "\n{}–{} of {} torrents (--offset/--limit to page)",
+        first,
+        last,
+        total
+    );
+}
+
 pub fn print_torrent(torrent: &Torrent) {
     outln!("id:       {}", torrent.id);
     outln!("name:     {}", torrent.name);
