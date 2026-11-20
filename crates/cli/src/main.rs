@@ -208,8 +208,12 @@ async fn main() {
     let _telemetry = ferrent_telemetry::init("ferrent-cli");
     let cli = Cli::parse();
     if let Err(error) = run(cli).await {
-        ferrent_telemetry::capture_error(&error);
-        ferrent_telemetry::flush();
+        // Only defects are reported; a stopped daemon or a mistyped id is a
+        // normal answer and would otherwise flood the issue tracker.
+        if error.reportable() {
+            ferrent_telemetry::capture_error(&error);
+            ferrent_telemetry::flush();
+        }
         eprintln!("ferrent-cli: {error}");
         std::process::exit(error.exit_code());
     }
@@ -232,9 +236,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             resolved.ca.display()
         ))
     })?;
-    let mut client = ferrent_protocol::client::connect(&resolved.server, &ca_pem, &resolved.token)
+    let server = resolved.server.clone();
+    let mut client = ferrent_protocol::client::connect(&server, &ca_pem, &resolved.token)
         .await
-        .map_err(|error| CliError::Transport(error.to_string()))?;
+        .map_err(|error| CliError::Transport { server, error })?;
 
     match command {
         Command::Add {

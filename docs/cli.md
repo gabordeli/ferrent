@@ -87,6 +87,16 @@ A `state` értékek: `unspecified`, `queued`, `checking`, `downloading`,
 | 4 | hitelesítési hiba (`Unauthenticated`/`PermissionDenied`) |
 | 5 | kapcsolódási/TLS hiba |
 
+Kapcsolódási hibánál az üzenet megnevezi a célt és az okot is, pl.
+`ferrent-cli: cannot connect to https://127.0.0.1:50051: transport error: tcp
+connect error: Connection refused (os error 111)`.
+
+A `ferrent-cli` csak a **várt** hibákat jelenti telemetrián (Bugsink): a leállt
+daemon (5), a nem létező torrent (3), a rossz token (4) és a `| head` miatti
+zárt cső normális válasz, ezek nem generálnak issue-t. A konfigurációs hibák
+és a szerveroldali `Internal`/`Unknown`/`DataLoss`/`Unimplemented` státuszok
+mennek csak fel.
+
 ## Daemon indítása
 
 ```bash

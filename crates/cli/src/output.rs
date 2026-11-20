@@ -8,6 +8,15 @@ use serde_json::{Value, json};
 
 use crate::error::CliError;
 
+/// Writes one line to stdout, ignoring a closed pipe: `ferrent-cli list | head`
+/// must end quietly instead of panicking inside `println!` (a broken pipe used
+/// to reach the issue tracker as a panic).
+macro_rules! outln {
+    ($($arg:tt)*) => {{
+        let _ = writeln!(std::io::stdout().lock(), $($arg)*);
+    }};
+}
+
 pub fn torrent_json(torrent: &Torrent) -> Value {
     json!({
         "id": torrent.id,
@@ -27,19 +36,23 @@ pub fn torrent_json(torrent: &Torrent) -> Value {
 }
 
 pub fn print_json(value: &Value) {
-    println!(
+    outln!(
         "{}",
         serde_json::to_string_pretty(value).expect("serialize JSON value")
     );
 }
 
 pub fn print_torrents(torrents: &[Torrent]) {
-    println!(
+    outln!(
         "{:>6}  {:<12}  {:>8}  {:>12}  {:>12}  NAME",
-        "ID", "STATE", "PROGRESS", "DOWN", "UP"
+        "ID",
+        "STATE",
+        "PROGRESS",
+        "DOWN",
+        "UP"
     );
     for torrent in torrents {
-        println!(
+        outln!(
             "{:>6}  {:<12}  {:>8}  {:>12}  {:>12}  {}",
             torrent.id,
             state_label(torrent.state),
@@ -52,16 +65,16 @@ pub fn print_torrents(torrents: &[Torrent]) {
 }
 
 pub fn print_torrent(torrent: &Torrent) {
-    println!("id:       {}", torrent.id);
-    println!("name:     {}", torrent.name);
-    println!("state:    {}", state_label(torrent.state));
-    println!("progress: {:.1}%", torrent.progress * 100.0);
-    println!("size:     {}", format_bytes(torrent.total_bytes));
-    println!("save:     {}", torrent.save_path);
-    println!("down:     {}", format_rate(torrent.download_rate));
-    println!("up:       {}", format_rate(torrent.upload_rate));
+    outln!("id:       {}", torrent.id);
+    outln!("name:     {}", torrent.name);
+    outln!("state:    {}", state_label(torrent.state));
+    outln!("progress: {:.1}%", torrent.progress * 100.0);
+    outln!("size:     {}", format_bytes(torrent.total_bytes));
+    outln!("save:     {}", torrent.save_path);
+    outln!("down:     {}", format_rate(torrent.download_rate));
+    outln!("up:       {}", format_rate(torrent.upload_rate));
     if !torrent.error.is_empty() {
-        println!("error:    {}", torrent.error);
+        outln!("error:    {}", torrent.error);
     }
 }
 
@@ -101,29 +114,29 @@ pub fn print_event(event: &WatchResponse, json_mode: bool) -> Result<(), CliErro
                 "id": finished.id,
             }),
         };
-        println!(
+        outln!(
             "{}",
             serde_json::to_string(&value).expect("serialize watch event")
         );
     } else {
         match event {
-            Event::Added(torrent) => println!("added {} {}", torrent.id, torrent.name),
+            Event::Added(torrent) => outln!("added {} {}", torrent.id, torrent.name),
             Event::StateChanged(change) => {
-                println!("state {} {}", change.id, state_label(change.state));
+                outln!("state {} {}", change.id, state_label(change.state));
             }
-            Event::Progress(progress) => println!(
+            Event::Progress(progress) => outln!(
                 "progress {} {:.1}% down {} up {}",
                 progress.id,
                 progress.progress * 100.0,
                 format_rate(progress.download_rate),
                 format_rate(progress.upload_rate)
             ),
-            Event::Removed(removed) => println!("removed {}", removed.id),
+            Event::Removed(removed) => outln!("removed {}", removed.id),
             Event::ConfigChanged(change) => {
-                println!("config revision {}", change.revision);
+                outln!("config revision {}", change.revision);
             }
             Event::Finished(finished) => {
-                println!("finished {}", finished.id);
+                outln!("finished {}", finished.id);
             }
         }
     }
