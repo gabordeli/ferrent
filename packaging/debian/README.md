@@ -1,34 +1,31 @@
 # ferrentd Debian package
 
-Build (with the real engine):
+Build with a statically linked libtorrent (no libtorrent runtime dependency,
+one package for Debian 12/13 and Ubuntu 24.04):
 
 ```bash
-cargo deb -p ferrent-daemon --features libtorrent
+packaging/debian/build.sh debian:12 amd64   # -> target/debian-dist/*.deb
+packaging/debian/build.sh debian:12 arm64   # cross-compiled, no emulation
 ```
 
-The dependency list is resolved at build time (`$auto`), so the package installs
-only on the release it was built on: a trixie build needs `libc6 >= 2.39` and
-`libtorrent-rasterbar2.0t64`, while bookworm has `libc6 2.36` and
-`libtorrent-rasterbar2.0`. Build on the oldest suite you support:
+The script builds inside a container: it compiles libtorrent from source with
+`BUILD_SHARED_LIBS=OFF` (version via `LT_VERSION`, default 2.0.11), then builds
+the daemon with `FERRENT_LIBTORRENT_STATIC=1` so pkg-config resolves the static
+archive. OpenSSL and zlib stay dynamic. The decision is ADR 0005
+(`docs/adr/0005-min-debian.md`).
+
+A plain `cargo deb -p ferrent-daemon --features libtorrent` on the host still
+works, but then `$auto` resolves against the host: a trixie build needs
+`libc6 >= 2.39` and `libtorrent-rasterbar2.0t64` and does not install on
+bookworm.
+
+Verify a built package in a throwaway systemd container (32 asserts: user, file
+modes, no secret in the package, no libtorrent dependency, start/stop,
+remove/purge):
 
 ```bash
-mkdir -p /tmp/ferrent-deb-build
-docker run --rm -v "$PWD:/src:ro" -v /tmp/ferrent-deb-build:/build debian:12 \
-  bash -c 'set -e; apt-get update -qq &&
-    apt-get install -y -qq build-essential pkg-config libssl-dev \
-        libtorrent-rasterbar-dev curl ca-certificates >/dev/null &&
-    curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null &&
-    export PATH=/root/.cargo/bin:$PATH CARGO_TARGET_DIR=/build/target &&
-    cargo install cargo-deb --version 3.8.0 --locked &&
-    cd /src && cargo build --release -p ferrent-daemon --features libtorrent &&
-    cargo deb -p ferrent-daemon --features libtorrent --no-build --output /build'
-```
-
-Verify a built package in a throwaway systemd container (31 asserts: user, file
-modes, no secret in the package, start/stop, remove/purge):
-
-```bash
-packaging/debian/container-test.sh debian:12 target/debian/ferrentd_0.1.0-1_amd64.deb
+packaging/debian/container-test.sh debian:12 target/debian-dist/ferrentd_0.1.0-1_amd64.deb
+packaging/debian/container-test.sh ubuntu:24.04 target/debian-dist/ferrentd_0.1.0-1_amd64.deb
 ```
 
 Results and the container pitfalls: `docs/measurements/packaging.md`.

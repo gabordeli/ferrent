@@ -12,6 +12,10 @@ set -euo pipefail
 
 suite=${1:-debian:12}
 deb=${2:-target/debian/ferrentd_0.1.0-1_amd64.deb}
+case "$suite" in
+    ubuntu:*) base="$suite" ;; # Ubuntu has no -slim tags
+    *) base="$suite-slim" ;;
+esac
 image="ferrent-pkgtest:${suite/:/}"
 name="ferrent-pkgtest-${suite/:/}"
 work=$(mktemp -d)
@@ -49,7 +53,7 @@ fi
 
 cp "$deb" "$work/package.deb"
 cat > "$work/Dockerfile" <<EOF
-FROM $suite-slim
+FROM $base
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus \\
       init-system-helpers adduser procps iproute2 \\
@@ -75,8 +79,9 @@ for _ in $(seq 30); do
     sleep 1
 done
 docker cp "$deb" "$name:/root/package.deb" >/dev/null
+if dpkg-deb -f "$deb" Depends | grep -q libtorrent; then static_pkg=0; else static_pkg=1; fi
 
-docker exec -i "$name" bash -s <<'EOS' || fail=1
+docker exec -i -e STATIC_PKG="$static_pkg" "$name" bash -s <<'EOS' || fail=1
 set -uo pipefail
 expect() { if [ "$2" = "$3" ]; then echo "PASS  $1"; else echo "FAIL  $1 (expected '$2', got '$3')"; exit_code=1; fi; }
 exit_code=0
@@ -102,6 +107,9 @@ systemctl start ferrentd
 sleep 3
 expect "service active" active "$(systemctl is-active ferrentd)"
 expect "listens on 50051" yes "$(ss -ltn | grep -q ':50051 ' && echo yes || echo no)"
+if [ "${STATIC_PKG:-0}" = 1 ]; then
+    expect "no libtorrent runtime dependency" 0 "$(ldd /usr/bin/ferrentd | grep -c torrent || true)"
+fi
 expect "startup log line" yes \
     "$(journalctl -u ferrentd --no-pager --since '-1min' | grep -q 'ferrentd listening on' && echo yes || echo no)"
 

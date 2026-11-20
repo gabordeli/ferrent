@@ -10,10 +10,19 @@ fn main() {
     // The Debian package is built with OpenSSL, so the public headers need
     // TORRENT_USE_OPENSSL / TORRENT_USE_LIBCRYPTO to select the same hasher
     // implementation as the shared library.
-    let libtorrent = pkg_config::Config::new()
-        .atleast_version("2.0")
-        .probe("libtorrent-rasterbar")
-        .expect("libtorrent-rasterbar not found (install libtorrent-rasterbar-dev)");
+    let libtorrent = {
+        let mut config = pkg_config::Config::new();
+        config.atleast_version("2.0");
+        if std::env::var_os("FERRENT_LIBTORRENT_STATIC").is_some() {
+            // packaging/debian/build.sh builds libtorrent with
+            // BUILD_SHARED_LIBS=OFF; the .pc Libs.private then lists boost,
+            // ssl and zlib, and pkg-config resolves them with --static.
+            config.statik(true);
+        }
+        config
+            .probe("libtorrent-rasterbar")
+            .expect("libtorrent-rasterbar not found (install libtorrent-rasterbar-dev)")
+    };
 
     let mut build = cxx_build::bridge("src/libtorrent/bridge.rs");
     build.file("src/libtorrent/bridge.cpp").std("c++17");

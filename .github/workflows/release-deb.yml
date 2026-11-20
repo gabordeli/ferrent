@@ -1,0 +1,75 @@
+name: release-deb
+
+# Builds the static-libtorrent .deb (amd64 + arm64) and verifies it on every
+# supported suite. Publishing (apt repo, GHCR) is a later task; this workflow
+# only produces and checks artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-deb-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the package in a container
+        run: packaging/debian/build.sh debian:12 "${{ matrix.arch }}"
+
+      - name: Show package metadata
+        run: |
+          set -e
+          for deb in target/debian-dist/*.deb; do
+            dpkg-deb -f "$deb" Package Version Architecture Depends
+            ls -l "$deb"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrentd-${{ matrix.arch }}
+          path: target/debian-dist/*.deb
+          if-no-files-found: error
+
+  verify:
+    name: verify on ${{ matrix.suite }}
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [debian:12, debian:13, ubuntu:24.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ferrentd-amd64
+          path: dist
+
+      - name: Install into a throwaway systemd container
+        run: packaging/debian/container-test.sh "${{ matrix.suite }}" dist/ferrentd_*_amd64.deb
+
+  smoke-arm64:
+    name: smoke arm64 (qemu)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ferrentd-arm64
+          path: dist
+
+      - name: Run the arm64 binary under qemu-user
+        run: packaging/debian/qemu-smoke.sh dist/ferrentd_*_arm64.deb

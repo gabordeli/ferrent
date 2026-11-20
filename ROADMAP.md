@@ -697,11 +697,11 @@
 
 **Acceptance**
 
-- [ ] `ldd ferrentd` nem mutat `libtorrent` függőséget; csak a vállalt glibc/libstdc++ baseline.
-- [ ] Ugyanaz a `.deb` települ és fut Debian 12, 13 és Ubuntu 24.04 konténerben.
-- [ ] A bináris méret dokumentálva; a build konténerben reprodukálható.
-- [ ] arm64 build (cross vagy natív) lefut és smoke-tesztet kap.
-- [ ] `docs/adr/0005-min-debian.md`: minimum Debian verzió döntés.
+- [x] `ldd ferrentd` nem mutat `libtorrent` függőséget; csak a vállalt glibc/libstdc++ baseline.
+- [x] Ugyanaz a `.deb` települ és fut Debian 12, 13 és Ubuntu 24.04 konténerben (32/32 assert mindhármon).
+- [x] A bináris méret dokumentálva (26,8 MB amd64 / 18,2 MB arm64; `docs/measurements/packaging.md`); a build a `packaging/debian/build.sh` konténerben, rögzített libtorrent verzióval.
+- [x] arm64 build (cross `aarch64-linux-gnu`, `qemu-smoke.sh` alatt fut) lefut és smoke-tesztet kap.
+- [x] `docs/adr/0005-min-debian.md`: minimum Debian verzió döntés (Debian 12+, Ubuntu 24.04+).
 
 **Files:** `packaging/debian/build.sh`, `.github/workflows/release-deb.yml`, `docs/adr/0005-min-debian.md`
 

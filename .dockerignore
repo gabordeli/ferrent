@@ -1,0 +1,12 @@
+# Rust and Docker build state
+target/
+.git/
+logs/
+tmp/
+.qwen/
+.playwright-mcp/
+.sonar/
+webui/node_modules/
+webui/dist/
+webui/coverage/
+webui/test-results/

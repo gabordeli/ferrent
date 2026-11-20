@@ -28,8 +28,8 @@ addig a `packaging/debian/README.md` recipe-je szerint kell építeni.
 
 ## M2 – Telepítés friss konténerbe
 
-`packaging/debian/container-test.sh` — 31 assert, Debian 12 **és** Debian 13
-ellen: **31/31 PASS**, exit 0 mindkettőn.
+`packaging/debian/container-test.sh` — 32 assert, Debian 12, Debian 13 és Ubuntu 24.04
+ellen: **32/32 PASS**, exit 0 mindhármon (a statikus csomagnál).
 
 | Ellenőrzés | Eredmény |
 |---|---|
@@ -67,6 +67,53 @@ packaging/debian/container-test.sh debian:12 target/debian/ferrentd_0.1.0-1_amd6
 packaging/debian/container-test.sh debian:13 target/debian/ferrentd_0.1.0-1_amd64.deb
 ```
 
-A szkript a `.deb`-ből épít egy eldobható systemd-s képet, lefuttatja a 31
+A szkript a `.deb`-ből épít egy eldobható systemd-s képet, lefuttatja a 32
 assertet, és `exit 1`-gyel áll meg az első bukásnál (a PASS/FAIL sorok
 megmondják, melyik).
+
+## M5 – Statikus libtorrent, egy csomag több disztróra (M3-T2)
+
+Build: `packaging/debian/build.sh` — `debian:12-slim` konténer, libtorrent
+2.0.11 forrásból `BUILD_SHARED_LIBS=OFF`, majd a daemon
+`FERRENT_LIBTORRENT_STATIC=1`-gyel. OpenSSL/zlib dinamikus marad (ADR 0005).
+
+| Metrika | Dinamikus (T1) | Statikus amd64 | Statikus arm64 |
+|---|---:|---:|---:|
+| `ferrentd` bináris | 15,2 MB | 26,8 MB | 18,2 MB |
+| `.deb` | 3,79 MB | 5,27 MB | 4,65 MB |
+| Telepített méret | 14,9 MB | 19,5 MB | 17,8 MB |
+| `ldd` libtorrent | igen | **nincs** | **nincs** |
+| `Depends` libtorrent | `libtorrent-rasterbar2.0 (>= 2.0.8)` | – | – |
+
+A statikus csomag `Depends`-e: `adduser, init-system-helpers,
+libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6 (>= 12)`. Az arm64 csomagnál a
+`libstdc++6:arm64` multiarch utótagot a cross build környezete teszi be; arm64
+gépen ugyanazt jelenti.
+
+`ldd` a statikus binárison: `libssl.so.3`, `libcrypto.so.3`, `libstdc++.so.6`,
+`libgcc_s.so.1`, `libm.so.6`, `libc.so.6` — libtorrent nélkül.
+
+### Telepítés és futás
+
+| Cél | Eredmény |
+|---|---|
+| Debian 12, Debian 13, Ubuntu 24.04 (amd64) | `container-test.sh`: **32/32 PASS** mindhármon |
+| arm64 (cross, `aarch64-linux-gnu-g++`) | `qemu-smoke.sh`: PASS — indul, TLS-t nyit, `state.redb`-t ír; `startup_ms=211–300` (qemu emuláció) |
+
+Build idők (hideg, 12 szál): amd64 ~7 perc, arm64 ~10 perc — a konténer
+rétegei (toolchain, cargo-deb, libtorrent) cache-elődnek, ismételt buildnél
+csak a Rust fordítás fut.
+
+### Ismételhető ellenőrzés
+
+```bash
+packaging/debian/build.sh debian:12 amd64
+packaging/debian/build.sh debian:12 arm64
+packaging/debian/container-test.sh debian:12 target/debian-dist/ferrentd_0.1.0-1_amd64.deb
+packaging/debian/qemu-smoke.sh target/debian-dist/ferrentd_0.1.0-1_arm64.deb
+```
+
+Ugyanezt futtatja a `.github/workflows/release-deb.yml` minden `v*` tagon
+(build amd64+arm64, verify a három suite-on, arm64 qemu smoke). Publikálás
+(APT repo, GHCR) még nincs a workflow-ban — az M3-T3/T4.
+
