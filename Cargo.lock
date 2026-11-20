@@ -1442,6 +1442,7 @@ dependencies = [
  "rustix 1.1.6",
  "rustls-pemfile",
  "serde",
+ "serde_json",
  "sha2",
  "subtle",
  "tokio",

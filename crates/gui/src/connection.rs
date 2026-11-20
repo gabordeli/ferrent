@@ -7,10 +7,10 @@ use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
     CreateLabelRequest, DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest,
-    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest,
-    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest,
-    SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
-    TorrentTracker, UpdateLabelRequest,
+    GetHookStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
+    GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
+    ScanAutoAddRequest, SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile,
+    TorrentPeer, TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -336,5 +336,41 @@ pub async fn scan_auto_add(client: &AuthClient, path: &str) -> Result<ScanTotals
         failed: response.failed,
         invalid: response.invalid,
         deferred: response.deferred,
+    })
+}
+
+/// The hook journal depth and the recent runs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookStatus {
+    pub pending: u32,
+    pub runs: Vec<crate::settings::HookRunRow>,
+}
+
+/// Fetches the hook status and the most recent runs.
+pub async fn hook_status(client: &AuthClient, limit: u32) -> Result<HookStatus, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_hook_status(GetHookStatusRequest { limit })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(HookStatus {
+        pending: response.pending,
+        runs: response
+            .runs
+            .into_iter()
+            .map(|run| crate::settings::HookRunRow {
+                event: run.event,
+                torrent_name: run.torrent_name,
+                command: run.command,
+                succeeded: run.succeeded,
+                exit_code: run.exit_code,
+                timed_out: run.timed_out,
+                duration_ms: run.duration_ms,
+                stdout: run.stdout,
+                stderr: run.stderr,
+                at_unix: run.at_unix,
+            })
+            .collect(),
     })
 }

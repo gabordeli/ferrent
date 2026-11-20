@@ -48,6 +48,36 @@ service Ferrent {
   rpc GetAutoAddStatus(GetAutoAddStatusRequest) returns (GetAutoAddStatusResponse);
   // Scans one watch directory (or all of them) immediately.
   rpc ScanAutoAdd(ScanAutoAddRequest) returns (ScanAutoAddResponse);
+  // Returns the hook journal depth and the most recent runs.
+  rpc GetHookStatus(GetHookStatusRequest) returns (GetHookStatusResponse);
+}
+
+message GetHookStatusRequest {
+  // Maximum number of recent runs; `0` uses the server default of 20.
+  uint32 limit = 1;
+}
+
+// One completed hook execution.
+message HookRun {
+  string event = 1;
+  uint64 torrent_id = 2;
+  string torrent_name = 3;
+  string command = 4;
+  // `true` when the process exited with status 0.
+  bool succeeded = 5;
+  // Exit code; `0` when the process did not exit normally.
+  int32 exit_code = 6;
+  bool timed_out = 7;
+  uint64 duration_ms = 8;
+  string stdout = 9;
+  string stderr = 10;
+  int64 at_unix = 11;
+}
+
+message GetHookStatusResponse {
+  // Unacknowledged journal events.
+  uint32 pending = 1;
+  repeated HookRun runs = 2;
 }
 
 // One configured watch directory and what the scanner has done with it.

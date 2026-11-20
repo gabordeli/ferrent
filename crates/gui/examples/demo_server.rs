@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ConfigStore::default();
     config.apply_toml(
         &format!(
-            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n",
+            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"true\"]\n",
             watch_dir.display().to_string()
         ),
         0,

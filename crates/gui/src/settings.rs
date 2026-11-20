@@ -17,11 +17,18 @@ pub enum Tab {
     Connection,
     Session,
     AutoAdd,
+    Hooks,
     Labels,
 }
 
 impl Tab {
-    pub const ALL: [Self; 4] = [Self::Connection, Self::Session, Self::AutoAdd, Self::Labels];
+    pub const ALL: [Self; 5] = [
+        Self::Connection,
+        Self::Session,
+        Self::AutoAdd,
+        Self::Hooks,
+        Self::Labels,
+    ];
 
     #[must_use]
     pub fn label(self) -> &'static str {
@@ -29,6 +36,7 @@ impl Tab {
             Self::Connection => "Connection",
             Self::Session => "Session",
             Self::AutoAdd => "AutoAdd",
+            Self::Hooks => "Hooks",
             Self::Labels => "Labels",
         }
     }
@@ -41,6 +49,7 @@ impl Tab {
             Self::AutoAdd => {
                 "Watch directories; a 1 s scan picks up new .torrent and .magnet files."
             }
+            Self::Hooks => "Programs run on added, finished, removed and error events.",
             Self::Labels => "Definitions, limits and auto-assignment rules.",
         }
     }
@@ -652,6 +661,280 @@ impl AutoAddStatusRow {
     }
 }
 
+/// The journal event a hook listens to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HookEvent {
+    #[default]
+    Added,
+    Finished,
+    Removed,
+    Error,
+}
+
+impl HookEvent {
+    pub const ALL: [Self; 4] = [Self::Added, Self::Finished, Self::Removed, Self::Error];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Finished => "finished",
+            Self::Removed => "removed",
+            Self::Error => "error",
+        }
+    }
+
+    #[must_use]
+    pub fn as_toml(self) -> &'static str {
+        self.label()
+    }
+
+    #[must_use]
+    pub fn from_toml(text: &str) -> Self {
+        match text.trim() {
+            "finished" | "complete" => Self::Finished,
+            "removed" => Self::Removed,
+            "error" => Self::Error,
+            _ => Self::Added,
+        }
+    }
+}
+
+/// One editable hook.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookRow {
+    pub event: HookEvent,
+    pub command: String,
+    /// Whitespace separated argv template.
+    pub args: String,
+    pub shell: bool,
+    pub timeout_secs: String,
+    pub enabled: bool,
+}
+
+impl Default for HookRow {
+    fn default() -> Self {
+        Self {
+            event: HookEvent::Added,
+            command: String::new(),
+            args: "{id} {name} {path} {infohash} {label}".to_owned(),
+            shell: false,
+            timeout_secs: "60".to_owned(),
+            enabled: true,
+        }
+    }
+}
+
+impl HookRow {
+    /// Replaces one text field.
+    pub fn set(&mut self, field: HookField, text: String) {
+        match field {
+            HookField::Command => self.command = text,
+            HookField::Args => self.args = text,
+            HookField::Timeout => self.timeout_secs = text,
+        }
+    }
+
+    /// Returns the text of one field.
+    #[must_use]
+    pub fn text(&self, field: HookField) -> &str {
+        match field {
+            HookField::Command => &self.command,
+            HookField::Args => &self.args,
+            HookField::Timeout => &self.timeout_secs,
+        }
+    }
+}
+
+/// One editable text of a hook.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookField {
+    Command,
+    Args,
+    Timeout,
+}
+
+impl HookField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Command => "Command",
+            Self::Args => "Arguments (whitespace separated)",
+            Self::Timeout => "Timeout (seconds)",
+        }
+    }
+}
+
+/// The `[[hook]]` table of the configuration document.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookForm {
+    pub rows: Vec<HookRow>,
+}
+
+impl HookForm {
+    /// Reads the `[[hook]]` array of tables.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("hook") else {
+            return Ok(Self::default());
+        };
+        let Item::ArrayOfTables(array) = item else {
+            return Err("hook must be an array of tables".to_owned());
+        };
+        let mut rows = Vec::with_capacity(array.len());
+        for table in array.iter() {
+            let text = |key: &str| {
+                table
+                    .get(key)
+                    .and_then(Item::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let flag = |key: &str, default: bool| {
+                table.get(key).and_then(Item::as_bool).unwrap_or(default)
+            };
+            let args = table
+                .get("args")
+                .and_then(Item::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_else(|| HookRow::default().args);
+            rows.push(HookRow {
+                event: HookEvent::from_toml(&text("event")),
+                command: text("command"),
+                args,
+                shell: flag("shell", false),
+                timeout_secs: table
+                    .get("timeout_secs")
+                    .and_then(Item::as_integer)
+                    .map_or_else(|| "60".to_owned(), |value| value.to_string()),
+                enabled: flag("enabled", true),
+            });
+        }
+        Ok(Self { rows })
+    }
+
+    /// Checks the rows before they are written to the document.
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.command.trim().is_empty() {
+                return Err(format!("Hook {}: command must not be empty", index + 1));
+            }
+            let timeout: u64 = row
+                .timeout_secs
+                .trim()
+                .parse()
+                .map_err(|_| format!("Hook {}: timeout must be a whole number", index + 1))?;
+            if timeout == 0 || timeout > 3600 {
+                return Err(format!(
+                    "Hook {}: timeout must be between 1 and 3600 seconds",
+                    index + 1
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Replaces the `hook` array in an already rendered document.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        if self.rows.is_empty() {
+            doc.remove("hook");
+            return Ok(());
+        }
+        let mut array = ArrayOfTables::new();
+        for row in &self.rows {
+            let mut table = Table::new();
+            table["event"] = value(row.event.as_toml());
+            table["command"] = value(row.command.trim());
+            let mut args = toml_edit::Array::new();
+            for argument in row.args.split_whitespace() {
+                args.push(argument);
+            }
+            if !args.is_empty() {
+                table["args"] = value(args);
+            }
+            if row.shell {
+                table["shell"] = value(true);
+            }
+            if let Ok(timeout) = row.timeout_secs.trim().parse::<i64>() {
+                table["timeout_secs"] = value(timeout);
+            }
+            if !row.enabled {
+                table["enabled"] = value(false);
+            }
+            array.push(table);
+        }
+        doc["hook"] = Item::ArrayOfTables(array);
+        Ok(())
+    }
+
+    /// Adds an empty row and returns its index.
+    pub fn add(&mut self) -> usize {
+        self.rows.push(HookRow::default());
+        self.rows.len() - 1
+    }
+
+    /// Removes one row.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.rows.len() {
+            self.rows.remove(index);
+        }
+    }
+}
+
+/// One finished hook run, as shown in the Hooks tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookRunRow {
+    pub event: String,
+    pub torrent_name: String,
+    pub command: String,
+    pub succeeded: bool,
+    pub exit_code: i32,
+    pub timed_out: bool,
+    pub duration_ms: u64,
+    pub stdout: String,
+    pub stderr: String,
+    pub at_unix: i64,
+}
+
+impl HookRunRow {
+    /// One-line table summary.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let status = if self.timed_out {
+            "timeout".to_owned()
+        } else if self.succeeded {
+            "ok".to_owned()
+        } else {
+            format!("exit {}", self.exit_code)
+        };
+        format!(
+            "{} · {} · {status} · {} ms",
+            self.event, self.torrent_name, self.duration_ms
+        )
+    }
+
+    /// The error text to show under the row, when any.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        if !self.stderr.is_empty() {
+            Some(&self.stderr)
+        } else if !self.stdout.is_empty() {
+            Some(&self.stdout)
+        } else {
+            None
+        }
+    }
+}
+
 /// One label row plus its assignment count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelRow {
@@ -838,6 +1121,11 @@ pub struct Settings {
     pub autoadd_baseline: AutoAddForm,
     pub autoadd_selected: Option<usize>,
     pub autoadd_status: Vec<AutoAddStatusRow>,
+    pub hooks: HookForm,
+    pub hooks_baseline: HookForm,
+    pub hooks_selected: Option<usize>,
+    pub hook_runs: Vec<HookRunRow>,
+    pub hook_pending: u32,
     pub labels: Vec<LabelRow>,
     pub label_selected: Option<String>,
     pub label_new: bool,
@@ -862,6 +1150,11 @@ impl Default for Settings {
             autoadd_baseline: AutoAddForm::default(),
             autoadd_selected: None,
             autoadd_status: Vec::new(),
+            hooks: HookForm::default(),
+            hooks_baseline: HookForm::default(),
+            hooks_selected: None,
+            hook_runs: Vec::new(),
+            hook_pending: 0,
             labels: Vec::new(),
             label_selected: None,
             label_new: false,
@@ -882,6 +1175,7 @@ impl Settings {
     ) -> Result<(), String> {
         let form = ConfigForm::from_toml(toml)?;
         let autoadd = AutoAddForm::from_toml(toml)?;
+        let hooks = HookForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
@@ -890,6 +1184,9 @@ impl Settings {
         self.autoadd_baseline = autoadd.clone();
         self.autoadd = autoadd;
         self.autoadd_selected = None;
+        self.hooks_baseline = hooks.clone();
+        self.hooks = hooks;
+        self.hooks_selected = None;
         Ok(())
     }
 
@@ -903,6 +1200,7 @@ impl Settings {
     pub fn dirty_tab(&self, tab: Tab) -> bool {
         match tab {
             Tab::AutoAdd => self.autoadd != self.autoadd_baseline,
+            Tab::Hooks => self.hooks != self.hooks_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
         }
@@ -917,6 +1215,7 @@ impl Settings {
             .parse()
             .map_err(|error| format!("invalid TOML: {error}"))?;
         self.autoadd.render_into(&mut doc)?;
+        self.hooks.render_into(&mut doc)?;
         Ok(doc.to_string())
     }
 
@@ -931,6 +1230,37 @@ impl Settings {
     pub fn selected_watch_mut(&mut self) -> Option<&mut WatchRow> {
         let index = self.autoadd_selected?;
         self.autoadd.rows.get_mut(index)
+    }
+
+    /// The selected hook row.
+    #[must_use]
+    pub fn selected_hook(&self) -> Option<&HookRow> {
+        let index = self.hooks_selected?;
+        self.hooks.rows.get(index)
+    }
+
+    /// The selected hook row, mutably.
+    pub fn selected_hook_mut(&mut self) -> Option<&mut HookRow> {
+        let index = self.hooks_selected?;
+        self.hooks.rows.get_mut(index)
+    }
+
+    /// Adds a hook row and selects it.
+    pub fn add_hook(&mut self) {
+        self.hooks_selected = Some(self.hooks.add());
+    }
+
+    /// Removes the selected hook row.
+    pub fn remove_hook(&mut self) {
+        let Some(index) = self.hooks_selected else {
+            return;
+        };
+        self.hooks.remove(index);
+        self.hooks_selected = if self.hooks.rows.is_empty() {
+            None
+        } else {
+            Some(index.min(self.hooks.rows.len() - 1))
+        };
     }
 
     /// Adds a watch row and selects it.
@@ -1198,6 +1528,85 @@ mod tests {
             AutoAddForm::from_toml(&rendered).expect("reparse"),
             settings.autoadd
         );
+    }
+
+    #[test]
+    fn hook_rows_round_trip_through_the_document() {
+        let raw = "[[hook]]\nevent = \"finished\"\ncommand = \"/usr/local/bin/notify\"\ntimeout_secs = 5\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/echo\"\nargs = [\"{id}\", \"{name}\"]\nshell = true\nenabled = false\n";
+        let mut settings = Settings {
+            raw: raw.to_owned(),
+            ..Settings::default()
+        };
+        settings
+            .apply_snapshot(raw, 1, Vec::new())
+            .expect("snapshot");
+        assert_eq!(settings.hooks.rows.len(), 2);
+        assert_eq!(settings.hooks.rows[0].event, HookEvent::Finished);
+        assert_eq!(settings.hooks.rows[0].timeout_secs, "5");
+        assert_eq!(settings.hooks.rows[1].args, "{id} {name}");
+        assert!(!settings.dirty_tab(Tab::Hooks));
+
+        settings.hooks.rows[1].enabled = true;
+        settings.hooks.rows[0].timeout_secs = "30".to_owned();
+        assert!(settings.dirty_tab(Tab::Hooks));
+        let rendered = settings.render().expect("render");
+        assert!(rendered.contains("timeout_secs = 30"), "{rendered}");
+        assert!(
+            rendered.contains("args = [\"{id}\", \"{name}\"]"),
+            "{rendered}"
+        );
+        assert_eq!(
+            HookForm::from_toml(&rendered).expect("reparse"),
+            settings.hooks
+        );
+    }
+
+    #[test]
+    fn hook_validation_reports_the_row() {
+        let mut form = HookForm::default();
+        form.add();
+        assert!(form.validate().is_err(), "empty command");
+        form.rows[0].command = "/bin/true".to_owned();
+        assert!(form.validate().is_ok());
+        form.rows[0].timeout_secs = "0".to_owned();
+        assert!(form.validate().is_err());
+        form.rows[0].timeout_secs = "nope".to_owned();
+        assert!(form.validate().is_err());
+        form.rows[0].timeout_secs = "60".to_owned();
+        assert!(form.validate().is_ok());
+
+        let mut settings = Settings::default();
+        settings.add_hook();
+        assert_eq!(settings.hooks_selected, Some(0));
+        assert!(settings.dirty_tab(Tab::Hooks));
+        settings.remove_hook();
+        assert!(settings.hooks.rows.is_empty());
+        assert!(!settings.dirty_tab(Tab::Hooks));
+    }
+
+    #[test]
+    fn hook_run_summary_shows_the_outcome() {
+        let run = HookRunRow {
+            event: "finished".to_owned(),
+            torrent_name: "movie".to_owned(),
+            succeeded: true,
+            duration_ms: 12,
+            ..HookRunRow::default()
+        };
+        assert_eq!(run.summary(), "finished · movie · ok · 12 ms");
+        let failed = HookRunRow {
+            exit_code: 3,
+            succeeded: false,
+            ..run.clone()
+        };
+        assert_eq!(failed.summary(), "finished · movie · exit 3 · 12 ms");
+        let timed_out = HookRunRow {
+            timed_out: true,
+            stderr: "killed".to_owned(),
+            ..run
+        };
+        assert_eq!(timed_out.summary(), "finished · movie · timeout · 12 ms");
+        assert_eq!(timed_out.detail(), Some("killed"));
     }
 
     #[test]

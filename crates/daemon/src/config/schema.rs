@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigError;
 use crate::autoadd::WatchDir;
+use crate::hooks::HookSpec;
 
 const DEFAULT_DATA_DIR: &str = "./ferrent-data";
 const DEFAULT_BIND: &str = "127.0.0.1:50051";
@@ -33,6 +34,8 @@ pub struct FileConfig {
     pub queue: QueueConfig,
     /// Watch directories fed into the engine (M5-T1).
     pub autoadd: Vec<WatchDir>,
+    /// Execute hooks (M5-T2).
+    pub hook: Vec<HookSpec>,
 }
 
 /// Session-wide engine limits. `0` means unlimited.
@@ -95,6 +98,10 @@ impl FileConfig {
         if let Some(bind) = self.bind.as_deref() {
             validate_bind(bind)?;
         }
+        for (index, hook) in self.hook.iter().enumerate() {
+            hook.validate()
+                .map_err(|message| ConfigError::invalid(format!("hook[{index}]: {message}")))?;
+        }
         let mut seen = BTreeSet::new();
         for (index, watch) in self.autoadd.iter().enumerate() {
             watch
@@ -151,6 +158,7 @@ impl FileConfig {
             session: self.session.clone(),
             queue: self.queue.clone(),
             autoadd: self.autoadd.clone(),
+            hook: self.hook.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -168,6 +176,7 @@ pub struct ResolvedConfig {
     pub session: SessionConfig,
     pub queue: QueueConfig,
     pub autoadd: Vec<WatchDir>,
+    pub hook: Vec<HookSpec>,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -362,6 +371,57 @@ path = "/data/watch"
             error.to_string().contains("duplicate watch path"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn hook_tables_parse_with_the_default_argv() {
+        let file = FileConfig::parse(
+            r#"
+[[hook]]
+event = "finished"
+command = "/usr/local/bin/notify"
+
+[[hook]]
+event = "added"
+command = "/bin/echo"
+args = ["{id}", "{name}"]
+shell = true
+timeout_secs = 5
+enabled = false
+"#,
+        )
+        .expect("hook config");
+
+        assert_eq!(file.hook.len(), 2);
+        assert_eq!(file.hook[0].event, crate::events::EventKind::Finished);
+        assert_eq!(file.hook[0].args.len(), 5);
+        assert_eq!(file.hook[0].timeout_secs, 60);
+        assert!(file.hook[0].enabled);
+        assert!(file.hook[1].shell);
+        assert!(!file.hook[1].enabled);
+        assert_eq!(file.hook[1].timeout_secs, 5);
+    }
+
+    #[test]
+    fn hook_validation_reports_the_index() {
+        let error = FileConfig::parse(
+            r#"
+[[hook]]
+event = "finished"
+"#,
+        )
+        .expect_err("empty command");
+        assert!(error.to_string().contains("hook[0]"), "{error}");
+
+        let error = FileConfig::parse(
+            r#"
+[[hook]]
+event = "sometimes"
+command = "/bin/true"
+"#,
+        )
+        .expect_err("unknown event");
+        assert!(error.to_string().contains("sometimes"), "{error}");
     }
 
     #[test]

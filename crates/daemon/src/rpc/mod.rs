@@ -16,18 +16,18 @@ use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
     DeleteLabelRequest, DeleteLabelResponse, GetAutoAddStatusRequest, GetAutoAddStatusResponse,
-    GetConfigRequest, GetConfigResponse, GetStatusRequest, GetStatusResponse,
-    GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
-    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
-    GetTorrentTrackersResponse, Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest,
-    ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest,
-    MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
-    QueueDirection as ProtoQueueDirection, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
-    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
-    SetConfigRequest, SetConfigResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
-    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
-    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
-    WatchRequest, WatchResponse,
+    GetConfigRequest, GetConfigResponse, GetHookStatusRequest, GetHookStatusResponse,
+    GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse,
+    GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
+    GetTorrentTrackersRequest, GetTorrentTrackersResponse, HookRun as ProtoHookRun,
+    Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest, ListLabelsResponse,
+    ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse,
+    PauseTorrentRequest, PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection,
+    RemoveTorrentRequest, RemoveTorrentResponse, Removed, ResumeTorrentRequest,
+    ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SetConfigRequest,
+    SetConfigResponse, SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
+    SetTorrentLimitsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
+    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -99,11 +99,11 @@ pub struct AppState {
     pub engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
     pub(crate) mirror: Arc<StateMirror>,
     pub(crate) watch: broadcast::Sender<EngineEvent>,
-    pub(crate) config: ConfigStore,
+    pub config: ConfigStore,
     pub(crate) config_watch: broadcast::Sender<u64>,
     pub(crate) control: Arc<Mutex<TorrentControl>>,
     pub labels: Arc<Mutex<LabelState>>,
-    pub(crate) store: Arc<Mutex<Box<dyn StateStore>>>,
+    pub store: Arc<Mutex<Box<dyn StateStore>>>,
     pub(crate) auth: Auth,
     pub(crate) data_dir: PathBuf,
     pub(crate) download_dir: PathBuf,
@@ -425,23 +425,27 @@ impl Ferrent for FerrentService {
                         .trackers(id)
                         .map(|items| items.into_iter().map(|tracker| tracker.url).collect())
                         .unwrap_or_default();
-                    Ok((id, trackers))
+                    let infohash = engine
+                        .status(id)
+                        .map(|status| status.infohash)
+                        .unwrap_or_default();
+                    Ok((id, trackers, infohash))
                 }
                 Err(error) => Err(error),
             }
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))?;
-        let (id, trackers, duplicate) = match result {
-            Ok((id, trackers)) => (id, trackers, false),
-            Err(EngineError::AlreadyExists { id }) => (id, Vec::new(), true),
+        let (id, trackers, infohash, duplicate) = match result {
+            Ok((id, trackers, infohash)) => (id, trackers, infohash, false),
+            Err(EngineError::AlreadyExists { id }) => (id, Vec::new(), String::new(), true),
             Err(error) => return Err(engine_status(error)),
         };
         if !duplicate {
             let persisted = PersistedTorrent {
                 id,
-                name,
-                save_path,
+                name: name.clone(),
+                save_path: save_path.clone(),
                 metainfo,
                 resume_data: None,
                 paused_by_user: false,
@@ -450,6 +454,10 @@ impl Ferrent for FerrentService {
             self.persist(move |store| persist::save_torrent(store, &persisted))
                 .await?;
             self.match_and_assign(id, &match_name, &trackers).await?;
+            let event = crate::hooks::added_event(id, &name, &save_path, &infohash);
+            if let Err(error) = self.state.append_hook_event(event).await {
+                eprintln!("hook journal: {error}");
+            }
         }
         Ok(Response::new(AddTorrentResponse { id, duplicate }))
     }
@@ -515,6 +523,18 @@ impl Ferrent for FerrentService {
         let request = request.into_inner();
         let id = request.id;
         let delete_files = request.delete_files;
+        if let Some(status) = self.state.mirror.get(id) {
+            let event = crate::events::NewEvent::new(
+                crate::events::EventKind::Removed,
+                id,
+                status.name.clone(),
+            )
+            .with_path(status.save_path.display().to_string())
+            .with_infohash(status.infohash.clone());
+            if let Err(error) = self.state.append_hook_event(event).await {
+                eprintln!("hook journal: {error}");
+            }
+        }
         self.with_engine(move |engine| engine.remove(id, delete_files))
             .await?;
         self.state
@@ -762,6 +782,49 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn get_hook_status(
+        &self,
+        request: Request<GetHookStatusRequest>,
+    ) -> Result<Response<GetHookStatusResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let limit = match request.into_inner().limit {
+            0 => 20,
+            limit => usize::try_from(limit).unwrap_or(20).min(200),
+        };
+        let store = Arc::clone(&self.state.store);
+        let (pending, runs) = tokio::task::spawn_blocking(move || {
+            let store = store.lock().expect("state store mutex poisoned");
+            let pending = crate::events::pending_len(&**store).unwrap_or(0);
+            let runs = crate::events::recent_runs(&**store, limit).unwrap_or_default();
+            (pending, runs)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?;
+        let runs = runs
+            .into_iter()
+            .map(|run| {
+                let succeeded = run.succeeded();
+                ProtoHookRun {
+                    event: run.event.as_str().to_owned(),
+                    torrent_id: run.torrent_id,
+                    torrent_name: run.torrent_name,
+                    command: run.command,
+                    succeeded,
+                    exit_code: run.exit_code.unwrap_or(0),
+                    timed_out: run.timed_out,
+                    duration_ms: run.duration_ms,
+                    stdout: run.stdout,
+                    stderr: run.stderr,
+                    at_unix: run.at_unix,
+                }
+            })
+            .collect();
+        Ok(Response::new(GetHookStatusResponse {
+            pending: u32::try_from(pending).unwrap_or(u32::MAX),
+            runs,
+        }))
+    }
+
     async fn get_torrent(
         &self,
         request: Request<GetTorrentRequest>,
@@ -992,8 +1055,9 @@ pub async fn serve(
     state: Arc<AppState>,
     tls: &TlsMaterial,
 ) -> Result<(), tonic::transport::Error> {
-    spawn_label_mover(Arc::clone(&state));
+    spawn_engine_watcher(Arc::clone(&state));
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
+    crate::hooks::spawn_hook_runner(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),
@@ -1006,12 +1070,24 @@ pub async fn serve(
 }
 
 /// Moves finished torrents to their label's `move_completed_path`.
-fn spawn_label_mover(state: Arc<AppState>) {
+fn spawn_engine_watcher(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut events = state.watch.subscribe();
         loop {
             match events.recv().await {
                 Ok(EngineEvent::Finished { id }) => {
+                    if let Some(status) = state.mirror.get(id) {
+                        let event = crate::events::NewEvent::new(
+                            crate::events::EventKind::Finished,
+                            id,
+                            status.name.clone(),
+                        )
+                        .with_path(status.save_path.display().to_string())
+                        .with_infohash(status.infohash.clone());
+                        if let Err(error) = state.append_hook_event(event).await {
+                            eprintln!("hook journal: {error}");
+                        }
+                    }
                     let target = {
                         let labels = state.labels.lock().expect("label state poisoned");
                         labels.move_target(id)
@@ -1038,9 +1114,25 @@ fn spawn_label_mover(state: Arc<AppState>) {
                         Err(error) => eprintln!("label move task failed for torrent {id}: {error}"),
                     }
                 }
+                Ok(EngineEvent::StateChanged {
+                    id,
+                    state: EngineState::Error(message),
+                }) => {
+                    let name = state
+                        .mirror
+                        .get(id)
+                        .map(|status| status.name.clone())
+                        .unwrap_or_default();
+                    let event =
+                        crate::events::NewEvent::new(crate::events::EventKind::Error, id, name)
+                            .with_error(Some(message));
+                    if let Err(error) = state.append_hook_event(event).await {
+                        eprintln!("hook journal: {error}");
+                    }
+                }
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    eprintln!("label mover lagged by {skipped} events");
+                    eprintln!("engine watcher lagged by {skipped} events");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -1385,7 +1477,7 @@ mod tests {
             PathBuf::from("."),
             PathBuf::from("/tmp"),
         ));
-        spawn_label_mover(Arc::clone(&state));
+        spawn_engine_watcher(Arc::clone(&state));
         tokio::time::sleep(Duration::from_millis(50)).await;
         state
             .watch

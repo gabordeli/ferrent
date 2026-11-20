@@ -3,7 +3,7 @@
 mod support;
 
 use ferrent_gui::connection::{self, ServerConfig, connect};
-use ferrent_protocol::v1::Label;
+use ferrent_protocol::v1::{AddTorrentRequest, Label};
 use support::start_server;
 
 async fn client(
@@ -181,6 +181,49 @@ async fn auto_add_status_and_manual_scan() {
 
     let missing = connection::scan_auto_add(&client, "/nope").await;
     assert!(missing.is_err(), "an unknown watch path is rejected");
+
+    server.shutdown();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn hook_runs_appear_in_the_status() {
+    let (client, server, dir) = client("hooks").await;
+
+    let config =
+        "[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"exit 0\"]\n";
+    connection::set_config(&client, config, 0)
+        .await
+        .expect("set config");
+
+    let mut metainfo = Vec::new();
+    metainfo.extend_from_slice(b"d4:infod6:lengthi5e4:name4:hookee");
+    let mut add_client = client.clone();
+    add_client
+        .add_torrent(AddTorrentRequest {
+            name: "hook.mkv".to_owned(),
+            total_bytes: 5,
+            metainfo,
+            save_path: String::new(),
+        })
+        .await
+        .expect("add torrent");
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let status = connection::hook_status(&client, 10).await.expect("status");
+        if status.runs.iter().any(|run| run.event == "added") {
+            assert_eq!(status.pending, 0, "the event is acknowledged");
+            assert!(status.runs[0].succeeded, "{:?}", status.runs[0]);
+            assert_eq!(status.runs[0].torrent_name, "hook.mkv");
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the hook did not run: {status:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 
     server.shutdown();
     let _ = std::fs::remove_dir_all(dir);

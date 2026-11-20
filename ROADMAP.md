@@ -424,17 +424,17 @@
 
 ### M5-T2 – Execute hookok ⚠️
 
-**Scope:** esemény-journal + kurzor, hook entitás, argv/env contract, timeout/concurrency, log, GUI tab.
+**Scope:** esemény-journal + ack, hook entitás a configban, argv/env contract, timeout/concurrency, futásnapló, GUI tab.
 
 **Acceptance**
 
-- [ ] added/finished/removed/error eseményre futtat; argv `{id} {name} {path} {infohash} {label}`.
-- [ ] at-least-once: `kill -9` után a nem nyugtázott esemény újra lefut (idempotencia a hooké, dokumentálva).
-- [ ] timeout → process group kill; exit code/stdout/stderr a journalban.
-- [ ] max 4 párhuzamos; a torrent szál nem blokkol; shell csak opt-in.
-- [ ] `removed` esetén a név/path a remove előtti pillanatképből jön.
+- [x] added/finished/removed/error eseményre futtat; argv `{id} {name} {path} {infohash} {label}` (+ `FERRENT_*` env).
+- [x] at-least-once: a nyugtázatlan `hookevent` rekord redb-ben marad és restart után újra lefut (ADR 0009; idempotencia a hooké).
+- [x] timeout → process group `SIGKILL`; exit code/stdout/stderr/időtartam a `hookrun` rekordban, a GUI-ban is.
+- [x] max 4 párhuzamos (teszt méri); a torrent-szál nem blokkol (tokio task + külön process); shell csak `shell = true`-ra.
+- [x] `removed` esetén a név/path/infohash a remove előtti mirror-pillanatképből jön.
 
-**Files:** `crates/daemon/src/events.rs`, `crates/daemon/src/hooks.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/hooks.rs`, `docs/adr/0009-event-journal.md`
+**Files:** `crates/daemon/src/events.rs`, `crates/daemon/src/hooks.rs`, `crates/daemon/src/config/schema.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `docs/adr/0009-event-journal.md`
 
 ### M5-T3 – Scheduler ⚠️
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1 kész; a következő szelet **M5-T2 Execute hookok**.
+**Állapot (2026-11-20):** M4-T1–T5, M5-T1 és M5-T2 kész; a következő szelet **M5-T3 Scheduler**.

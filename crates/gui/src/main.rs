@@ -12,7 +12,7 @@ use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
-    self, ConfigField, LabelField, Settings, SuccessAction, Tab, WatchField,
+    self, ConfigField, HookEvent, HookField, LabelField, Settings, SuccessAction, Tab, WatchField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -169,6 +169,7 @@ enum Message {
         config: Result<connection::ConfigSnapshot, String>,
         labels: Result<Vec<settings::LabelRow>, String>,
         auto_add: Result<Vec<settings::AutoAddStatusRow>, String>,
+        hooks: Result<connection::HookStatus, String>,
     },
     SettingsSaved {
         request: u64,
@@ -201,6 +202,15 @@ enum Message {
     AutoAddScanNow,
     AutoAddStatusLoaded(Result<Vec<settings::AutoAddStatusRow>, String>),
     AutoAddScanned(Result<connection::ScanTotals, String>),
+    HooksSelected(usize),
+    HooksAdd,
+    HooksRemove,
+    HooksField(HookField, String),
+    HooksEvent(HookEvent),
+    HooksShell(bool),
+    HooksEnabled(bool),
+    HooksRefresh,
+    HooksStatusLoaded(Result<connection::HookStatus, String>),
     SelectLabelFilter(String),
     ChooseLabel(Option<String>),
     LabelsAssigned(Result<usize, String>),
@@ -647,7 +657,8 @@ impl App {
                 config,
                 labels,
                 auto_add,
-            } => self.settings_loaded(request, config, labels, auto_add),
+                hooks,
+            } => self.settings_loaded(request, config, labels, auto_add, hooks),
             Message::SettingsSaved {
                 request,
                 toml,
@@ -713,6 +724,55 @@ impl App {
             Message::AutoAddAction(action) => {
                 if let Some(row) = self.settings.selected_watch_mut() {
                     row.on_success = action;
+                }
+                Task::none()
+            }
+            Message::HooksSelected(index) => {
+                if index < self.settings.hooks.rows.len() {
+                    self.settings.hooks_selected = Some(index);
+                }
+                Task::none()
+            }
+            Message::HooksAdd => {
+                self.settings.add_hook();
+                Task::none()
+            }
+            Message::HooksRemove => {
+                self.settings.remove_hook();
+                Task::none()
+            }
+            Message::HooksField(field, value) => {
+                if let Some(row) = self.settings.selected_hook_mut() {
+                    row.set(field, value);
+                }
+                Task::none()
+            }
+            Message::HooksEvent(event) => {
+                if let Some(row) = self.settings.selected_hook_mut() {
+                    row.event = event;
+                }
+                Task::none()
+            }
+            Message::HooksShell(value) => {
+                if let Some(row) = self.settings.selected_hook_mut() {
+                    row.shell = value;
+                }
+                Task::none()
+            }
+            Message::HooksEnabled(value) => {
+                if let Some(row) = self.settings.selected_hook_mut() {
+                    row.enabled = value;
+                }
+                Task::none()
+            }
+            Message::HooksRefresh => self.load_hook_status(),
+            Message::HooksStatusLoaded(result) => {
+                match result {
+                    Ok(status) => {
+                        self.settings.hook_pending = status.pending;
+                        self.settings.hook_runs = status.runs;
+                    }
+                    Err(error) => self.settings.error = Some(format!("Hooks: {error}")),
                 }
                 Task::none()
             }
@@ -1957,13 +2017,15 @@ impl App {
                     .await
                     .map(|entries| entries.into_iter().map(settings::LabelRow::from).collect());
                 let auto_add = connection::auto_add_status(&client).await;
-                (request, config, labels, auto_add)
+                let hooks = connection::hook_status(&client, 30).await;
+                (request, config, labels, auto_add, hooks)
             },
-            |(request, config, labels, auto_add)| Message::SettingsLoaded {
+            |(request, config, labels, auto_add, hooks)| Message::SettingsLoaded {
                 request,
                 config,
                 labels,
                 auto_add,
+                hooks,
             },
         )
     }
@@ -1974,6 +2036,7 @@ impl App {
         config: Result<connection::ConfigSnapshot, String>,
         labels: Result<Vec<settings::LabelRow>, String>,
         auto_add: Result<Vec<settings::AutoAddStatusRow>, String>,
+        hooks: Result<connection::HookStatus, String>,
     ) -> Task<Message> {
         if request != self.settings_request {
             return Task::none();
@@ -2010,7 +2073,28 @@ impl App {
                 }
             }
         }
+        match hooks {
+            Ok(status) => {
+                self.settings.hook_pending = status.pending;
+                self.settings.hook_runs = status.runs;
+            }
+            Err(error) => {
+                if self.settings.error.is_none() {
+                    self.settings.error = Some(format!("hooks: {error}"));
+                }
+            }
+        }
         Task::none()
+    }
+
+    fn load_hook_status(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { connection::hook_status(&client, 30).await },
+            Message::HooksStatusLoaded,
+        )
     }
 
     fn load_auto_add_status(&mut self) -> Task<Message> {
@@ -2092,6 +2176,7 @@ impl App {
                 self.settings.raw = toml;
                 self.settings.baseline = self.settings.form.clone();
                 self.settings.autoadd_baseline = self.settings.autoadd.clone();
+                self.settings.hooks_baseline = self.settings.hooks.clone();
                 self.settings.error = None;
                 self.settings.message = format!("Saved revision {revision}");
                 Task::batch([self.refresh_page(), self.load_labels()])
@@ -2334,6 +2419,7 @@ impl App {
             Tab::Connection => self.settings_connection_view(),
             Tab::Session => self.settings_session_view(),
             Tab::AutoAdd => self.settings_auto_add_view(),
+            Tab::Hooks => self.settings_hooks_view(),
             Tab::Labels => self.settings_labels_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
@@ -2361,12 +2447,12 @@ impl App {
 
         let save = match settings.tab {
             Tab::Labels => Message::LabelSave,
-            Tab::Connection | Tab::Session | Tab::AutoAdd => Message::SettingsSave,
+            Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
                 Tab::Labels => settings.label_new || settings.label_selected.is_some(),
-                Tab::Connection | Tab::Session | Tab::AutoAdd => true,
+                Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks => true,
             };
         let footer = row![
             summary,
@@ -2624,7 +2710,12 @@ impl App {
                     totals,
                     row![
                         horizontal_space(),
-                        action_button("Scan now", Message::AutoAddScanNow, !settings.loading),
+                        container(action_button(
+                            "Scan now",
+                            Message::AutoAddScanNow,
+                            !settings.loading,
+                        ))
+                        .width(Length::Fixed(110.0)),
                     ],
                 ]
                 .spacing(4)
@@ -2682,6 +2773,216 @@ impl App {
             ));
         }
         editor.max_width(560.0).into()
+    }
+
+    fn settings_hooks_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let rows: Vec<Element<Message>> = settings
+            .hooks
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let selected = settings.hooks_selected == Some(index);
+                let command = row
+                    .command
+                    .rsplit('/')
+                    .next()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("(no command)")
+                    .to_owned();
+                let detail = if row.enabled {
+                    format!("{} · {}s", row.event.label(), row.timeout_secs)
+                } else {
+                    format!("{} · disabled", row.event.label())
+                };
+                button(
+                    column![
+                        row![
+                            text(glyph::PLAY).font(icons::solid()).size(10.0).color(
+                                if row.enabled {
+                                    theme::PRIMARY
+                                } else {
+                                    theme::TEXT_MUTED
+                                }
+                            ),
+                            text(command).size(12),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                        text(detail).size(10).color(theme::TEXT_MUTED),
+                    ]
+                    .spacing(2),
+                )
+                .on_press(Message::HooksSelected(index))
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::SURFACE
+                        } else {
+                            theme::BG_SECONDARY
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_SECONDARY
+                    },
+                    border: iced::Border {
+                        color: if selected {
+                            theme::PRIMARY
+                        } else {
+                            theme::BG_SECONDARY
+                        },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = column![
+            row![
+                text("Hooks").size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button("Add", Message::HooksAdd, !settings.loading),
+                action_button(
+                    "Remove",
+                    Message::HooksRemove,
+                    settings.hooks_selected.is_some() && !settings.loading,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(6)
+        .width(Length::Fixed(300.0))
+        .height(Length::Fill);
+
+        let editor: Element<Message> = if settings.selected_hook().is_some() {
+            self.hook_editor_view()
+        } else {
+            column![
+                text("Select a hook, or add one.")
+                    .size(12)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .into()
+        };
+
+        let runs: Vec<Element<Message>> = settings
+            .hook_runs
+            .iter()
+            .map(|run| {
+                let color = if run.timed_out || !run.succeeded {
+                    theme::ERROR
+                } else {
+                    theme::PRIMARY
+                };
+                let mut entry = column![text(run.summary()).size(11).color(color)].spacing(1);
+                if let Some(detail) = run.detail() {
+                    entry = entry.push(
+                        text(detail.lines().next().unwrap_or_default().to_owned())
+                            .size(10)
+                            .color(theme::TEXT_MUTED),
+                    );
+                }
+                entry.into()
+            })
+            .collect();
+        let runs_section = column![
+            row![
+                text("Recent runs").size(12).font(theme::semibold()),
+                horizontal_space(),
+                text(format!("{} pending", settings.hook_pending))
+                    .size(10)
+                    .color(theme::TEXT_MUTED),
+                container(action_button(
+                    "Refresh",
+                    Message::HooksRefresh,
+                    !settings.loading,
+                ))
+                .width(Length::Fixed(96.0)),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(runs).spacing(3)).height(Length::Fill)
+            )
+            .height(Length::Fixed(170.0)),
+        ]
+        .spacing(4);
+
+        row![
+            list,
+            container(
+                column![scrollable(editor).height(Length::Fill), runs_section,]
+                    .spacing(8)
+                    .height(Length::Fill)
+            )
+            .padding([0, 12])
+            .width(Length::Fill)
+            .height(Length::Fill),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn hook_editor_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let Some(row) = settings.selected_hook() else {
+            return text("").size(1).into();
+        };
+        column![
+            hook_field_view(row, HookField::Command, "/usr/local/bin/notify"),
+            hook_field_view(row, HookField::Args, "{id} {name} {path} {infohash} {label}"),
+            column![
+                text("Event").size(11).color(theme::TEXT_MUTED),
+                row![
+                    hook_event_toggle(HookEvent::Added, row.event),
+                    hook_event_toggle(HookEvent::Finished, row.event),
+                    hook_event_toggle(HookEvent::Removed, row.event),
+                    hook_event_toggle(HookEvent::Error, row.event),
+                ]
+                .spacing(6),
+            ]
+            .spacing(3),
+            row![
+                hook_field_view(row, HookField::Timeout, "60"),
+                column![
+                    text("Options").size(11).color(theme::TEXT_MUTED),
+                    row![
+                        checkbox("Run through shell", row.shell)
+                            .on_toggle(Message::HooksShell)
+                            .size(14)
+                            .text_size(12),
+                        checkbox("Enabled", row.enabled)
+                            .on_toggle(Message::HooksEnabled)
+                            .size(14)
+                            .text_size(12),
+                    ]
+                    .spacing(12),
+                ]
+                .spacing(3)
+                .width(Length::Fill),
+            ]
+            .spacing(8),
+            text("Hooks are at-least-once: a crash replays the event, so make the command idempotent. The event is acknowledged after every matching hook finished.")
+                .size(10)
+                .color(theme::TEXT_MUTED),
+        ]
+        .spacing(10)
+        .max_width(560.0)
+        .into()
     }
 
     fn settings_labels_view(&self) -> Element<'_, Message> {
@@ -3194,11 +3495,14 @@ impl App {
             )
         };
         let pinned: Element<Message> = match &pending.expected {
-            Some(expected) => {
-                column![text("Pinned fingerprint").size(12), text(expected).size(14),]
-                    .spacing(4)
-                    .into()
-            }
+            Some(expected) => column![
+                text("Pinned fingerprint").size(12),
+                text(fingerprint_display(expected))
+                    .size(12)
+                    .font(iced::Font::MONOSPACE),
+            ]
+            .spacing(4)
+            .into(),
             None => column![].into(),
         };
 
@@ -3209,7 +3513,9 @@ impl App {
                 text("Server").size(12),
                 text(&pending.config.server),
                 text("Presented SHA-256 fingerprint").size(12),
-                text(&pending.fingerprint).size(16),
+                text(fingerprint_display(&pending.fingerprint))
+                    .size(12)
+                    .font(iced::Font::MONOSPACE),
                 pinned,
                 row![
                     button("Trust and connect").on_press(Message::TrustFingerprint),
@@ -3937,10 +4243,33 @@ fn watch_field_view<'a>(
     .into()
 }
 
-fn watch_action(action: SuccessAction, current: SuccessAction) -> Element<'static, Message> {
-    let selected = action == current;
-    button(text(action.label()).size(11))
-        .on_press(Message::AutoAddAction(action))
+fn hook_field_view<'a>(
+    row: &'a settings::HookRow,
+    field: HookField,
+    placeholder: &'a str,
+) -> Element<'a, Message> {
+    column![
+        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text_input(placeholder, row.text(field))
+            .style(muted_input_style)
+            .width(Length::Fill)
+            .on_input(move |value| Message::HooksField(field, value)),
+    ]
+    .spacing(3)
+    .into()
+}
+
+fn hook_event_toggle(event: HookEvent, current: HookEvent) -> Element<'static, Message> {
+    toggle_button(event.label(), event == current, Message::HooksEvent(event))
+}
+
+fn toggle_button(
+    label: &'static str,
+    selected: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    button(text(label).size(11))
+        .on_press(message)
         .padding([5, 12])
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(
@@ -3968,6 +4297,14 @@ fn watch_action(action: SuccessAction, current: SuccessAction) -> Element<'stati
             ..button::Style::default()
         })
         .into()
+}
+
+fn watch_action(action: SuccessAction, current: SuccessAction) -> Element<'static, Message> {
+    toggle_button(
+        action.label(),
+        action == current,
+        Message::AutoAddAction(action),
+    )
 }
 
 fn settings_tab(tab: Tab, active: bool) -> Element<'static, Message> {
@@ -4024,6 +4361,18 @@ fn settings_field<'a>(
     ]
     .spacing(3)
     .into()
+}
+
+/// Splits a fingerprint into two lines so the last group is never wrapped
+/// alone; a 32-group digest fits the dialog at 12 pt monospace.
+fn fingerprint_display(fingerprint: &str) -> String {
+    let groups: Vec<&str> = fingerprint.split(':').collect();
+    if groups.len() % 2 == 0 && groups.len() >= 2 {
+        let half = groups.len() / 2;
+        format!("{}\n{}", groups[..half].join(":"), groups[half..].join(":"))
+    } else {
+        fingerprint.to_owned()
+    }
 }
 
 fn muted_input_style(theme_: &iced::Theme, status: text_input::Status) -> text_input::Style {

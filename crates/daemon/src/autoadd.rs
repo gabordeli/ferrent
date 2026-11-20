@@ -986,7 +986,7 @@ impl crate::rpc::AppState {
             ferrent_engine::TorrentSource::Magnet(_) => Vec::new(),
         };
         let engine = std::sync::Arc::clone(&self.engine);
-        let (id, duplicate, trackers) = tokio::task::spawn_blocking(move || {
+        let (id, duplicate, trackers, infohash) = tokio::task::spawn_blocking(move || {
             let mut engine = engine.lock().expect("engine mutex poisoned");
             match engine.add_torrent(spec) {
                 Ok(id) => {
@@ -994,10 +994,14 @@ impl crate::rpc::AppState {
                         .trackers(id)
                         .map(|items| items.into_iter().map(|tracker| tracker.url).collect())
                         .unwrap_or_default();
-                    Ok((id, false, trackers))
+                    let infohash = engine
+                        .status(id)
+                        .map(|status| status.infohash)
+                        .unwrap_or_default();
+                    Ok((id, false, trackers, infohash))
                 }
                 Err(ferrent_engine::EngineError::AlreadyExists { id }) => {
-                    Ok((id, true, Vec::new()))
+                    Ok((id, true, Vec::new(), String::new()))
                 }
                 Err(error) => Err(error),
             }
@@ -1016,7 +1020,7 @@ impl crate::rpc::AppState {
         let persisted = crate::persist::PersistedTorrent {
             id,
             name: name.clone(),
-            save_path,
+            save_path: save_path.clone(),
             metainfo,
             resume_data: None,
             paused_by_user: paused,
@@ -1074,6 +1078,11 @@ impl crate::rpc::AppState {
                 engine.set_torrent_limits(id, limits)
             })
             .await;
+        }
+
+        let event = crate::hooks::added_event(id, &name, &save_path, &infohash);
+        if let Err(error) = self.append_hook_event(event).await {
+            eprintln!("hook journal: {error}");
         }
 
         if paused {
