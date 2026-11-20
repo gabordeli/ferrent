@@ -24,6 +24,7 @@ pub const QUEUED: Color = Color::from_rgb(0.980, 0.800, 0.082);
 pub const PAUSED: Color = TEXT_SECONDARY;
 pub const ERROR: Color = Color::from_rgb(0.937, 0.267, 0.267);
 pub const CHECKING: Color = Color::from_rgb(0.655, 0.545, 0.980);
+pub const MOVING: Color = Color::from_rgb(0.298, 0.651, 0.949);
 pub const CONNECTING: Color = CYAN;
 
 const FAMILY: &str = "IBM Plex Sans";

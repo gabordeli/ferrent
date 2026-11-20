@@ -77,6 +77,7 @@ pub struct ServerStatus {
     pub paused: u32,
     pub error: u32,
     pub checking: u32,
+    pub moving: u32,
     pub active: u32,
 }
 
@@ -137,6 +138,7 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
         paused: response.paused_count,
         error: response.error_count,
         checking: response.checking_count,
+        moving: response.moving_count,
         active: response.active_count,
     })
 }

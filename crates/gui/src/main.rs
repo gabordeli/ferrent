@@ -2179,6 +2179,7 @@ impl App {
         let queued = TorrentState::Queued as i32;
         let paused = TorrentState::Paused as i32;
         let error = TorrentState::Error as i32;
+        let moving = TorrentState::Moving as i32;
 
         let bottom: Element<Message> = WidgetColumn::with_children(vec![
             icon_nav(
@@ -2220,6 +2221,15 @@ impl App {
                 "Downloading",
                 status.downloading,
                 Some(downloading),
+                active,
+            ),
+            nav_button(
+                expanded,
+                glyph::DOWNLOAD,
+                table::state_color(moving),
+                "Moving",
+                status.moving,
+                Some(moving),
                 active,
             ),
             nav_button(

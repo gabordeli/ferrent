@@ -55,7 +55,7 @@ ferrent-cli config set <file> [--revision N]
 
 ## JSON kimenet (stabil, v1)
 
-- `add`: `{"id": 0}`
+- `add`: `{"id": 0, "duplicate": false}`
 - `list`: `{"total": 1, "torrents": [<torrent>]}`
 - `show`: `<torrent>`
 - `pause` / `resume` / `remove`: `{"ok": true, "id": 0}`
@@ -68,10 +68,11 @@ ferrent-cli config set <file> [--revision N]
   - `{"event":"state_changed","id":0,"state":"paused"}`
   - `{"event":"progress","id":0,"progress":0.5,"download_rate":1,"upload_rate":2}`
   - `{"event":"removed","id":0}`
+  - `{"event":"finished","id":0}`
   - `{"event":"config_changed","revision":1}`
 
 A `state` értékek: `unspecified`, `queued`, `checking`, `downloading`,
-`seeding`, `paused`, `error`.
+`seeding`, `paused`, `moving`, `error`.
 
 ## Exit code-ok
 

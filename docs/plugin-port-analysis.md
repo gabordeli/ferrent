@@ -12,8 +12,8 @@
 | RPC | add/pause/resume/remove/get/list/status/files/peers/trackers/watch/queue-move/config get-set | `crates/protocol/proto/ferrent/v1/ferrent.proto` |
 | State mirror | név-substring + state szűrő, 6 rendezési kulcs | `crates/daemon/src/state.rs` |
 | Perzisztencia | név, save path, metainfo, fastresume, queue order | `crates/daemon/src/persist.rs` |
-| Engine | per-torrent limit nélkül; `EngineSettings` = le/fel limit + seed mode | `crates/engine/src/{engine,types}.rs` |
-| Események | `Added`, `StateChanged`, `Progress`, `Removed`; nincs `Finished` | `crates/engine/src/types.rs` |
+| Engine | per-torrent limitek, `move_storage`, `Moving`, infohash, `Finished`, session/active limitek | `crates/engine/src/{engine,types}.rs` |
+| Események | `Added`, `StateChanged`, `Progress`, `Removed`, `Finished` (pontosan egyszer) | `crates/engine/src/types.rs` |
 | GUI | virtualizált tábla, Details fülek, szerverkezelő; Settings modal 560×380 stub | `crates/gui/src/main.rs` |
 | Label / infohash / move storage / web | nincs | – |
 

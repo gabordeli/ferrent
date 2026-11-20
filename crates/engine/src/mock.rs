@@ -1,13 +1,15 @@
 //! In-memory engine used by unit tests and by the daemon before the
 //! `libtorrent` backend is wired in.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use tokio::sync::broadcast;
 
 use crate::engine::TorrentEngine;
 use crate::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentState, TorrentStatus,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentLimits, TorrentSource,
+    TorrentState, TorrentStatus,
 };
 
 const EVENT_BUFFER: usize = 256;
@@ -17,6 +19,9 @@ const EVENT_BUFFER: usize = 256;
 pub struct MockEngine {
     next_id: TorrentId,
     torrents: BTreeMap<TorrentId, TorrentStatus>,
+    infohash_index: BTreeMap<String, TorrentId>,
+    limits: BTreeMap<TorrentId, TorrentLimits>,
+    finished: BTreeSet<TorrentId>,
     settings: EngineSettings,
     events: broadcast::Sender<EngineEvent>,
 }
@@ -35,9 +40,18 @@ impl MockEngine {
         Self {
             next_id: 0,
             torrents: BTreeMap::new(),
+            infohash_index: BTreeMap::new(),
+            limits: BTreeMap::new(),
+            finished: BTreeSet::new(),
             settings: EngineSettings::default(),
             events,
         }
+    }
+
+    /// Test helper: the limits currently applied to a torrent.
+    #[must_use]
+    pub fn limits(&self, id: TorrentId) -> Option<TorrentLimits> {
+        self.limits.get(&id).copied()
     }
 
     /// Test helper: advances progress and emits the resulting events.
@@ -49,7 +63,7 @@ impl MockEngine {
         upload_rate: u64,
     ) -> Result<(), EngineError> {
         let progress = progress.clamp(0.0, 1.0);
-        let state_change = {
+        let (state_change, finished) = {
             let status = self
                 .torrents
                 .get_mut(&id)
@@ -57,16 +71,21 @@ impl MockEngine {
             status.progress = progress;
             status.download_rate = download_rate;
             status.upload_rate = upload_rate;
-            if progress >= 1.0 && status.state != TorrentState::Seeding {
+            let state_change = if progress >= 1.0 && status.state != TorrentState::Seeding {
                 status.state = TorrentState::Seeding;
                 Some(status.state.clone())
             } else {
                 None
-            }
+            };
+            let finished = progress >= 1.0 && self.finished.insert(id);
+            (state_change, finished)
         };
 
         if let Some(state) = state_change {
             self.emit(EngineEvent::StateChanged { id, state });
+        }
+        if finished {
+            self.emit(EngineEvent::Finished { id });
         }
         self.emit(EngineEvent::Progress {
             id,
@@ -83,25 +102,64 @@ impl MockEngine {
     }
 }
 
+fn status_from_spec(id: TorrentId, spec: AddTorrent, infohash: String) -> TorrentStatus {
+    TorrentStatus {
+        id,
+        infohash,
+        name: spec.name,
+        save_path: spec.save_path,
+        total_bytes: spec.total_bytes,
+        state: TorrentState::Queued,
+        progress: 0.0,
+        download_rate: 0,
+        upload_rate: 0,
+        seeds: 0,
+        peers: 0,
+        eta_seconds: 0,
+        queue_position: 0,
+    }
+}
+
+/// Stable mock identity; not a real SHA-1.
+fn infohash_for(spec: &AddTorrent) -> String {
+    if let TorrentSource::Magnet(uri) = &spec.source {
+        if let Some(rest) = uri.split("urn:btih:").nth(1) {
+            let hash = rest.split('&').next().unwrap_or(rest);
+            if hash.len() == 40 && hash.chars().all(|character| character.is_ascii_hexdigit()) {
+                return hash.to_ascii_lowercase();
+            }
+        }
+    }
+    let bytes = match &spec.source {
+        TorrentSource::Metainfo(bytes) => bytes.as_slice(),
+        TorrentSource::Magnet(uri) => uri.as_bytes(),
+    };
+    synthetic_infohash(bytes)
+}
+
+fn synthetic_infohash(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!(
+        "{hash:016x}{:016x}{:08x}",
+        hash.rotate_left(21),
+        hash.rotate_left(43) as u32
+    )
+}
+
 impl TorrentEngine for MockEngine {
     fn add_torrent(&mut self, spec: AddTorrent) -> Result<TorrentId, EngineError> {
+        let infohash = infohash_for(&spec);
+        if let Some(existing) = self.infohash_index.get(&infohash) {
+            return Err(EngineError::AlreadyExists { id: *existing });
+        }
         let id = self.next_id;
         self.next_id += 1;
-
-        let status = TorrentStatus {
-            id,
-            name: spec.name,
-            save_path: spec.save_path,
-            total_bytes: spec.total_bytes,
-            state: TorrentState::Queued,
-            progress: 0.0,
-            download_rate: 0,
-            upload_rate: 0,
-            seeds: 0,
-            peers: 0,
-            eta_seconds: 0,
-            queue_position: 0,
-        };
+        let status = status_from_spec(id, spec, infohash.clone());
+        self.infohash_index.insert(infohash, id);
         self.torrents.insert(id, status.clone());
         self.emit(EngineEvent::Added(status));
         Ok(id)
@@ -109,25 +167,15 @@ impl TorrentEngine for MockEngine {
 
     fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
         if self.torrents.contains_key(&id) {
-            return Err(EngineError::Rejected {
-                reason: format!("torrent {id} already exists"),
-            });
+            return Err(EngineError::AlreadyExists { id });
         }
-        let status = TorrentStatus {
-            id,
-            name: spec.name,
-            save_path: spec.save_path,
-            total_bytes: spec.total_bytes,
-            state: TorrentState::Queued,
-            progress: 0.0,
-            download_rate: 0,
-            upload_rate: 0,
-            seeds: 0,
-            peers: 0,
-            eta_seconds: 0,
-            queue_position: 0,
-        };
+        let infohash = infohash_for(&spec);
+        if let Some(existing) = self.infohash_index.get(&infohash) {
+            return Err(EngineError::AlreadyExists { id: *existing });
+        }
+        let status = status_from_spec(id, spec, infohash.clone());
         self.next_id = self.next_id.max(id + 1);
+        self.infohash_index.insert(infohash, id);
         self.torrents.insert(id, status.clone());
         self.emit(EngineEvent::Added(status));
         Ok(())
@@ -173,10 +221,65 @@ impl TorrentEngine for MockEngine {
                 .torrents
                 .get_mut(&id)
                 .ok_or(EngineError::NotFound { id })?;
-            if status.state == TorrentState::Downloading {
+            if status.state == TorrentState::Downloading || status.state == TorrentState::Seeding {
                 return Ok(());
             }
-            status.state = TorrentState::Downloading;
+            status.state = if status.progress >= 1.0 {
+                TorrentState::Seeding
+            } else {
+                TorrentState::Downloading
+            };
+            status.state.clone()
+        };
+        self.emit(EngineEvent::StateChanged { id, state });
+        Ok(())
+    }
+
+    fn set_torrent_limits(
+        &mut self,
+        id: TorrentId,
+        limits: TorrentLimits,
+    ) -> Result<(), EngineError> {
+        if !self.torrents.contains_key(&id) {
+            return Err(EngineError::NotFound { id });
+        }
+        self.limits.insert(id, limits);
+        Ok(())
+    }
+
+    fn move_storage(&mut self, id: TorrentId, path: PathBuf) -> Result<(), EngineError> {
+        let previous = {
+            let status = self
+                .torrents
+                .get_mut(&id)
+                .ok_or(EngineError::NotFound { id })?;
+            if status.state == TorrentState::Moving {
+                return Ok(());
+            }
+            let previous = status.state.clone();
+            status.state = TorrentState::Moving;
+            status.download_rate = 0;
+            status.upload_rate = 0;
+            previous
+        };
+        self.emit(EngineEvent::StateChanged {
+            id,
+            state: TorrentState::Moving,
+        });
+
+        let state = {
+            let status = self
+                .torrents
+                .get_mut(&id)
+                .ok_or(EngineError::NotFound { id })?;
+            status.save_path = path;
+            status.state = match previous {
+                TorrentState::Paused => TorrentState::Paused,
+                TorrentState::Queued => TorrentState::Queued,
+                TorrentState::Error(message) => TorrentState::Error(message),
+                _ if status.progress >= 1.0 => TorrentState::Seeding,
+                _ => TorrentState::Downloading,
+            };
             status.state.clone()
         };
         self.emit(EngineEvent::StateChanged { id, state });
@@ -185,9 +288,13 @@ impl TorrentEngine for MockEngine {
 
     fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError> {
         let _ = delete_files;
-        if self.torrents.remove(&id).is_none() {
-            return Err(EngineError::NotFound { id });
-        }
+        let status = self
+            .torrents
+            .remove(&id)
+            .ok_or(EngineError::NotFound { id })?;
+        self.infohash_index.remove(&status.infohash);
+        self.limits.remove(&id);
+        self.finished.remove(&id);
         self.emit(EngineEvent::Removed { id });
         Ok(())
     }
@@ -387,10 +494,116 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
         match recv(&mut events) {
+            EngineEvent::Finished { id: event_id } => assert_eq!(event_id, id),
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match recv(&mut events) {
             EngineEvent::Progress { progress, .. } => {
                 assert!((progress - 1.0).abs() < 1e-6);
             }
             other => panic!("unexpected event: {other:?}"),
         }
+
+        engine.advance(id, 1.0, 0, 256).expect("still finished");
+        match recv(&mut events) {
+            EngineEvent::Progress { progress, .. } => {
+                assert!((progress - 1.0).abs() < 1e-6);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        assert!(events.try_recv().is_err(), "Finished must fire once");
+    }
+
+    #[test]
+    fn duplicate_add_returns_the_existing_id() {
+        let mut engine = MockEngine::new();
+        let first = add(&mut engine, "same");
+        let error = engine
+            .add_torrent(AddTorrent {
+                name: "same".to_owned(),
+                total_bytes: 1024,
+                source: TorrentSource::Magnet("magnet:?xt=urn:btih:same".to_owned()),
+                save_path: PathBuf::from("/tmp/ferrent"),
+                resume_data: None,
+            })
+            .expect_err("duplicate");
+        assert_eq!(error, EngineError::AlreadyExists { id: first });
+    }
+
+    #[test]
+    fn move_storage_updates_the_path_and_restores_the_state() {
+        let mut engine = MockEngine::new();
+        let mut events = engine.subscribe();
+        let id = add(&mut engine, "move");
+        let _ = recv(&mut events);
+        engine.resume(id).expect("resume");
+        let _ = recv(&mut events);
+
+        engine
+            .move_storage(id, PathBuf::from("/mnt/new"))
+            .expect("move");
+        match recv(&mut events) {
+            EngineEvent::StateChanged {
+                id: event_id,
+                state,
+            } => {
+                assert_eq!(event_id, id);
+                assert_eq!(state, TorrentState::Moving);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match recv(&mut events) {
+            EngineEvent::StateChanged {
+                id: event_id,
+                state,
+            } => {
+                assert_eq!(event_id, id);
+                assert_eq!(state, TorrentState::Downloading);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        let status = engine.status(id).expect("status");
+        assert_eq!(status.save_path, PathBuf::from("/mnt/new"));
+    }
+
+    #[test]
+    fn bulk_pause_and_resume() {
+        let mut engine = MockEngine::new();
+        let first = add(&mut engine, "bulk-first");
+        let second = add(&mut engine, "bulk-second");
+
+        assert_eq!(engine.pause_many(&[first, second]), 2);
+        assert_eq!(
+            engine.status(first).expect("first").state,
+            TorrentState::Paused
+        );
+        assert_eq!(
+            engine.status(second).expect("second").state,
+            TorrentState::Paused
+        );
+
+        assert_eq!(engine.resume_many(&[first, second]), 2);
+        assert_eq!(
+            engine.status(first).expect("first").state,
+            TorrentState::Downloading
+        );
+    }
+
+    #[test]
+    fn per_torrent_limits_are_stored() {
+        let mut engine = MockEngine::new();
+        let id = add(&mut engine, "limits");
+        let limits = TorrentLimits {
+            download_rate_limit: 1024,
+            upload_rate_limit: 512,
+            connections_limit: 20,
+            upload_slots_limit: 4,
+        };
+        engine.set_torrent_limits(id, limits).expect("set limits");
+        assert_eq!(engine.limits(id), Some(limits));
+        assert_eq!(
+            engine.set_torrent_limits(99, limits),
+            Err(EngineError::NotFound { id: 99 })
+        );
     }
 }

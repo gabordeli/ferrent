@@ -14,6 +14,14 @@ fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../engine/tests/fixtures/hello.torrent")
 }
 
+fn fixture_variant(dir: &std::path::Path, tag: u8) -> PathBuf {
+    let mut bytes = std::fs::read(fixture()).expect("read fixture");
+    bytes.push(tag);
+    let path = dir.join(format!("hello-{tag}.torrent"));
+    std::fs::write(&path, bytes).expect("write variant");
+    path
+}
+
 async fn connect_to(
     server: &support::TestServer,
     ca: PathBuf,
@@ -34,13 +42,13 @@ async fn adds_pages_and_mutates_torrents() {
     let client = connect_to(&server, ca).await;
 
     let save_path = dir.join("downloads").display().to_string();
-    let first = actions::add(&client, &fixture(), &save_path, "")
+    let first = actions::add(&client, &fixture_variant(&dir, 1), &save_path, "")
         .await
         .expect("add first");
-    let second = actions::add(&client, &fixture(), &save_path, "")
+    let second = actions::add(&client, &fixture_variant(&dir, 2), &save_path, "")
         .await
         .expect("add second");
-    let third = actions::add(&client, &fixture(), &save_path, "")
+    let third = actions::add(&client, &fixture_variant(&dir, 3), &save_path, "")
         .await
         .expect("add third");
     tokio::time::sleep(Duration::from_millis(250)).await;

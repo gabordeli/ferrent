@@ -103,6 +103,21 @@ async fn tls_auth_and_crud() {
         .await
         .expect("add")
         .into_inner();
+    assert!(!added.duplicate);
+
+    let duplicate = client
+        .add_torrent(AddTorrentRequest {
+            name: "test".to_owned(),
+            metainfo: Vec::new(),
+            save_path: "/tmp".to_owned(),
+            total_bytes: 123,
+        })
+        .await
+        .expect("duplicate add")
+        .into_inner();
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.id, added.id);
+
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     let list = client
@@ -113,6 +128,7 @@ async fn tls_auth_and_crud() {
     assert_eq!(list.total, 1);
     assert_eq!(list.torrents.len(), 1);
     assert_eq!(list.torrents[0].name, "test");
+    assert_eq!(list.torrents[0].infohash.len(), 40);
 
     client
         .pause_torrent(PauseTorrentRequest { id: added.id })

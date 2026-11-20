@@ -93,6 +93,10 @@ pub fn print_event(event: &WatchResponse, json_mode: bool) -> Result<(), CliErro
                 "event": "config_changed",
                 "revision": change.revision,
             }),
+            Event::Finished(finished) => json!({
+                "event": "finished",
+                "id": finished.id,
+            }),
         };
         println!(
             "{}",
@@ -114,6 +118,9 @@ pub fn print_event(event: &WatchResponse, json_mode: bool) -> Result<(), CliErro
             Event::Removed(removed) => println!("removed {}", removed.id),
             Event::ConfigChanged(change) => {
                 println!("config revision {}", change.revision);
+            }
+            Event::Finished(finished) => {
+                println!("finished {}", finished.id);
             }
         }
     }

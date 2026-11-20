@@ -40,11 +40,14 @@ pub struct SessionConfig {
     pub download_rate_limit: u64,
     /// Upload limit in bytes per second; `0` means unlimited.
     pub upload_rate_limit: u64,
-    /// Maximum number of simultaneously downloading torrents; `0` means unlimited.
+    /// Maximum number of simultaneously downloading torrents; `0` uses the
+    /// engine's 20 000 soak head-room.
     pub active_downloads: u32,
-    /// Maximum number of simultaneously seeding torrents; `0` means unlimited.
+    /// Maximum number of simultaneously seeding torrents; `0` uses the engine's
+    /// 20 000 soak head-room.
     pub active_seeds: u32,
-    /// Maximum number of active torrents; `0` means unlimited.
+    /// Maximum number of active torrents; `0` uses the engine's 20 000 soak
+    /// head-room.
     pub active_limit: u32,
     /// Treat newly added torrents as complete without an initial file check.
     pub seed_mode: bool,

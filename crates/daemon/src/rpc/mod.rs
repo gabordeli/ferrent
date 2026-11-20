@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use ferrent_engine::{
-    AddTorrent, EngineError, EngineEvent, TorrentEngine, TorrentSource,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentEngine, TorrentSource,
     TorrentState as EngineState, TorrentStatus,
 };
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
@@ -20,8 +20,8 @@ use ferrent_protocol::v1::{
     ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
     PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
     RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SetConfigRequest,
-    SetConfigResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentPeer, TorrentState,
-    TorrentTracker, WatchRequest, WatchResponse,
+    SetConfigResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer,
+    TorrentState, TorrentTracker, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -82,6 +82,7 @@ pub struct AggregateStatus {
     pub paused: u32,
     pub error: u32,
     pub checking: u32,
+    pub moving: u32,
     pub active: u32,
 }
 
@@ -148,6 +149,7 @@ impl AppState {
                 4 => status.seeding += 1,
                 5 => status.paused += 1,
                 6 => status.error += 1,
+                7 => status.moving += 1,
                 _ => {}
             }
         }
@@ -234,19 +236,30 @@ impl Ferrent for FerrentService {
             TorrentSource::Metainfo(bytes) => bytes.clone(),
             TorrentSource::Magnet(_) => Vec::new(),
         };
-        let id = self
-            .with_engine(move |engine| engine.add_torrent(spec))
-            .await?;
-        let persisted = PersistedTorrent {
-            id,
-            name,
-            save_path,
-            metainfo,
-            resume_data: None,
+        let engine = Arc::clone(&self.state.engine);
+        let result = tokio::task::spawn_blocking(move || {
+            let mut engine = engine.lock().expect("engine mutex poisoned");
+            engine.add_torrent(spec)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?;
+        let (id, duplicate) = match result {
+            Ok(id) => (id, false),
+            Err(EngineError::AlreadyExists { id }) => (id, true),
+            Err(error) => return Err(engine_status(error)),
         };
-        self.persist(move |store| persist::save_torrent(store, &persisted))
-            .await?;
-        Ok(Response::new(AddTorrentResponse { id }))
+        if !duplicate {
+            let persisted = PersistedTorrent {
+                id,
+                name,
+                save_path,
+                metainfo,
+                resume_data: None,
+            };
+            self.persist(move |store| persist::save_torrent(store, &persisted))
+                .await?;
+        }
+        Ok(Response::new(AddTorrentResponse { id, duplicate }))
     }
 
     async fn pause_torrent(
@@ -414,6 +427,7 @@ impl Ferrent for FerrentService {
             error_count: status.error,
             checking_count: status.checking,
             active_count: status.active,
+            moving_count: status.moving,
         }))
     }
 
@@ -441,6 +455,20 @@ impl Ferrent for FerrentService {
             .config
             .apply_toml(&request.toml, request.revision)
             .map_err(config_status)?;
+        let resolved = self.state.config.resolved().map_err(config_status)?;
+        let settings = EngineSettings {
+            download_rate_limit: resolved.session.download_rate_limit,
+            upload_rate_limit: resolved.session.upload_rate_limit,
+            seed_mode: resolved.session.seed_mode,
+            active_downloads: resolved.session.active_downloads,
+            active_seeds: resolved.session.active_seeds,
+            active_limit: resolved.session.active_limit,
+        };
+        self.with_engine(move |engine| {
+            engine.set_settings(settings);
+            Ok(())
+        })
+        .await?;
         let _ = self.state.config_watch.send(revision);
         Ok(Response::new(SetConfigResponse { revision }))
     }
@@ -488,6 +516,7 @@ pub async fn serve(
 
 fn engine_status(error: EngineError) -> Status {
     match &error {
+        EngineError::AlreadyExists { .. } => Status::already_exists(error.to_string()),
         EngineError::NotFound { .. } => Status::not_found(error.to_string()),
         EngineError::InvalidTransition { .. } => Status::failed_precondition(error.to_string()),
         EngineError::Rejected { .. } => Status::invalid_argument(error.to_string()),
@@ -529,6 +558,7 @@ fn to_proto_state(state: &EngineState) -> TorrentState {
         EngineState::Downloading => TorrentState::Downloading,
         EngineState::Seeding => TorrentState::Seeding,
         EngineState::Paused => TorrentState::Paused,
+        EngineState::Moving => TorrentState::Moving,
         EngineState::Error(_) => TorrentState::Error,
     }
 }
@@ -541,6 +571,7 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
     };
     Torrent {
         id: status.id,
+        infohash: status.infohash,
         name: status.name,
         save_path: status.save_path.to_string_lossy().into_owned(),
         total_bytes: status.total_bytes,
@@ -577,6 +608,7 @@ fn to_proto_watch(event: EngineEvent) -> WatchResponse {
             queue_position,
         }),
         EngineEvent::Removed { id } => WatchEvent::Removed(Removed { id }),
+        EngineEvent::Finished { id } => WatchEvent::Finished(TorrentFinished { id }),
     };
     WatchResponse { event: Some(event) }
 }

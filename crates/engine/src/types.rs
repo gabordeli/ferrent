@@ -14,6 +14,8 @@ pub enum TorrentState {
     Downloading,
     Seeding,
     Paused,
+    /// The engine is moving the payload to a new save path.
+    Moving,
     Error(String),
 }
 
@@ -25,6 +27,7 @@ impl fmt::Display for TorrentState {
             Self::Downloading => f.write_str("downloading"),
             Self::Seeding => f.write_str("seeding"),
             Self::Paused => f.write_str("paused"),
+            Self::Moving => f.write_str("moving"),
             Self::Error(message) => write!(f, "error: {message}"),
         }
     }
@@ -34,6 +37,8 @@ impl fmt::Display for TorrentState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TorrentStatus {
     pub id: TorrentId,
+    /// v1 info hash as 40 lowercase hex characters.
+    pub infohash: String,
     pub name: String,
     /// Directory the torrent's files are written to, as the engine resolved it.
     pub save_path: PathBuf,
@@ -90,6 +95,28 @@ pub struct EngineSettings {
     pub upload_rate_limit: u64,
     /// Treat newly added torrents as complete without an initial file check.
     pub seed_mode: bool,
+    /// Maximum number of simultaneously downloading torrents; `0` uses the
+    /// engine's 20 000 soak head-room.
+    pub active_downloads: u32,
+    /// Maximum number of simultaneously seeding torrents; `0` uses the engine's
+    /// 20 000 soak head-room.
+    pub active_seeds: u32,
+    /// Maximum number of active torrents; `0` uses the engine's 20 000 soak
+    /// head-room.
+    pub active_limit: u32,
+}
+
+/// Per-torrent limits. A value of `0` means unlimited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TorrentLimits {
+    /// Download limit in bytes per second.
+    pub download_rate_limit: u64,
+    /// Upload limit in bytes per second.
+    pub upload_rate_limit: u64,
+    /// Maximum number of peer connections.
+    pub connections_limit: u32,
+    /// Maximum number of unchoked upload slots.
+    pub upload_slots_limit: u32,
 }
 
 /// Delta emitted by the engine. Consumers apply these to their state mirror.
@@ -99,6 +126,10 @@ pub enum EngineEvent {
     StateChanged {
         id: TorrentId,
         state: TorrentState,
+    },
+    /// The torrent reached 100% and fired exactly once per engine lifetime.
+    Finished {
+        id: TorrentId,
     },
     Progress {
         id: TorrentId,
@@ -115,6 +146,9 @@ pub enum EngineEvent {
 /// Errors returned by engine operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineError {
+    AlreadyExists {
+        id: TorrentId,
+    },
     NotFound {
         id: TorrentId,
     },
@@ -131,6 +165,7 @@ pub enum EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AlreadyExists { id } => write!(f, "torrent {id} already exists"),
             Self::NotFound { id } => write!(f, "torrent {id} not found"),
             Self::InvalidTransition { id, from, action } => {
                 write!(f, "cannot {action} torrent {id} while it is {from}")

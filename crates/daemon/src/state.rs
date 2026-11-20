@@ -57,6 +57,7 @@ pub fn state_code(state: &TorrentState) -> i32 {
         TorrentState::Seeding => 4,
         TorrentState::Paused => 5,
         TorrentState::Error(_) => 6,
+        TorrentState::Moving => 7,
     }
 }
 
@@ -198,6 +199,12 @@ impl StateMirror {
                         false
                     };
                     if changed {
+                        data.dirty.insert(id);
+                    }
+                }
+                EngineEvent::Finished { id } => {
+                    if let Some(status) = data.torrents.get_mut(&id) {
+                        Arc::make_mut(status).progress = 1.0;
                         data.dirty.insert(id);
                     }
                 }
@@ -356,6 +363,7 @@ mod tests {
     fn status(id: TorrentId, name: &str) -> TorrentStatus {
         TorrentStatus {
             id,
+            infohash: format!("{id:040x}"),
             name: name.to_owned(),
             save_path: PathBuf::from("/tmp"),
             total_bytes: 1024,

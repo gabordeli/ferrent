@@ -56,6 +56,8 @@ message GetStatusResponse {
   uint32 checking_count = 10;
   // Torrents with a non-zero transfer rate.
   uint32 active_count = 11;
+  // Torrents whose payload is being moved.
+  uint32 moving_count = 12;
 }
 
 // Request to add a torrent.
@@ -74,6 +76,9 @@ message AddTorrentRequest {
 message AddTorrentResponse {
   // Torrent id.
   uint64 id = 1;
+  // True when the same info hash was already present; the id is the existing
+  // torrent.
+  bool duplicate = 2;
 }
 
 // Request to pause a torrent.
@@ -181,6 +186,8 @@ enum TorrentState {
   TORRENT_STATE_PAUSED = 5;
   // Engine error; see the `error` field for details.
   TORRENT_STATE_ERROR = 6;
+  // The payload is being moved to a new save path.
+  TORRENT_STATE_MOVING = 7;
 }
 
 // Snapshot of one torrent.
@@ -211,6 +218,8 @@ message Torrent {
   string save_path = 12;
   // Position in the download queue; negative when the engine has none.
   int32 queue_position = 13;
+  // v1 info hash as 40 lowercase hex characters.
+  string infohash = 14;
 }
 
 // Sort key for the torrent list.
@@ -272,7 +281,15 @@ message WatchResponse {
     Removed removed = 4;
     // The configuration changed.
     ConfigChanged config_changed = 5;
+    // The torrent reached 100%.
+    TorrentFinished finished = 6;
   }
+}
+
+// A torrent reached 100% (once per engine lifetime).
+message TorrentFinished {
+  // Torrent id.
+  uint64 id = 1;
 }
 
 // A configuration revision change.

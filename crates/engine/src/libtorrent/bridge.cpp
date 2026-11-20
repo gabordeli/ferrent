@@ -10,6 +10,7 @@
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/hasher.hpp>
+#include <libtorrent/hex.hpp>
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
@@ -26,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,10 +42,12 @@ constexpr int32_t kDownloading = 2;
 constexpr int32_t kSeeding = 3;
 constexpr int32_t kPaused = 4;
 constexpr int32_t kError = 5;
+constexpr int32_t kMoving = 6;
 
 constexpr int32_t kEventStateChanged = 1;
 constexpr int32_t kEventProgress = 2;
 constexpr int32_t kEventRemoved = 3;
+constexpr int32_t kEventFinished = 4;
 
 int clamp_rate(uint64_t value) {
     return static_cast<int>(
@@ -83,16 +87,21 @@ struct Session::Impl {
     std::map<uint64_t, lt::torrent_handle> handles;
     std::map<lt::sha1_hash, uint64_t> ids;
     std::map<uint64_t, std::vector<char>> resume_data;
+    std::set<uint64_t> moving;
     bool seed_mode;
     uint64_t next_id = 1;
     std::string last_error;
 
-    Impl(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode)
-        : session(make_settings(download_rate_limit, upload_rate_limit)),
+    Impl(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode,
+         uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit)
+        : session(make_settings(download_rate_limit, upload_rate_limit, active_downloads,
+                               active_seeds, active_limit)),
           seed_mode(seed_mode) {}
 
     static lt::settings_pack make_settings(uint64_t download_rate_limit,
-                                           uint64_t upload_rate_limit) {
+                                           uint64_t upload_rate_limit,
+                                           uint32_t active_downloads, uint32_t active_seeds,
+                                           uint32_t active_limit) {
         lt::settings_pack pack;
         pack.set_int(
             lt::settings_pack::alert_mask,
@@ -101,10 +110,14 @@ struct Session::Impl {
         pack.set_int(lt::settings_pack::download_rate_limit, clamp_rate(download_rate_limit));
         pack.set_int(lt::settings_pack::upload_rate_limit, clamp_rate(upload_rate_limit));
         // Head-room for the 10 000-torrent soak: libtorrent queues anything above
-        // active_limit, and a queued torrent never reports as seeding.
-        pack.set_int(lt::settings_pack::active_limit, 20000);
-        pack.set_int(lt::settings_pack::active_seeds, 20000);
-        pack.set_int(lt::settings_pack::active_downloads, 20000);
+        // active_limit, and a queued torrent never reports as seeding. Zero means
+        // "use the soak head-room".
+        auto active_or_default = [](uint32_t value) {
+            return value == 0 ? 20000 : static_cast<int>(value);
+        };
+        pack.set_int(lt::settings_pack::active_limit, active_or_default(active_limit));
+        pack.set_int(lt::settings_pack::active_seeds, active_or_default(active_seeds));
+        pack.set_int(lt::settings_pack::active_downloads, active_or_default(active_downloads));
         pack.set_int(lt::settings_pack::active_checking, 20000);
         return pack;
     }
@@ -123,12 +136,13 @@ struct Session::Impl {
                                     lt::torrent_handle::query_save_path);
         out.found = true;
         out.id = id;
+        out.infohash = rust::String(lt::aux::to_hex(handle.info_hash().to_string()));
         out.name = rust::String(status.name);
         out.save_path = rust::String(status.save_path);
         out.total_bytes = status.total_wanted > 0
                               ? static_cast<uint64_t>(status.total_wanted)
                               : static_cast<uint64_t>(status.total);
-        out.state = map_status(status);
+        out.state = (moving.count(id) > 0) ? kMoving : map_status(status);
         out.progress = status.progress;
         out.download_rate = static_cast<uint64_t>(std::max(status.download_rate, 0));
         out.upload_rate = static_cast<uint64_t>(std::max(status.upload_rate, 0));
@@ -145,15 +159,16 @@ struct Session::Impl {
     }
 };
 
-Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode)
-    : impl_(std::make_unique<Impl>(download_rate_limit, upload_rate_limit, seed_mode)) {}
+Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode,
+                 uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit)
+    : impl_(std::make_unique<Impl>(download_rate_limit, upload_rate_limit, seed_mode,
+                                   active_downloads, active_seeds, active_limit)) {}
 
 Session::~Session() = default;
 
-std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
-                                          rust::Slice<const uint8_t> metainfo,
-                                          rust::Str save_path,
-                                          rust::Slice<const uint8_t> resume_data) {
+FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
+                               rust::Slice<const uint8_t> metainfo, rust::Str save_path,
+                               rust::Slice<const uint8_t> resume_data) {
     impl_->last_error.clear();
 
     lt::error_code ec;
@@ -161,7 +176,15 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
         reinterpret_cast<char const *>(metainfo.data()), static_cast<int>(metainfo.size()), ec);
     if (ec) {
         impl_->last_error = ec.message();
-        return std::nullopt;
+        return FfiAddResult{false, false, 0, rust::String(impl_->last_error)};
+    }
+
+    // Duplicate detection before add: libtorrent would return a second handle
+    // for the same info hash, which would break the id mapping.
+    auto const info_hash = info->info_hash();
+    if (auto existing = impl_->ids.find(info_hash); existing != impl_->ids.end()) {
+        impl_->last_error = "torrent already exists";
+        return FfiAddResult{false, true, existing->second, rust::String(impl_->last_error)};
     }
 
     lt::add_torrent_params params;
@@ -173,7 +196,7 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
             resume_ec);
         if (resume_ec) {
             impl_->last_error = resume_ec.message();
-            return std::nullopt;
+            return FfiAddResult{false, false, 0, rust::String(impl_->last_error)};
         }
     }
     params.ti = std::move(info);
@@ -188,7 +211,7 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
     auto handle = impl_->session.add_torrent(params, ec);
     if (ec) {
         impl_->last_error = ec.message();
-        return std::nullopt;
+        return FfiAddResult{false, false, 0, rust::String(impl_->last_error)};
     }
 
     uint64_t id;
@@ -197,7 +220,7 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
         if (impl_->handles.count(id) > 0) {
             impl_->last_error = "torrent id already exists";
             impl_->session.remove_torrent(handle);
-            return std::nullopt;
+            return FfiAddResult{false, false, id, rust::String(impl_->last_error)};
         }
         impl_->next_id = std::max(impl_->next_id, id + 1);
     } else {
@@ -207,17 +230,17 @@ std::optional<uint64_t> Session::add_impl(std::optional<uint64_t> requested_id,
     // v1 info hash; v2-only torrents need info_hashes() once they matter here.
     impl_->ids.emplace(handle.info_hash(), id);
     impl_->handles.emplace(id, handle);
-    return id;
+    return FfiAddResult{true, false, id, rust::String()};
 }
 
-uint64_t Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
-                              rust::Slice<const uint8_t> resume_data) {
-    return add_impl(std::nullopt, metainfo, save_path, resume_data).value_or(0);
+FfiAddResult Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
+                                  rust::Slice<const uint8_t> resume_data) {
+    return add_impl(std::nullopt, metainfo, save_path, resume_data);
 }
 
 bool Session::restore_torrent(uint64_t id, rust::Slice<const uint8_t> metainfo,
                               rust::Str save_path, rust::Slice<const uint8_t> resume_data) {
-    return add_impl(id, metainfo, save_path, resume_data).has_value();
+    return add_impl(id, metainfo, save_path, resume_data).ok;
 }
 
 bool Session::request_resume(uint64_t id) {
@@ -261,6 +284,35 @@ bool Session::resume(uint64_t id) {
     return true;
 }
 
+bool Session::set_torrent_limits(uint64_t id, uint64_t download_rate_limit,
+                                 uint64_t upload_rate_limit, uint32_t connections_limit,
+                                 uint32_t upload_slots_limit) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.set_download_limit(clamp_rate(download_rate_limit));
+    it->second.set_upload_limit(clamp_rate(upload_rate_limit));
+    auto limit_or_unlimited = [](uint32_t value) {
+        return value == 0 ? std::numeric_limits<int>::max()
+                          : static_cast<int>(std::min<uint32_t>(
+                                value, static_cast<uint32_t>(std::numeric_limits<int>::max())));
+    };
+    it->second.set_max_connections(limit_or_unlimited(connections_limit));
+    it->second.set_max_uploads(limit_or_unlimited(upload_slots_limit));
+    return true;
+}
+
+bool Session::move_storage(uint64_t id, rust::Str path) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    impl_->moving.insert(id);
+    it->second.move_storage(static_cast<std::string>(path));
+    return true;
+}
+
 bool Session::remove(uint64_t id, bool delete_files) {
     auto it = impl_->handles.find(id);
     if (it == impl_->handles.end()) {
@@ -269,6 +321,7 @@ bool Session::remove(uint64_t id, bool delete_files) {
     auto handle = it->second;
     impl_->ids.erase(handle.info_hash());
     impl_->resume_data.erase(id);
+    impl_->moving.erase(id);
     impl_->handles.erase(it);
     impl_->session.remove_torrent(
         handle, delete_files ? lt::session::delete_files : lt::remove_flags_t{});
@@ -414,6 +467,26 @@ rust::Vec<FfiEvent> Session::poll_events() {
             if (auto id = impl_->id_for(finished->handle)) {
                 events.push_back(
                     FfiEvent{kEventStateChanged, *id, kSeeding, 1.0f, 0, 0, -1});
+                events.push_back(
+                    FfiEvent{kEventFinished, *id, kSeeding, 1.0f, 0, 0, -1});
+            }
+        } else if (auto *moved = lt::alert_cast<lt::storage_moved_alert>(alert)) {
+            if (auto id = impl_->id_for(moved->handle)) {
+                impl_->moving.erase(*id);
+                auto status = moved->handle.status(lt::torrent_handle::query_name |
+                                                   lt::torrent_handle::query_save_path);
+                events.push_back(FfiEvent{
+                    kEventStateChanged, *id, map_status(status), status.progress,
+                    static_cast<uint64_t>(std::max(status.download_rate, 0)),
+                    static_cast<uint64_t>(std::max(status.upload_rate, 0)),
+                    static_cast<int>(status.queue_position)});
+            }
+        } else if (auto *failed = lt::alert_cast<lt::storage_moved_failed_alert>(alert)) {
+            if (auto id = impl_->id_for(failed->handle)) {
+                impl_->moving.erase(*id);
+                impl_->last_error = failed->error.message();
+                events.push_back(
+                    FfiEvent{kEventStateChanged, *id, kError, 0.0f, 0, 0, -1});
             }
         } else if (auto *error = lt::alert_cast<lt::torrent_error_alert>(alert)) {
             if (auto id = impl_->id_for(error->handle)) {
@@ -448,10 +521,19 @@ void Session::request_updates() {
     impl_->session.post_torrent_updates(lt::torrent_handle::status_flags_t{});
 }
 
-void Session::set_settings(uint64_t download_rate_limit, uint64_t upload_rate_limit) {
+void Session::set_settings(uint64_t download_rate_limit, uint64_t upload_rate_limit,
+                           uint32_t active_downloads, uint32_t active_seeds,
+                           uint32_t active_limit, bool seed_mode) {
+    impl_->seed_mode = seed_mode;
     lt::settings_pack pack;
     pack.set_int(lt::settings_pack::download_rate_limit, clamp_rate(download_rate_limit));
     pack.set_int(lt::settings_pack::upload_rate_limit, clamp_rate(upload_rate_limit));
+    auto active_or_default = [](uint32_t value) {
+        return value == 0 ? 20000 : static_cast<int>(value);
+    };
+    pack.set_int(lt::settings_pack::active_limit, active_or_default(active_limit));
+    pack.set_int(lt::settings_pack::active_seeds, active_or_default(active_seeds));
+    pack.set_int(lt::settings_pack::active_downloads, active_or_default(active_downloads));
     impl_->session.apply_settings(pack);
 }
 
@@ -460,8 +542,11 @@ rust::String Session::last_error() const {
 }
 
 std::unique_ptr<Session> new_session(uint64_t download_rate_limit,
-                                     uint64_t upload_rate_limit, bool seed_mode) {
-    return std::make_unique<Session>(download_rate_limit, upload_rate_limit, seed_mode);
+                                     uint64_t upload_rate_limit, bool seed_mode,
+                                     uint32_t active_downloads, uint32_t active_seeds,
+                                     uint32_t active_limit) {
+    return std::make_unique<Session>(download_rate_limit, upload_rate_limit, seed_mode,
+                                     active_downloads, active_seeds, active_limit);
 }
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload) {

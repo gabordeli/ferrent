@@ -13,11 +13,11 @@ use ferrent_daemon::persist;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::{StateMirror, TorrentQuery};
 use ferrent_daemon::store::{RedbStore, StateStore};
+#[cfg(feature = "libtorrent")]
+use ferrent_engine::LibtorrentEngine;
 #[cfg(not(feature = "libtorrent"))]
 use ferrent_engine::MockEngine;
-use ferrent_engine::TorrentEngine;
-#[cfg(feature = "libtorrent")]
-use ferrent_engine::{EngineSettings, LibtorrentEngine};
+use ferrent_engine::{EngineSettings, TorrentEngine};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -76,6 +76,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let data_dir = resolved.data_dir;
     let download_dir = resolved.download_dir;
     let bind = resolved.bind;
+    let settings = EngineSettings {
+        download_rate_limit: resolved.session.download_rate_limit,
+        upload_rate_limit: resolved.session.upload_rate_limit,
+        seed_mode: resolved.session.seed_mode,
+        active_downloads: resolved.session.active_downloads,
+        active_seeds: resolved.session.active_seeds,
+        active_limit: resolved.session.active_limit,
+    };
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
     let store = RedbStore::open(data_dir.join("state.redb"))?;
@@ -85,10 +93,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let restored_count = persisted.len();
 
     #[cfg(feature = "libtorrent")]
-    let mut engine: Box<dyn TorrentEngine> =
-        Box::new(LibtorrentEngine::new(EngineSettings::default()));
+    let mut engine: Box<dyn TorrentEngine> = Box::new(LibtorrentEngine::new(settings));
     #[cfg(not(feature = "libtorrent"))]
-    let mut engine: Box<dyn TorrentEngine> = Box::new(MockEngine::new());
+    let mut engine: Box<dyn TorrentEngine> = {
+        let mut engine = MockEngine::new();
+        engine.set_settings(settings);
+        Box::new(engine)
+    };
 
     let events = engine.subscribe();
     let mirror = Arc::new(StateMirror::new());

@@ -11,8 +11,8 @@ use tokio::sync::broadcast;
 
 use crate::engine::TorrentEngine;
 use crate::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentSource, TorrentState,
-    TorrentStatus,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentId, TorrentLimits, TorrentSource,
+    TorrentState, TorrentStatus,
 };
 
 use self::bridge::ffi::{FfiEvent, FfiStatus, new_session};
@@ -53,6 +53,16 @@ enum Command {
     },
     Resume {
         id: TorrentId,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    SetLimits {
+        id: TorrentId,
+        limits: TorrentLimits,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    MoveStorage {
+        id: TorrentId,
+        path: PathBuf,
         reply: Sender<Result<(), EngineError>>,
     },
     Remove {
@@ -171,6 +181,22 @@ impl TorrentEngine for LibtorrentEngine {
         Self::recv(response)
     }
 
+    fn set_torrent_limits(
+        &mut self,
+        id: TorrentId,
+        limits: TorrentLimits,
+    ) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetLimits { id, limits, reply })?;
+        Self::recv(response)
+    }
+
+    fn move_storage(&mut self, id: TorrentId, path: PathBuf) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::MoveStorage { id, path, reply })?;
+        Self::recv(response)
+    }
+
     fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Remove {
@@ -262,8 +288,12 @@ fn run_worker(
         settings.download_rate_limit,
         settings.upload_rate_limit,
         settings.seed_mode,
+        settings.active_downloads,
+        settings.active_seeds,
+        settings.active_limit,
     );
     let mut last_progress = Instant::now();
+    let mut finished = std::collections::BTreeSet::new();
 
     loop {
         match commands.recv_timeout(POLL_INTERVAL) {
@@ -280,15 +310,20 @@ fn run_worker(
                 };
                 let save_path = spec.save_path.to_string_lossy().into_owned();
                 let resume_data = spec.resume_data.as_deref().unwrap_or(&[]);
-                let id = session
+                let result = session
                     .pin_mut()
                     .add_torrent(&metainfo, &save_path, resume_data);
-                if id == 0 {
+                if result.duplicate {
+                    let _ = reply.send(Err(EngineError::AlreadyExists { id: result.id }));
+                    continue;
+                }
+                if !result.ok {
                     let _ = reply.send(Err(EngineError::Rejected {
-                        reason: session.last_error().to_string(),
+                        reason: result.error.to_string(),
                     }));
                     continue;
                 }
+                let id = result.id;
                 let status = convert_status(session.status(id));
                 let _ = events.send(EngineEvent::Added(status));
                 let _ = reply.send(Ok(id));
@@ -311,6 +346,9 @@ fn run_worker(
                     .restore_torrent(id, &metainfo, &save_path, resume_data)
                 {
                     let status = convert_status(session.status(id));
+                    if status.progress >= 0.999 {
+                        finished.insert(id);
+                    }
                     let _ = events.send(EngineEvent::Added(status));
                     let _ = reply.send(Ok(()));
                 } else {
@@ -341,6 +379,35 @@ fn run_worker(
             }
             Ok(Command::Resume { id, reply }) => {
                 let ok = session.pin_mut().resume(id);
+                let _ = reply.send(if ok {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                });
+            }
+            Ok(Command::SetLimits { id, limits, reply }) => {
+                let ok = session.pin_mut().set_torrent_limits(
+                    id,
+                    limits.download_rate_limit,
+                    limits.upload_rate_limit,
+                    limits.connections_limit,
+                    limits.upload_slots_limit,
+                );
+                let _ = reply.send(if ok {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                });
+            }
+            Ok(Command::MoveStorage { id, path, reply }) => {
+                let path = path.to_string_lossy().into_owned();
+                let ok = session.pin_mut().move_storage(id, &path);
+                if ok {
+                    let _ = events.send(EngineEvent::StateChanged {
+                        id,
+                        state: TorrentState::Moving,
+                    });
+                }
                 let _ = reply.send(if ok {
                     Ok(())
                 } else {
@@ -424,9 +491,14 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Ok(Command::SetSettings { settings, reply }) => {
-                session
-                    .pin_mut()
-                    .set_settings(settings.download_rate_limit, settings.upload_rate_limit);
+                session.pin_mut().set_settings(
+                    settings.download_rate_limit,
+                    settings.upload_rate_limit,
+                    settings.active_downloads,
+                    settings.active_seeds,
+                    settings.active_limit,
+                    settings.seed_mode,
+                );
                 let _ = reply.send(());
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
@@ -435,6 +507,14 @@ fn run_worker(
 
         for event in session.pin_mut().poll_events() {
             if let Some(event) = convert_event(event) {
+                if let EngineEvent::Finished { id } = &event {
+                    if !finished.insert(*id) {
+                        continue;
+                    }
+                }
+                if let EngineEvent::Removed { id } = &event {
+                    finished.remove(id);
+                }
                 let _ = events.send(event);
             }
         }
@@ -453,6 +533,7 @@ fn state_from_code(code: i32, error: String) -> TorrentState {
         2 => TorrentState::Downloading,
         3 => TorrentState::Seeding,
         4 => TorrentState::Paused,
+        6 => TorrentState::Moving,
         _ => TorrentState::Error(if error.is_empty() {
             "libtorrent error".to_owned()
         } else {
@@ -465,6 +546,7 @@ fn convert_status(status: FfiStatus) -> TorrentStatus {
     let error = status.error.to_string();
     TorrentStatus {
         id: status.id,
+        infohash: status.infohash.to_string(),
         name: status.name.to_string(),
         save_path: PathBuf::from(status.save_path.to_string()),
         total_bytes: status.total_bytes,
@@ -493,6 +575,7 @@ fn convert_event(event: FfiEvent) -> Option<EngineEvent> {
             queue_position: event.queue_position,
         }),
         3 => Some(EngineEvent::Removed { id: event.id }),
+        4 => Some(EngineEvent::Finished { id: event.id }),
         _ => None,
     }
 }
@@ -513,6 +596,19 @@ mod tests {
         dir
     }
 
+    /// A directory on a different filesystem when `/dev/shm` exists.
+    fn cross_fs_dir(name: &str) -> PathBuf {
+        let base = if std::path::Path::new("/dev/shm").is_dir() {
+            PathBuf::from("/dev/shm")
+        } else {
+            std::env::temp_dir()
+        };
+        let dir = base.join(format!("ferrent-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create cross-fs dir");
+        dir
+    }
+
     fn payload() -> Vec<u8> {
         "hello ferrent\n".repeat(1024).into_bytes()
     }
@@ -524,6 +620,59 @@ mod tests {
         fs::write(dir.join("payload.bin"), &data).expect("write payload");
 
         let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let spec = AddTorrent {
+            name: "payload.bin".to_owned(),
+            total_bytes: data.len() as u64,
+            source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+            save_path: dir.clone(),
+            resume_data: None,
+        };
+        let id = engine.add_torrent(spec.clone()).expect("add torrent");
+
+        let status = engine.status(id).expect("status");
+        assert_eq!(status.id, id);
+        assert_eq!(status.total_bytes, data.len() as u64);
+        assert_eq!(status.infohash.len(), 40);
+        assert!(engine.list().iter().any(|status| status.id == id));
+
+        assert_eq!(
+            engine.add_torrent(spec),
+            Err(EngineError::AlreadyExists { id })
+        );
+        engine
+            .set_torrent_limits(
+                id,
+                TorrentLimits {
+                    download_rate_limit: 1_048_576,
+                    upload_rate_limit: 524_288,
+                    connections_limit: 20,
+                    upload_slots_limit: 4,
+                },
+            )
+            .expect("set limits");
+
+        engine.pause(id).expect("pause");
+        assert_eq!(
+            engine.status(id).expect("paused status").state,
+            TorrentState::Paused
+        );
+
+        engine.resume(id).expect("resume");
+        engine.remove(id, false).expect("remove");
+        assert_eq!(engine.status(id), Err(EngineError::NotFound { id }));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_storage_reports_moving_and_moves_the_payload() {
+        let dir = temp_dir("libtorrent-move-src");
+        let target = cross_fs_dir("libtorrent-move-dst");
+        let data = payload();
+        fs::write(dir.join("payload.bin"), &data).expect("write payload");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let mut events = engine.subscribe();
         let id = engine
             .add_torrent(AddTorrent {
                 name: "payload.bin".to_owned(),
@@ -534,22 +683,37 @@ mod tests {
             })
             .expect("add torrent");
 
-        let status = engine.status(id).expect("status");
-        assert_eq!(status.id, id);
-        assert_eq!(status.total_bytes, data.len() as u64);
-        assert!(engine.list().iter().any(|status| status.id == id));
-
-        engine.pause(id).expect("pause");
-        assert_eq!(
-            engine.status(id).expect("paused status").state,
-            TorrentState::Paused
+        engine
+            .move_storage(id, target.clone())
+            .expect("move storage");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut saw_moving = false;
+        let status = loop {
+            while let Ok(event) = events.try_recv() {
+                if let EngineEvent::StateChanged { state, .. } = event {
+                    saw_moving = saw_moving || state == TorrentState::Moving;
+                }
+            }
+            let status = engine.status(id).expect("status");
+            if status.save_path == target && status.state != TorrentState::Moving {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "storage did not move: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert!(saw_moving, "no Moving state was emitted");
+        assert_eq!(status.save_path, target);
+        assert!(
+            target.join("payload.bin").exists(),
+            "payload was not moved to the target"
         );
 
-        engine.resume(id).expect("resume");
-        engine.remove(id).expect("remove");
-        assert_eq!(engine.status(id), Err(EngineError::NotFound { id }));
-
+        engine.remove(id, false).expect("remove");
         let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&target);
     }
 
     #[test]
@@ -592,7 +756,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         };
         assert!(!resume.is_empty());
-        engine.remove(id).expect("remove original");
+        engine.remove(id, false).expect("remove original");
         drop(engine);
 
         let mut engine = LibtorrentEngine::new(EngineSettings::default());
@@ -615,7 +779,7 @@ mod tests {
             status.progress >= 0.999,
             "restored torrent did not use resume data: {status:?}"
         );
-        engine.remove(id).expect("remove restored");
+        engine.remove(id, false).expect("remove restored");
         let _ = fs::remove_dir_all(&dir);
     }
 

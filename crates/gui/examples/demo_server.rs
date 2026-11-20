@@ -58,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             1 => TorrentState::Seeding,
             2 => TorrentState::Checking,
             3 => TorrentState::Error("demo error".to_owned()),
+            4 => TorrentState::Moving,
             _ => TorrentState::Downloading,
         };
     }

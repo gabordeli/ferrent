@@ -1,10 +1,12 @@
 //! The engine contract.
 
+use std::path::PathBuf;
+
 use tokio::sync::broadcast;
 
 use crate::{
     AddTorrent, EngineError, EngineEvent, EngineSettings, QueueDirection, TorrentFileInfo,
-    TorrentId, TorrentPeerInfo, TorrentStatus, TorrentTrackerInfo,
+    TorrentId, TorrentLimits, TorrentPeerInfo, TorrentStatus, TorrentTrackerInfo,
 };
 
 /// Synchronous torrent engine contract.
@@ -30,6 +32,29 @@ pub trait TorrentEngine: Send + 'static {
 
     /// Resumes a torrent. Idempotent when it is already downloading.
     fn resume(&mut self, id: TorrentId) -> Result<(), EngineError>;
+
+    /// Applies per-torrent rate and connection limits.
+    fn set_torrent_limits(
+        &mut self,
+        id: TorrentId,
+        limits: TorrentLimits,
+    ) -> Result<(), EngineError>;
+
+    /// Moves the payload to a new save path.
+    ///
+    /// Implementations set [`crate::TorrentState::Moving`] while the move is in
+    /// progress and return to the previous state when it completes.
+    fn move_storage(&mut self, id: TorrentId, path: PathBuf) -> Result<(), EngineError>;
+
+    /// Pauses every torrent in `ids`; returns how many transitions succeeded.
+    fn pause_many(&mut self, ids: &[TorrentId]) -> usize {
+        ids.iter().filter(|&&id| self.pause(id).is_ok()).count()
+    }
+
+    /// Resumes every torrent in `ids`; returns how many transitions succeeded.
+    fn resume_many(&mut self, ids: &[TorrentId]) -> usize {
+        ids.iter().filter(|&&id| self.resume(id).is_ok()).count()
+    }
 
     /// Removes a torrent and its engine state.
     ///

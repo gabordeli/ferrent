@@ -88,6 +88,7 @@ pub fn state_color(state: i32) -> Color {
         TorrentState::Queued => theme::QUEUED,
         TorrentState::Checking => theme::CHECKING,
         TorrentState::Paused => theme::PAUSED,
+        TorrentState::Moving => theme::MOVING,
         TorrentState::Error => theme::ERROR,
         TorrentState::Unspecified => theme::TEXT_MUTED,
     }
@@ -558,6 +559,7 @@ pub fn state_label(state: i32) -> &'static str {
         TorrentState::Downloading => "downloading",
         TorrentState::Seeding => "seeding",
         TorrentState::Paused => "paused",
+        TorrentState::Moving => "moving",
         TorrentState::Error => "error",
     }
 }

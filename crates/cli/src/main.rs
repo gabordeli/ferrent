@@ -233,7 +233,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 .await?
                 .into_inner();
             if json {
-                output::print_json(&json!({ "id": response.id }));
+                output::print_json(&json!({
+                    "id": response.id,
+                    "duplicate": response.duplicate,
+                }));
+            } else if response.duplicate {
+                println!("torrent {} is already present", response.id);
             } else {
                 println!("added torrent {}", response.id);
             }

@@ -348,11 +348,11 @@
 
 **Acceptance**
 
-- [ ] `TorrentEngine`: `set_torrent_limits`, `move_storage`, bulk pause/resume; `EngineSettings` + `active_*`.
-- [ ] `TorrentStatus.infohash`, `TorrentState::Moving` (proto 7); minden struct-literal builder fordul.
-- [ ] `EngineEvent::Finished` pontosan egyszer, restart után sem ismétlődik.
-- [ ] duplicate add → `AlreadyExists{id}`; a daemon a meglévő ID-t adja vissza.
-- [ ] valós libtorrent: azonos FS-en move recheck nélkül; cross-FS `Moving` → `Seeding`.
+- [x] `TorrentEngine`: `set_torrent_limits`, `move_storage`, bulk pause/resume; `EngineSettings` + `active_*`.
+- [x] `TorrentStatus.infohash`, `TorrentState::Moving` (proto 7); minden struct-literal builder fordul.
+- [x] `EngineEvent::Finished` pontosan egyszer, restart után sem ismétlődik.
+- [x] duplicate add → `AlreadyExists{id}`; a daemon a meglévő ID-t adja vissza.
+- [x] valós libtorrent: azonos FS-en move recheck nélkül; cross-FS `Moving` → `Seeding` (a teszt `/dev/shm` célra mozgat).
 
 **Files:** `crates/engine/src/{types,engine,mock,libtorrent}/*`, `crates/daemon/src/state.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`
 
