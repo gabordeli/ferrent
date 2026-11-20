@@ -5,6 +5,7 @@
 //! bridges the daemon's `Watch` stream as coalesced SSE. TLS is terminated by
 //! the reverse proxy in front of it (nginx), so the listener stays on loopback.
 
+pub mod api;
 pub mod auth;
 pub mod config;
 pub mod sse;
@@ -19,7 +20,7 @@ use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use ferrent_protocol::client::AuthClient;
 use serde::Deserialize;
 use serde_json::json;
@@ -90,6 +91,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/logout", post(logout))
         .route("/api/session", get(session))
         .route("/api/events", get(events))
+        .route("/api/status", get(api::status))
+        .route("/api/torrents", get(api::list).post(api::add))
+        .route("/api/torrents/bulk", post(api::bulk))
+        .route("/api/torrents/{id}", get(api::detail).delete(api::remove))
+        .route("/api/torrents/{id}/files", get(api::files))
+        .route("/api/torrents/{id}/pause", post(api::pause))
+        .route("/api/torrents/{id}/resume", post(api::resume))
+        .route("/api/torrents/{id}/label", put(api::set_label))
+        .route("/api/labels", get(api::labels))
         .fallback(get(spa))
         .with_state(state)
 }

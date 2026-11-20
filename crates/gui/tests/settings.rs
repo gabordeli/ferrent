@@ -206,6 +206,7 @@ async fn hook_runs_appear_in_the_status() {
             label: String::new(),
             metainfo,
             save_path: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("add torrent");

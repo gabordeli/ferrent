@@ -99,6 +99,7 @@ pub async fn add(
             save_path: save_path.to_owned(),
             total_bytes: 0,
             label: label.to_owned(),
+            magnet: String::new(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;

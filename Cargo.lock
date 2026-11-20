@@ -1537,6 +1537,9 @@ name = "ferrent-web"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
+ "ferrent-daemon",
+ "ferrent-engine",
  "ferrent-protocol",
  "http-body-util",
  "serde",
@@ -1546,6 +1549,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
+ "tonic",
  "tower",
 ]
 

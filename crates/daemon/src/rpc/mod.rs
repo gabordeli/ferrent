@@ -463,10 +463,15 @@ impl Ferrent for FerrentService {
                 return Err(Status::failed_precondition(message));
             }
         };
+        let source = if request.metainfo.is_empty() && !request.magnet.is_empty() {
+            TorrentSource::Magnet(request.magnet.clone())
+        } else {
+            TorrentSource::Metainfo(request.metainfo.clone())
+        };
         let spec = AddTorrent {
             name: request.name,
             total_bytes,
-            source: TorrentSource::Metainfo(request.metainfo),
+            source,
             save_path,
             resume_data: None,
         };
@@ -1794,6 +1799,7 @@ staging = true
                 save_path: String::new(),
                 total_bytes: 1,
                 label: "Filmek".to_owned(),
+                magnet: String::new(),
             }))
             .await
             .expect("add")
@@ -1840,6 +1846,7 @@ staging = true
                 save_path: String::new(),
                 total_bytes: 1,
                 label: String::new(),
+                magnet: String::new(),
             }))
             .await
             .expect_err("low disk");
@@ -1873,6 +1880,7 @@ staging = true
                 save_path: String::new(),
                 total_bytes: u64::MAX / 2,
                 label: String::new(),
+                magnet: String::new(),
             }))
             .await
             .expect_err("payload does not fit");

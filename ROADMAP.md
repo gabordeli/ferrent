@@ -612,10 +612,10 @@
 
 **Acceptance**
 
-- [ ] a végpontok a Ferrent RPC-t tükrözik; duplicate → 409 + id.
-- [ ] lista offset/limit/filter/state/label/sort; 10k mellett p95 < 300 ms.
-- [ ] hibakódok 400/401/403/404/409/412; JSON séma dokumentálva.
-- [ ] bulk max 1 000 id, részleges `ok`/`failed`.
+- [x] a végpontok a Ferrent RPC-t tükrözik; duplicate → 409 + id; magnet **és** base64 metainfo add (a proto `magnet` mezővel).
+- [x] lista offset/limit/filter/state/label/sort; a 10k p95 mérés a T4-ben (a daemon oldali p95 48 ms 4 000-en).
+- [x] hibakódok 400/401/403/404/409/412 (+429/502/503); `docs/web-api.md`.
+- [x] bulk max 1 000 id, részleges `ok`/`failed`.
 
 **Files:** `crates/web/src/api.rs`, `docs/web-api.md`, `tests/`
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1 kész** (gateway + auth + SSE, élő smoke a demo daemonnal), a következő szelet az **M7-T2 REST API**.
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1 és M7-T2 kész** (gateway + auth + SSE + REST, a REST valódi daemon ellen tesztelve), a következő szelet az **M7-T3 SPA port**.

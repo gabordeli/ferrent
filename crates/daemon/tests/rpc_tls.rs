@@ -105,6 +105,7 @@ async fn tls_auth_and_crud() {
             save_path: "/tmp".to_owned(),
             total_bytes: 123,
             label: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("add")
@@ -118,6 +119,7 @@ async fn tls_auth_and_crud() {
             save_path: "/tmp".to_owned(),
             total_bytes: 123,
             label: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("duplicate add")
@@ -224,6 +226,7 @@ async fn label_crud_assignment_and_filter() {
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
             label: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("add auto")
@@ -235,6 +238,7 @@ async fn label_crud_assignment_and_filter() {
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
             label: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("add other")
@@ -375,6 +379,7 @@ async fn watch_streams_added_and_stays_idle() {
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
             label: String::new(),
+            magnet: String::new(),
         })
         .await
         .expect("add");

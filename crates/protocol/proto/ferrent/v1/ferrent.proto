@@ -184,6 +184,8 @@ message AddTorrentRequest {
   uint64 total_bytes = 4;
   // Label whose staging folder receives the download; empty for none.
   string label = 5;
+  // Magnet URI; used when `metainfo` is empty.
+  string magnet = 6;
 }
 
 // Response with the engine-assigned torrent id.

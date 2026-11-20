@@ -256,6 +256,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     save_path,
                     total_bytes: 0,
                     label,
+                    magnet: String::new(),
                 })
                 .await?
                 .into_inner();
