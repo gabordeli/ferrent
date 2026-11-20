@@ -3,6 +3,7 @@
 pub mod autoadd;
 pub mod config;
 pub mod control;
+pub mod diskguard;
 pub mod events;
 pub mod hooks;
 pub mod labels;

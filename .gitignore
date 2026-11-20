@@ -4,6 +4,7 @@ target/
 
 # runtime output
 /logs/
+/tmp/
 
 # local tool state
 /.qwen/

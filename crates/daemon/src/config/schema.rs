@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigError;
 use crate::autoadd::WatchDir;
+use crate::diskguard::Zone;
 use crate::hooks::HookSpec;
 use crate::notify::{TelegramRule, WebhookRule};
 use crate::scheduler::Grid;
@@ -42,6 +43,8 @@ pub struct FileConfig {
     pub scheduler: SchedulerConfig,
     /// Notification channels (M5-T4).
     pub notify: NotifyConfig,
+    /// Storage zones and disk guard thresholds (M6).
+    pub diskguard: DiskGuardConfig,
 }
 
 /// Outbound notification settings.
@@ -108,6 +111,48 @@ impl NotifyConfig {
             return Err("notify.digest_window_secs must be at most 86400".to_owned());
         }
         Ok(())
+    }
+}
+
+/// Storage zones and the disk guard thresholds.
+///
+/// Zones are the source of truth for where a label's finished payload lives
+/// and where downloads of that label are staged; the guard part only reads
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct DiskGuardConfig {
+    /// Runs the guard loop (thresholds, pause/resume).
+    pub enabled: bool,
+    /// Free-space floor of a filesystem; below it the disk is `low`.
+    pub min_free_bytes: u64,
+    /// Recovery margin above `min_free_bytes`.
+    pub margin_bytes: u64,
+    /// Poll interval in seconds.
+    pub poll_secs: u64,
+    /// Library and staging folders.
+    pub zone: Vec<Zone>,
+}
+
+impl Default for DiskGuardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_free_bytes: 0,
+            margin_bytes: 0,
+            poll_secs: 30,
+            zone: Vec::new(),
+        }
+    }
+}
+
+impl DiskGuardConfig {
+    /// Checks the zones and the threshold values.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_secs == 0 || self.poll_secs > 3_600 {
+            return Err("diskguard.poll_secs must be between 1 and 3600".to_owned());
+        }
+        crate::diskguard::validate_zones(&self.zone)
     }
 }
 
@@ -219,6 +264,7 @@ impl FileConfig {
             validate_bind(bind)?;
         }
         self.scheduler.validate().map_err(ConfigError::invalid)?;
+        self.diskguard.validate().map_err(ConfigError::invalid)?;
         for (index, hook) in self.hook.iter().enumerate() {
             hook.validate()
                 .map_err(|message| ConfigError::invalid(format!("hook[{index}]: {message}")))?;
@@ -282,6 +328,7 @@ impl FileConfig {
             hook: self.hook.clone(),
             scheduler: self.scheduler.clone(),
             notify: self.notify.clone(),
+            diskguard: self.diskguard.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -302,6 +349,7 @@ pub struct ResolvedConfig {
     pub hook: Vec<HookSpec>,
     pub scheduler: SchedulerConfig,
     pub notify: NotifyConfig,
+    pub diskguard: DiskGuardConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -321,6 +369,7 @@ impl ResolvedConfig {
             }
         }
         validate_bind(&self.bind)?;
+        self.diskguard.validate().map_err(ConfigError::invalid)?;
         Ok(())
     }
 }
@@ -559,5 +608,72 @@ command = "/bin/true"
         );
         assert_eq!(resolved.bind, DEFAULT_BIND);
         assert_eq!(resolved.token_file, PathBuf::from(DEFAULT_TOKEN_FILE));
+    }
+
+    #[test]
+    fn diskguard_zones_parse_and_resolve() {
+        let file = FileConfig::parse(
+            r#"
+[diskguard]
+min_free_bytes = 1073741824
+margin_bytes = 1073741824
+poll_secs = 60
+
+[[diskguard.zone]]
+path = "/mnt/usbhdd2/Filmek"
+label = "Filmek"
+
+[[diskguard.zone]]
+path = "/mnt/usbhdd2/_progress"
+staging = true
+"#,
+        )
+        .expect("diskguard config");
+
+        assert_eq!(file.diskguard.zone.len(), 2);
+        assert_eq!(file.diskguard.zone[0].label.as_deref(), Some("Filmek"));
+        assert!(file.diskguard.zone[1].staging);
+
+        let resolved = file.resolve(&env(&[])).expect("resolve");
+        assert_eq!(resolved.diskguard.min_free_bytes, 1 << 30);
+        assert_eq!(resolved.diskguard.poll_secs, 60);
+    }
+
+    #[test]
+    fn diskguard_zone_errors_are_reported() {
+        let error = FileConfig::parse(
+            r#"
+[[diskguard.zone]]
+path = "/mnt/a/Filmek"
+label = "Filmek"
+
+[[diskguard.zone]]
+path = "/mnt/b/Filmek"
+label = "filmek"
+"#,
+        )
+        .expect_err("duplicate label");
+        assert!(error.to_string().contains("filmek"), "{error}");
+
+        let error = FileConfig::parse(
+            r#"
+[[diskguard.zone]]
+path = "/mnt/a/_progress"
+staging = true
+label = "Filmek"
+"#,
+        )
+        .expect_err("staging with label");
+        assert!(error.to_string().contains("staging"), "{error}");
+
+        let error = FileConfig::parse(
+            r#"
+[[diskguard.zone]]
+path = "relative/Filmek"
+label = "Filmek"
+"#,
+        )
+        .expect_err("relative path");
+        assert!(error.to_string().contains("absolute"), "{error}");
     }
 }

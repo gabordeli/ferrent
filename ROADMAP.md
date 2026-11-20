@@ -496,53 +496,91 @@
 
 ## M6 – v0.4 DiskGuard
 
-**Done when:** lemezenkénti szabad hely, guard, add-time kapu és GUI; több mountos hoston bizonyított.
+**Done when:** lemezenkénti zónák (címkézett könyvtár + staging), automatikus letöltési út ugyanazon a lemezen (rename, nem cross-disk copy), guard, add-time kapu és GUI; több mountos hoston bizonyított.
 
-**Non-goals:** auto-remove, SMART, nem-Ferrent pathok.
+**Non-goals:** auto-remove, SMART, nem-Ferrent pathok; preallocate az M6-T5-ben (később).
 
-**Függ:** M4 (label move target), M4-T2 (`Moving`).
+**Függ:** M4 (label), M4-T2 (`Moving`).
 
-### M6-T1 – Storage model 🤖
+**Modell (2026-11-20, user-döntés):**
 
-**Scope:** mount tábla, `statvfs`, `st_dev` csoportosítás/aliasok, path mapping (session/label/torrent), unknown, payload.
+- **Zóna = mappa, nem lemez.** Két fajta: *library* (címkével, **1:1**) és *staging* (lemezenként **egy, kötelező**).
+- Feloldás hozzáadáskor: `címke → library zóna → st_dev → azonos st_dev-en lévő staging → save_path`. A lemez futásidőben a pathból számolt `st_dev`, így az átmountolás nem töri el.
+- Címke nélkül a globális `download_dir` marad; a hozzáadó dialog figyelmeztet.
+- A letöltési út a dialogban látszik és **szerkeszthető**; címke választásra automatikusan frissül.
+- A zóna az igazságforrás: a `Label.move_completed_path` megszűnik, a hely a zónában él.
+- Befejezéskor a move a library zónába megy; a cél tele → a torrent a stagingen seedel és vár (retry + notification).
+
+### M6-T1 – Storage + zónamodell 🤖
+
+**Scope:** mount tábla, `statvfs`, `st_dev` csoportosítás/aliasok, `[[diskguard.zone]]` (library/staging), feloldás, unknown, payload.
 
 **Acceptance**
 
-- [ ] `/proc/self/mounts` parse + pseudo FS szűrés; bind mountok egy disk; leghosszabb mountpoint a display.
-- [ ] payload: mount, fs, total/free/used, paths, torrents, labels, deluge, low; unknown[].
-- [ ] tmpfs + bind mount teszt; eltűnt path → unknown, nem hiba.
-- [ ] `statvfs` `spawn_blocking` + timeout; beragadt NFS nem blokkol.
-- [ ] 1 000 path mellett < 50 ms.
+- [x] `/proc/self/mounts` parse + pseudo FS szűrés; bind mountok egy disk (leghosszabb alias a display).
+- [x] payload: mount, fs, total/free/used, zones, torrents, labels, low; unknown[].
+- [x] zóna validáció: üres/relatív path, duplikált címke (kis-nagybetűtől függetlenül), ugyanaz a path két zónában, staging címkével, library címke nélkül.
+- [x] `resolve_staging(label)` = címke → library zóna → `st_dev` → staging; ismeretlen címke / staging nélküli lemez → típusos hiba (`ZoneError`).
+- [x] tmpfs + bind mount a mount-tábla fixture-ön; valódi path stat + eltűnt path → unknown, nem hiba.
+- [x] `statvfs` + teljes scan `spawn_blocking` + 5 s timeout; hiba/timeout → nincs payload (a hívó az utolsó készletet tartja).
+- [x] 1 000 zóna csoportosítása < 50 ms (teszt); `snapshot` a valódi fájlrendszeren.
 
-**Files:** `crates/daemon/src/diskguard/{storage,mod}.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`
+**Files:** `crates/daemon/src/diskguard/storage.rs`, `crates/daemon/src/diskguard/zones.rs`, `crates/daemon/src/diskguard/mod.rs`, `crates/daemon/src/config/schema.rs`, `crates/daemon/tests/diskguard.rs` (a proto/RPC a T4-ben)
 
-### M6-T2 – Guard engine + kapuk ⚠️
+### M6-T2 – Automatikus letöltési út + move 🤖
 
-**Scope:** threshold/hysteresis, notify/pause, csak aktív írók, `DISK_GUARD` reason, add gate, move cél ellenőrzés.
+**Scope:** add-kori staging-feloldás, `save_path` felülírás, move a zónába, teljes cél-lemez viselkedés, add gate.
+
+**Acceptance**
+
+- [ ] `AddTorrent` üres `save_path` + címke → a zóna lemezének stagingje; explicit `save_path` nyer.
+- [ ] AutoAdd: a watch dir `save_path` opcionális; üresen a címke szerinti staging.
+- [ ] befejezéskor a move a library zónába megy; azonos `st_dev` → rename (a teszt méri, hogy nincs másolás).
+- [ ] cél-lemez tele a move idején → Seeding a stagingen, retry + notification; N próba után `Error`.
+- [ ] címkeváltás élő torrenten nem mozgat; a következő move már a zónát használja.
+- [ ] add gate: staging FS < `min_free` → `FAILED_PRECONDITION` (config: notify/reject); AutoAdd defer.
+
+**Files:** `crates/daemon/src/autoadd.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/daemon/src/labels.rs`, `crates/daemon/tests/automation_e2e.rs`
+
+### M6-T3 – Guard engine ⚠️
+
+**Scope:** threshold/hysteresis, notify/pause, csak aktív írók, `DISK_GUARD` reason, `DiskLow`/`DiskOk`.
 
 **Acceptance**
 
 - [ ] low = `free < min`; ok = `free >= min + margin`; csak tranziens emitál.
 - [ ] pause csak Downloading/Queued/Checking/Moving; seed nem; kézi pause-t nem ír felül.
-- [ ] add: cél FS < min → `FAILED_PRECONDITION` (config: notify/reject); AutoAdd visszatart.
-- [ ] move target < size → a move nem indul, event + notification.
+- [ ] `DiskLow`/`DiskOk` notification a M5 csatornákra (digest/quiet szerint).
 - [ ] restart után újraértékel; hiba → utolsó payload.
+- [ ] 3 FS + tmpfs low szimuláció: a megfelelő torrentek pause/resume.
 
-**Files:** `crates/daemon/src/diskguard/guard.rs`, `crates/daemon/src/control.rs`, `crates/daemon/src/rpc/mod.rs`, `tests/`
+**Files:** `crates/daemon/src/diskguard/guard.rs`, `crates/daemon/src/control.rs`, `tests/`
 
-### M6-T3 – DiskGuard API + GUI + acceptance 🤖 🔬
+### M6-T4 – API + GUI + acceptance 🤖 🔬
 
-**Scope:** `GetDisks`/`SetGuardConfig`, Storage tab + status item, multi-mount mérés.
+**Scope:** `GetDisks` + zóna API, Settings → Storage (lemezek + zónák), add-torrent dialog, sidebar, multi-mount mérés.
 
 **Acceptance**
 
-- [ ] Settings → Storage tábla mountonként (total/free/min/margin/action), egy Save + Reload.
-- [ ] sidebar „N disks · X free”, low → piros, kattintás a tabra.
-- [ ] 3 FS-es host + tmpfs low szimuláció: a megfelelő torrentek pause/resume.
-- [ ] `DiskLow`/`DiskOk` notification a M5 csatornákra.
-- [ ] mérés: poll idő, pause/resume latency, 4 000 torrent; `docs/measurements/diskguard.md`.
+- [ ] `GetDisks`: mount, fs, total/free/used, low, zónák (path, label|staging, enabled), torrentszám zónánként.
+- [ ] Settings → Storage: lemez-tábla (total/free/min/margin) + zóna-lista hozzáadás/törlés, **egy** Save + explicit Reload.
+- [ ] Add-torrent dialog: letöltési út mező, címke választásra frissül, szerkeszthető; címke nélkül warning.
+- [ ] sidebar „N disks · X free”, low → piros, kattintás a Storage tabra.
+- [ ] 3 FS-es host + tmpfs low szimuláció; mérés: poll idő, pause/resume latency, 4 000 torrent; `docs/measurements/diskguard.md`.
 
-**Files:** `crates/gui/src/settings/diskguard.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`, `docs/measurements/diskguard.md`
+**Files:** `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `docs/measurements/diskguard.md`
+
+### M6-T5 – Preallocate-kapu (később) 🤖
+
+**Scope:** opcionális preallocate: a torrent teljes méretének ellenőrzése a hozzáadáskor.
+
+**Acceptance**
+
+- [ ] `[diskguard] require_space_for_torrent = true` (default `false`).
+- [ ] bekapcsolva: `free < total_bytes + margin` → add `FAILED_PRECONDITION`, érthető üzenettel (lemez, kell / van); AutoAdd defer, nem `.invalid`.
+- [ ] kikapcsolva a mai viselkedés (csak `min_free` gate).
+
+**Files:** `crates/daemon/src/diskguard/`, `crates/daemon/src/rpc/mod.rs`, `tests/`
 
 ---
 
@@ -815,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); a következő mérföldkő az **M6 DiskGuard**, azon belül az M6-T1 storage model.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1 (storage + zónamodell) kész**, a következő szelet az **M6-T2 Automatikus letöltési út + move**.
