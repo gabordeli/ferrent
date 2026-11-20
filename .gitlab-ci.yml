@@ -113,7 +113,7 @@ release-deb:
     - packaging/debian/version.sh "$tag"
     - TAG="$tag" packaging/debian/build.sh debian:12 amd64
     - TAG="$tag" packaging/debian/build.sh debian:12 arm64
-    - packaging/apt/publish-gitlab.sh target/debian-dist
+    - bash packaging/apt/publish-gitlab.sh target/debian-dist
   artifacts:
     paths:
       - target/debian-dist/*.deb
