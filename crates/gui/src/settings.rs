@@ -19,16 +19,18 @@ pub enum Tab {
     AutoAdd,
     Hooks,
     Scheduler,
+    Notifications,
     Labels,
 }
 
 impl Tab {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
         Self::Hooks,
         Self::Scheduler,
+        Self::Notifications,
         Self::Labels,
     ];
 
@@ -40,6 +42,7 @@ impl Tab {
             Self::AutoAdd => "AutoAdd",
             Self::Hooks => "Hooks",
             Self::Scheduler => "Scheduler",
+            Self::Notifications => "Notifications",
             Self::Labels => "Labels",
         }
     }
@@ -55,6 +58,9 @@ impl Tab {
             Self::Hooks => "Programs run on added, finished, removed and error events.",
             Self::Scheduler => {
                 "A 24×7 weekly grid: green = session defaults, yellow = limits, red = pause."
+            }
+            Self::Notifications => {
+                "Webhook channels fed by the event journal, with retry and a dead-letter box."
             }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
         }
@@ -1133,6 +1139,236 @@ impl SchedulerForm {
     }
 }
 
+/// One editable webhook channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebhookRow {
+    pub url: String,
+    pub secret: String,
+    /// Comma separated event kinds; empty means every kind.
+    pub events: String,
+    pub enabled: bool,
+    pub timeout_ms: String,
+}
+
+impl Default for WebhookRow {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            secret: String::new(),
+            events: String::new(),
+            enabled: true,
+            timeout_ms: "5000".to_owned(),
+        }
+    }
+}
+
+impl WebhookRow {
+    /// Replaces one text field.
+    pub fn set(&mut self, field: WebhookField, text: String) {
+        match field {
+            WebhookField::Url => self.url = text,
+            WebhookField::Secret => self.secret = text,
+            WebhookField::Events => self.events = text,
+            WebhookField::Timeout => self.timeout_ms = text,
+        }
+    }
+
+    /// Returns the text of one field.
+    #[must_use]
+    pub fn text(&self, field: WebhookField) -> &str {
+        match field {
+            WebhookField::Url => &self.url,
+            WebhookField::Secret => &self.secret,
+            WebhookField::Events => &self.events,
+            WebhookField::Timeout => &self.timeout_ms,
+        }
+    }
+
+    /// Parses the event list; empty means every kind.
+    #[must_use]
+    pub fn event_list(&self) -> Vec<String> {
+        self.events
+            .split(',')
+            .map(str::trim)
+            .filter(|event| !event.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// One editable text of a webhook.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebhookField {
+    Url,
+    Secret,
+    Events,
+    Timeout,
+}
+
+impl WebhookField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Url => "URL",
+            Self::Secret => "HMAC secret",
+            Self::Events => "Events (comma separated; empty = all)",
+            Self::Timeout => "Timeout (ms)",
+        }
+    }
+}
+
+/// The `[notify]` table of the configuration document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotifyForm {
+    pub enabled: bool,
+    pub webhooks: Vec<WebhookRow>,
+}
+
+impl Default for NotifyForm {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            webhooks: Vec::new(),
+        }
+    }
+}
+
+impl NotifyForm {
+    /// Reads `[notify]` and its `[[notify.webhook]]` tables.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("notify") else {
+            return Ok(Self::default());
+        };
+        let Item::Table(table) = item else {
+            return Err("notify must be a table".to_owned());
+        };
+        let mut form = Self {
+            enabled: table.get("enabled").and_then(Item::as_bool).unwrap_or(true),
+            webhooks: Vec::new(),
+        };
+        if let Some(item) = table.get("webhook") {
+            let Item::ArrayOfTables(array) = item else {
+                return Err("notify.webhook must be an array of tables".to_owned());
+            };
+            for entry in array.iter() {
+                let text = |key: &str, fallback: &str| {
+                    entry
+                        .get(key)
+                        .and_then(Item::as_str)
+                        .unwrap_or(fallback)
+                        .to_owned()
+                };
+                let join = |key: &str| {
+                    entry
+                        .get(key)
+                        .and_then(Item::as_array)
+                        .map(|array| {
+                            array
+                                .iter()
+                                .filter_map(|item| item.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default()
+                };
+                form.webhooks.push(WebhookRow {
+                    url: text("url", ""),
+                    secret: text("secret", ""),
+                    events: join("events"),
+                    enabled: entry.get("enabled").and_then(Item::as_bool).unwrap_or(true),
+                    timeout_ms: entry
+                        .get("timeout_ms")
+                        .and_then(Item::as_integer)
+                        .map_or_else(|| "5000".to_owned(), |value| value.to_string()),
+                });
+            }
+        }
+        Ok(form)
+    }
+
+    /// Checks every webhook before it is written back.
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, row) in self.webhooks.iter().enumerate() {
+            let url = row.url.trim();
+            if url.is_empty() {
+                return Err(format!("Webhook {}: URL must not be empty", index + 1));
+            }
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(format!("Webhook {}: URL must be http(s)", index + 1));
+            }
+            let timeout: u64 =
+                row.timeout_ms.trim().parse().map_err(|_| {
+                    format!("Webhook {}: timeout must be a whole number", index + 1)
+                })?;
+            if !(100..=60_000).contains(&timeout) {
+                return Err(format!(
+                    "Webhook {}: timeout must be between 100 and 60000 ms",
+                    index + 1
+                ));
+            }
+            for event in row.event_list() {
+                if !matches!(event.as_str(), "added" | "finished" | "removed" | "error") {
+                    return Err(format!("Webhook {}: unknown event {event:?}", index + 1));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes the table back into an already rendered document.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        let mut table = Table::new();
+        table["enabled"] = value(self.enabled);
+        let mut array = ArrayOfTables::new();
+        for row in &self.webhooks {
+            let mut entry = Table::new();
+            entry["url"] = value(row.url.trim());
+            if !row.secret.trim().is_empty() {
+                entry["secret"] = value(row.secret.trim());
+            }
+            let events = row.event_list();
+            if !events.is_empty() {
+                let mut list = toml_edit::Array::new();
+                for event in events {
+                    list.push(event);
+                }
+                entry["events"] = value(list);
+            }
+            entry["enabled"] = value(row.enabled);
+            if let Ok(timeout) = row.timeout_ms.trim().parse::<i64>() {
+                entry["timeout_ms"] = value(timeout);
+            }
+            array.push(entry);
+        }
+        table["webhook"] = Item::ArrayOfTables(array);
+        doc["notify"] = Item::Table(table);
+        Ok(())
+    }
+
+    /// The selected webhook.
+    #[must_use]
+    pub fn selected(&self, index: Option<usize>) -> Option<&WebhookRow> {
+        index.and_then(|index| self.webhooks.get(index))
+    }
+
+    /// Adds an empty webhook and returns its index.
+    pub fn add(&mut self) -> usize {
+        self.webhooks.push(WebhookRow::default());
+        self.webhooks.len() - 1
+    }
+
+    /// Removes one webhook.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.webhooks.len() {
+            self.webhooks.remove(index);
+        }
+    }
+}
+
 /// One label row plus its assignment count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelRow {
@@ -1323,6 +1559,10 @@ pub struct Settings {
     pub hooks_baseline: HookForm,
     pub scheduler: SchedulerForm,
     pub scheduler_baseline: SchedulerForm,
+    pub notify: NotifyForm,
+    pub notify_baseline: NotifyForm,
+    pub notify_selected: Option<usize>,
+    pub notify_status: Option<(u32, u32, u32)>,
     pub hooks_selected: Option<usize>,
     pub hook_runs: Vec<HookRunRow>,
     pub hook_pending: u32,
@@ -1354,6 +1594,10 @@ impl Default for Settings {
             hooks_baseline: HookForm::default(),
             scheduler: SchedulerForm::default(),
             scheduler_baseline: SchedulerForm::default(),
+            notify: NotifyForm::default(),
+            notify_baseline: NotifyForm::default(),
+            notify_selected: None,
+            notify_status: None,
             hooks_selected: None,
             hook_runs: Vec::new(),
             hook_pending: 0,
@@ -1379,6 +1623,7 @@ impl Settings {
         let autoadd = AutoAddForm::from_toml(toml)?;
         let hooks = HookForm::from_toml(toml)?;
         let scheduler = SchedulerForm::from_toml(toml)?;
+        let notify = NotifyForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
@@ -1391,6 +1636,9 @@ impl Settings {
         self.hooks = hooks;
         self.scheduler_baseline = scheduler.clone();
         self.scheduler = scheduler;
+        self.notify_baseline = notify.clone();
+        self.notify = notify;
+        self.notify_selected = None;
         self.hooks_selected = None;
         Ok(())
     }
@@ -1407,6 +1655,7 @@ impl Settings {
             Tab::AutoAdd => self.autoadd != self.autoadd_baseline,
             Tab::Hooks => self.hooks != self.hooks_baseline,
             Tab::Scheduler => self.scheduler != self.scheduler_baseline,
+            Tab::Notifications => self.notify != self.notify_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
         }
@@ -1423,6 +1672,7 @@ impl Settings {
         self.autoadd.render_into(&mut doc)?;
         self.hooks.render_into(&mut doc)?;
         self.scheduler.render_into(&mut doc)?;
+        self.notify.render_into(&mut doc)?;
         Ok(doc.to_string())
     }
 
@@ -1855,6 +2105,53 @@ mod tests {
         };
         assert_eq!(row.summary(), "3 added · 1 duplicate");
         assert_eq!(AutoAddStatusRow::default().summary(), "idle");
+    }
+
+    #[test]
+    fn notify_rows_round_trip_through_the_document() {
+        let raw = "[notify]\nenabled = true\n\n[[notify.webhook]]\nurl = \"https://example.test/hook\"\nsecret = \"s3cret\"\nevents = [\"finished\", \"error\"]\ntimeout_ms = 2000\n";
+        let mut settings = Settings {
+            raw: raw.to_owned(),
+            ..Settings::default()
+        };
+        settings
+            .apply_snapshot(raw, 1, Vec::new())
+            .expect("snapshot");
+        assert_eq!(settings.notify.webhooks.len(), 1);
+        assert_eq!(settings.notify.webhooks[0].events, "finished, error");
+        assert_eq!(settings.notify.webhooks[0].secret, "s3cret");
+        assert!(!settings.dirty_tab(Tab::Notifications));
+
+        settings.notify.webhooks[0].enabled = false;
+        assert!(settings.dirty_tab(Tab::Notifications));
+        let rendered = settings.render().expect("render");
+        assert_eq!(
+            NotifyForm::from_toml(&rendered).expect("reparse"),
+            settings.notify
+        );
+        assert!(
+            rendered.contains("url = \"https://example.test/hook\""),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn notify_validation_matches_the_daemon() {
+        let mut form = NotifyForm::default();
+        form.add();
+        assert!(form.validate().is_err(), "empty URL");
+        form.webhooks[0].url = "ftp://x/y".to_owned();
+        assert!(form.validate().is_err());
+        form.webhooks[0].url = "https://x/y".to_owned();
+        assert!(form.validate().is_ok());
+        form.webhooks[0].timeout_ms = "1".to_owned();
+        assert!(form.validate().is_err());
+        form.webhooks[0].timeout_ms = "5000".to_owned();
+        form.webhooks[0].events = "nope".to_owned();
+        assert!(form.validate().is_err());
+        form.webhooks[0].events = "finished, error".to_owned();
+        assert!(form.validate().is_ok());
+        assert_eq!(form.webhooks[0].event_list(), vec!["finished", "error"]);
     }
 
     #[test]

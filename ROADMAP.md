@@ -456,14 +456,14 @@
 
 **Acceptance**
 
-- [ ] az esemény a szabály alapján outbox rekordot kap; `(event_id, channel)` dedupe; restart után nincs dupla.
-- [ ] webhook: JSON POST, `X-Ferrent-Event`, `X-Ferrent-Delivery`, opcionális `X-Ferrent-Signature: sha256=…`; timeout.
-- [ ] 5xx/429 → exponenciális backoff, max 5 kísérlet, utána `dead` + Activity bejegyzés.
-- [ ] a token/secret nem kerül logba; a webhook URL csak http/https.
-- [ ] Settings → Notifications tábla + egy Save/Reload + „Test”; `ferrent-cli notify test`.
-- [ ] fake HTTP szerverrel tesztelt; nincs hálózat a unit tesztekben.
+- [x] az esemény a szabály alapján outbox rekordot kap; `(event_seq, url)` dedupe; restart után nincs dupla.
+- [x] webhook: JSON POST, `X-Ferrent-Event`, `X-Ferrent-Delivery`, opcionális `X-Ferrent-Signature: sha256=…`; timeout (`timeout_ms`).
+- [x] 5xx/429 → exponenciális backoff (5 s · 2^n, cap 300 s), max 5 kísérlet, utána `dead` (a statusban és a GUI-ban; Activity bejegyzés a későbbi feeddel jön).
+- [x] a secret nem kerül logba; a webhook URL csak http/https (config-validáció + GUI-validáció).
+- [x] Settings → Notifications tábla + egy Save/Reload + „Test”; `ferrent-cli notify test` / `notify status`.
+- [x] fake HTTP szerverrel tesztelt (TcpListener, 200/400/500); nincs külső hálózat a tesztekben.
 
-**Files:** `crates/daemon/src/notify/{mod,outbox,webhook}.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/notifications.rs`, `crates/cli/src/notify.rs`, `tests/`
+**Files:** `crates/daemon/src/notify.rs`, `crates/daemon/src/config/schema.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `crates/cli/src/main.rs`, `crates/daemon/tests/notify.rs`
 
 ### M5-T5 – Telegram + digest/quiet hours 🤖
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5, M5-T1, M5-T2 és M5-T3 kész; a következő szelet **M5-T4 Notification router + webhook**.
+**Állapot (2026-11-20):** M4-T1–T5, M5-T1–T4 kész; a következő szelet **M5-T5 Telegram + digest/quiet hours**.

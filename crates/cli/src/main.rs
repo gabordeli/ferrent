@@ -9,9 +9,10 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetConfigRequest, GetTorrentRequest, ListTorrentsRequest,
-    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RemoveTorrentRequest,
-    ResumeTorrentRequest, SetConfigRequest, SortField, WatchRequest,
+    AddTorrentRequest, GetConfigRequest, GetNotificationStatusRequest, GetTorrentRequest,
+    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, QueueDirection,
+    RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
+    SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -128,6 +129,19 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Notifications: outbox status and a test delivery.
+    Notify {
+        #[command(subcommand)]
+        command: NotifyCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum NotifyCommand {
+    /// Queue a test delivery to every enabled webhook.
+    Test,
+    /// Print the outbox counters.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -343,6 +357,37 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             }
         }
+        Command::Notify { command } => match command {
+            NotifyCommand::Test => {
+                let response = client
+                    .send_test_notification(SendTestNotificationRequest {})
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({ "queued": response.queued }));
+                } else {
+                    println!("queued {} test delivery(ies)", response.queued);
+                }
+            }
+            NotifyCommand::Status => {
+                let response = client
+                    .get_notification_status(GetNotificationStatusRequest {})
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({
+                        "pending": response.pending,
+                        "dead": response.dead,
+                        "channels": response.channels,
+                    }));
+                } else {
+                    println!(
+                        "pending {} dead {} channels {}",
+                        response.pending, response.dead, response.channels
+                    );
+                }
+            }
+        },
         Command::Config { command } => match command {
             ConfigCommand::Get => {
                 let response = client.get_config(GetConfigRequest {}).await?.into_inner();

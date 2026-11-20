@@ -7,10 +7,11 @@ use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
     CreateLabelRequest, DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest,
-    GetHookStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
-    GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
-    ScanAutoAddRequest, SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile,
-    TorrentPeer, TorrentTracker, UpdateLabelRequest,
+    GetHookStatusRequest, GetNotificationStatusRequest, GetStatusRequest, GetTorrentFilesRequest,
+    GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest,
+    ListTorrentsRequest, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
+    SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
+    UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -373,4 +374,38 @@ pub async fn hook_status(client: &AuthClient, limit: u32) -> Result<HookStatus, 
             })
             .collect(),
     })
+}
+
+/// Notification outbox counters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NotifyStatus {
+    pub pending: u32,
+    pub dead: u32,
+    pub channels: u32,
+}
+
+/// Fetches the notification outbox counters.
+pub async fn notification_status(client: &AuthClient) -> Result<NotifyStatus, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_notification_status(GetNotificationStatusRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(NotifyStatus {
+        pending: response.pending,
+        dead: response.dead,
+        channels: response.channels,
+    })
+}
+
+/// Queues a test delivery to every enabled webhook.
+pub async fn send_test_notification(client: &AuthClient) -> Result<u32, String> {
+    let mut client = client.clone();
+    let response = client
+        .send_test_notification(SendTestNotificationRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.queued)
 }

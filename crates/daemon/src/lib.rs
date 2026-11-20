@@ -6,6 +6,7 @@ pub mod control;
 pub mod events;
 pub mod hooks;
 pub mod labels;
+pub mod notify;
 pub mod persist;
 pub mod rpc;
 pub mod scheduler;

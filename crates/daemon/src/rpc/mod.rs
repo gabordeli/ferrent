@@ -17,17 +17,19 @@ use ferrent_protocol::v1::{
     AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
     DeleteLabelRequest, DeleteLabelResponse, GetAutoAddStatusRequest, GetAutoAddStatusResponse,
     GetConfigRequest, GetConfigResponse, GetHookStatusRequest, GetHookStatusResponse,
-    GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse,
-    GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
-    GetTorrentTrackersRequest, GetTorrentTrackersResponse, HookRun as ProtoHookRun,
-    Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest, ListLabelsResponse,
-    ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse,
-    PauseTorrentRequest, PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection,
-    RemoveTorrentRequest, RemoveTorrentResponse, Removed, ResumeTorrentRequest,
-    ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SetConfigRequest,
-    SetConfigResponse, SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
-    SetTorrentLimitsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
-    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
+    GetNotificationStatusRequest, GetNotificationStatusResponse, GetStatusRequest,
+    GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
+    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
+    GetTorrentTrackersResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry,
+    LabelResponse, ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest,
+    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
+    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
+    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse,
+    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
+    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetTorrentLabelRequest,
+    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField,
+    StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
+    UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -458,7 +460,7 @@ impl Ferrent for FerrentService {
                 .await?;
             self.match_and_assign(id, &match_name, &trackers).await?;
             let event = crate::hooks::added_event(id, &name, &save_path, &infohash);
-            if let Err(error) = self.state.append_hook_event(event).await {
+            if let Err(error) = self.state.publish_event(event).await {
                 eprintln!("hook journal: {error}");
             }
         }
@@ -534,7 +536,7 @@ impl Ferrent for FerrentService {
             )
             .with_path(status.save_path.display().to_string())
             .with_infohash(status.infohash.clone());
-            if let Err(error) = self.state.append_hook_event(event).await {
+            if let Err(error) = self.state.publish_event(event).await {
                 eprintln!("hook journal: {error}");
             }
         }
@@ -996,6 +998,44 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn get_notification_status(
+        &self,
+        request: Request<GetNotificationStatusRequest>,
+    ) -> Result<Response<GetNotificationStatusResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let status = self
+            .state
+            .notification_status()
+            .await
+            .map_err(Status::internal)?;
+        let channels = self.state.config.resolved().map_or(0, |config| {
+            config
+                .notify
+                .webhook
+                .iter()
+                .filter(|rule| rule.enabled)
+                .count()
+        });
+        Ok(Response::new(GetNotificationStatusResponse {
+            pending: status.pending,
+            dead: status.dead,
+            channels: u32::try_from(channels).unwrap_or(u32::MAX),
+        }))
+    }
+
+    async fn send_test_notification(
+        &self,
+        request: Request<SendTestNotificationRequest>,
+    ) -> Result<Response<SendTestNotificationResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let queued = self
+            .state
+            .send_test_notification()
+            .await
+            .map_err(Status::internal)?;
+        Ok(Response::new(SendTestNotificationResponse { queued }))
+    }
+
     async fn get_config(
         &self,
         request: Request<GetConfigRequest>,
@@ -1072,6 +1112,7 @@ pub async fn serve(
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
+    crate::notify::spawn_notifier(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),
@@ -1098,7 +1139,7 @@ fn spawn_engine_watcher(state: Arc<AppState>) {
                         )
                         .with_path(status.save_path.display().to_string())
                         .with_infohash(status.infohash.clone());
-                        if let Err(error) = state.append_hook_event(event).await {
+                        if let Err(error) = state.publish_event(event).await {
                             eprintln!("hook journal: {error}");
                         }
                     }
@@ -1140,7 +1181,7 @@ fn spawn_engine_watcher(state: Arc<AppState>) {
                     let event =
                         crate::events::NewEvent::new(crate::events::EventKind::Error, id, name)
                             .with_error(Some(message));
-                    if let Err(error) = state.append_hook_event(event).await {
+                    if let Err(error) = state.publish_event(event).await {
                         eprintln!("hook journal: {error}");
                     }
                 }

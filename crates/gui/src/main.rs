@@ -13,7 +13,7 @@ use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus}
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
     self, ConfigField, HookEvent, HookField, LabelField, SchedulerLevel, Settings, SuccessAction,
-    Tab, WatchField,
+    Tab, WatchField, WebhookField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -218,6 +218,15 @@ enum Message {
     SchedulerPauseSeeding(bool),
     SchedulerField(SchedulerField, String),
     SchedulerCell(usize, usize),
+    NotifySelected(usize),
+    NotifyAdd,
+    NotifyRemove,
+    NotifyField(WebhookField, String),
+    NotifyEnabled(bool),
+    NotifyWebhookEnabled(bool),
+    NotifyTest,
+    NotifyTested(Result<u32, String>),
+    NotifyStatusLoaded(Result<connection::NotifyStatus, String>),
     SelectLabelFilter(String),
     ChooseLabel(Option<String>),
     LabelsAssigned(Result<usize, String>),
@@ -642,6 +651,9 @@ impl App {
             Message::SettingsTab(tab) => {
                 self.settings.tab = tab;
                 self.settings.message.clear();
+                if tab == Tab::Notifications {
+                    return self.load_notify_status();
+                }
                 Task::none()
             }
             Message::SettingsField(field, value) => {
@@ -795,6 +807,67 @@ impl App {
             }
             Message::SchedulerCell(day, hour) => {
                 self.settings.scheduler.cycle(day, hour);
+                Task::none()
+            }
+            Message::NotifySelected(index) => {
+                if index < self.settings.notify.webhooks.len() {
+                    self.settings.notify_selected = Some(index);
+                }
+                Task::none()
+            }
+            Message::NotifyAdd => {
+                self.settings.notify_selected = Some(self.settings.notify.add());
+                Task::none()
+            }
+            Message::NotifyRemove => {
+                if let Some(index) = self.settings.notify_selected {
+                    self.settings.notify.remove(index);
+                    self.settings.notify_selected = if self.settings.notify.webhooks.is_empty() {
+                        None
+                    } else {
+                        Some(index.min(self.settings.notify.webhooks.len() - 1))
+                    };
+                }
+                Task::none()
+            }
+            Message::NotifyField(field, value) => {
+                if let Some(index) = self.settings.notify_selected {
+                    if let Some(row) = self.settings.notify.webhooks.get_mut(index) {
+                        row.set(field, value);
+                    }
+                }
+                Task::none()
+            }
+            Message::NotifyEnabled(value) => {
+                self.settings.notify.enabled = value;
+                Task::none()
+            }
+            Message::NotifyWebhookEnabled(value) => {
+                if let Some(index) = self.settings.notify_selected {
+                    if let Some(row) = self.settings.notify.webhooks.get_mut(index) {
+                        row.enabled = value;
+                    }
+                }
+                Task::none()
+            }
+            Message::NotifyTest => self.send_notification_test(),
+            Message::NotifyTested(result) => {
+                match result {
+                    Ok(queued) => {
+                        self.settings.message = format!("Queued {queued} test delivery(ies)")
+                    }
+                    Err(error) => self.settings.error = Some(format!("Notification test: {error}")),
+                }
+                Task::batch([self.load_notify_status()])
+            }
+            Message::NotifyStatusLoaded(result) => {
+                match result {
+                    Ok(status) => {
+                        self.settings.notify_status =
+                            Some((status.pending, status.dead, status.channels));
+                    }
+                    Err(error) => self.settings.error = Some(format!("Notifications: {error}")),
+                }
                 Task::none()
             }
             Message::HooksRefresh => self.load_hook_status(),
@@ -2126,6 +2199,29 @@ impl App {
         Task::none()
     }
 
+    fn load_notify_status(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { connection::notification_status(&client).await },
+            Message::NotifyStatusLoaded,
+        )
+    }
+
+    fn send_notification_test(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        self.settings.error = None;
+        self.settings.message = "Queueing a test delivery...".to_owned();
+        Task::perform(
+            async move { connection::send_test_notification(&client).await },
+            Message::NotifyTested,
+        )
+    }
+
     fn load_hook_status(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
@@ -2217,6 +2313,7 @@ impl App {
                 self.settings.autoadd_baseline = self.settings.autoadd.clone();
                 self.settings.hooks_baseline = self.settings.hooks.clone();
                 self.settings.scheduler_baseline = self.settings.scheduler.clone();
+                self.settings.notify_baseline = self.settings.notify.clone();
                 self.settings.error = None;
                 self.settings.message = format!("Saved revision {revision}");
                 Task::batch([self.refresh_page(), self.load_labels()])
@@ -2461,6 +2558,7 @@ impl App {
             Tab::AutoAdd => self.settings_auto_add_view(),
             Tab::Hooks => self.settings_hooks_view(),
             Tab::Scheduler => self.settings_scheduler_view(),
+            Tab::Notifications => self.settings_notifications_view(),
             Tab::Labels => self.settings_labels_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
@@ -2488,14 +2586,22 @@ impl App {
 
         let save = match settings.tab {
             Tab::Labels => Message::LabelSave,
-            Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks | Tab::Scheduler => {
-                Message::SettingsSave
-            }
+            Tab::Connection
+            | Tab::Session
+            | Tab::AutoAdd
+            | Tab::Hooks
+            | Tab::Scheduler
+            | Tab::Notifications => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
                 Tab::Labels => settings.label_new || settings.label_selected.is_some(),
-                Tab::Connection | Tab::Session | Tab::AutoAdd | Tab::Hooks | Tab::Scheduler => true,
+                Tab::Connection
+                | Tab::Session
+                | Tab::AutoAdd
+                | Tab::Hooks
+                | Tab::Scheduler
+                | Tab::Notifications => true,
             };
         let footer = row![
             summary,
@@ -3116,6 +3222,183 @@ impl App {
             .color(theme::TEXT_MUTED),
         ]
         .spacing(8)
+        .into()
+    }
+
+    fn settings_notifications_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let rows: Vec<Element<Message>> = settings
+            .notify
+            .webhooks
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let selected = settings.notify_selected == Some(index);
+                let host = row
+                    .url
+                    .split_once("://")
+                    .map_or(row.url.as_str(), |(_, rest)| rest)
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_owned();
+                let detail = if row.events.trim().is_empty() {
+                    "all events".to_owned()
+                } else {
+                    row.events.clone()
+                };
+                let display = if host.is_empty() {
+                    "(no URL)".to_owned()
+                } else {
+                    host.clone()
+                };
+                button(
+                    column![
+                        text(display).size(12),
+                        text(if row.enabled {
+                            detail
+                        } else {
+                            format!("{detail} · disabled")
+                        })
+                        .size(10)
+                        .color(theme::TEXT_MUTED),
+                    ]
+                    .spacing(2),
+                )
+                .on_press(Message::NotifySelected(index))
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::SURFACE
+                        } else {
+                            theme::BG_SECONDARY
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_SECONDARY
+                    },
+                    border: iced::Border {
+                        color: if selected {
+                            theme::PRIMARY
+                        } else {
+                            theme::BG_SECONDARY
+                        },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = column![
+            row![
+                text("Webhooks").size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button("Add", Message::NotifyAdd, !settings.loading),
+                action_button(
+                    "Remove",
+                    Message::NotifyRemove,
+                    settings.notify_selected.is_some() && !settings.loading,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(6)
+        .width(Length::Fixed(320.0))
+        .height(Length::Fill);
+
+        let editor: Element<Message> = if let Some(row) =
+            settings.notify.selected(settings.notify_selected)
+        {
+            let field = |field: WebhookField, placeholder: &'static str| {
+                column![
+                    text(field.label()).size(11).color(theme::TEXT_MUTED),
+                    text_input(placeholder, row.text(field))
+                        .style(muted_input_style)
+                        .width(Length::Fill)
+                        .on_input(move |value| Message::NotifyField(field, value)),
+                ]
+                .spacing(3)
+            };
+            column![
+                field(WebhookField::Url, "https://example.test/ferrent"),
+                field(WebhookField::Secret, "optional HMAC secret"),
+                row![
+                    field(WebhookField::Events, "finished, error (empty = all)"),
+                    field(WebhookField::Timeout, "5000"),
+                ]
+                .spacing(8),
+                checkbox("Channel enabled", row.enabled)
+                    .on_toggle(Message::NotifyWebhookEnabled)
+                    .size(14)
+                    .text_size(12),
+                text("The daemon signs the JSON body with HMAC-SHA256 when a secret is set (X-Ferrent-Signature). Failures retry with backoff; after 5 attempts the delivery is dead-lettered.")
+                    .size(10)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .spacing(10)
+            .max_width(560.0)
+            .into()
+        } else {
+            column![
+                text("Select a webhook, or add one.")
+                    .size(12)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .into()
+        };
+
+        let status = settings.notify_status.map_or_else(
+            || "outbox: -".to_owned(),
+            |(pending, dead, channels)| {
+                format!("outbox: {pending} pending · {dead} dead · {channels} channel(s)")
+            },
+        );
+
+        row![
+            list,
+            container(
+                column![
+                    checkbox("Notifications enabled", settings.notify.enabled)
+                        .on_toggle(Message::NotifyEnabled)
+                        .size(14)
+                        .text_size(12),
+                    scrollable(editor).height(Length::Fill),
+                    row![
+                        text(status)
+                            .size(10)
+                            .color(theme::TEXT_MUTED)
+                            .width(Length::Fill),
+                        container(action_button(
+                            "Test",
+                            Message::NotifyTest,
+                            !settings.loading,
+                        ))
+                        .width(Length::Fixed(80.0)),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                ]
+                .spacing(8)
+                .height(Length::Fill)
+            )
+            .padding([0, 12])
+            .width(Length::Fill)
+            .height(Length::Fill),
+        ]
+        .height(Length::Fill)
         .into()
     }
 

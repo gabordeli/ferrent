@@ -50,6 +50,25 @@ service Ferrent {
   rpc ScanAutoAdd(ScanAutoAddRequest) returns (ScanAutoAddResponse);
   // Returns the hook journal depth and the most recent runs.
   rpc GetHookStatus(GetHookStatusRequest) returns (GetHookStatusResponse);
+  // Returns the notification outbox counters.
+  rpc GetNotificationStatus(GetNotificationStatusRequest) returns (GetNotificationStatusResponse);
+  // Queues a test delivery to every enabled webhook.
+  rpc SendTestNotification(SendTestNotificationRequest) returns (SendTestNotificationResponse);
+}
+
+message GetNotificationStatusRequest {}
+message GetNotificationStatusResponse {
+  // Deliveries waiting for (or retrying) a send.
+  uint32 pending = 1;
+  // Deliveries that exhausted their attempts.
+  uint32 dead = 2;
+  // Enabled webhook channels in the configuration.
+  uint32 channels = 3;
+}
+
+message SendTestNotificationRequest {}
+message SendTestNotificationResponse {
+  uint32 queued = 1;
 }
 
 message GetHookStatusRequest {

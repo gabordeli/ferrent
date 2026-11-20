@@ -1081,7 +1081,7 @@ impl crate::rpc::AppState {
         }
 
         let event = crate::hooks::added_event(id, &name, &save_path, &infohash);
-        if let Err(error) = self.append_hook_event(event).await {
+        if let Err(error) = self.publish_event(event).await {
             eprintln!("hook journal: {error}");
         }
 

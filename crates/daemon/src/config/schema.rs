@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::ConfigError;
 use crate::autoadd::WatchDir;
 use crate::hooks::HookSpec;
+use crate::notify::WebhookRule;
 use crate::scheduler::Grid;
 
 const DEFAULT_DATA_DIR: &str = "./ferrent-data";
@@ -39,6 +40,37 @@ pub struct FileConfig {
     pub hook: Vec<HookSpec>,
     /// 24x7 scheduler (M5-T3).
     pub scheduler: SchedulerConfig,
+    /// Notification channels (M5-T4).
+    pub notify: NotifyConfig,
+}
+
+/// Outbound notification settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct NotifyConfig {
+    pub enabled: bool,
+    /// Webhook channels; the router fans out one delivery per matching rule.
+    pub webhook: Vec<WebhookRule>,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            webhook: Vec::new(),
+        }
+    }
+}
+
+impl NotifyConfig {
+    /// Checks every configured webhook.
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, rule) in self.webhook.iter().enumerate() {
+            rule.validate()
+                .map_err(|message| format!("notify.webhook[{index}]: {message}"))?;
+        }
+        Ok(())
+    }
 }
 
 /// The weekly scheduler grid and its limits.
@@ -211,6 +243,7 @@ impl FileConfig {
             autoadd: self.autoadd.clone(),
             hook: self.hook.clone(),
             scheduler: self.scheduler.clone(),
+            notify: self.notify.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -230,6 +263,7 @@ pub struct ResolvedConfig {
     pub autoadd: Vec<WatchDir>,
     pub hook: Vec<HookSpec>,
     pub scheduler: SchedulerConfig,
+    pub notify: NotifyConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
