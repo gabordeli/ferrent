@@ -82,6 +82,7 @@ async fn query(
             offset: 0,
             limit,
             state_filter: 0,
+            label_filter: String::new(),
         })
         .await?;
     let response = response.into_inner();

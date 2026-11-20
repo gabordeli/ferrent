@@ -23,6 +23,7 @@ pub enum TorrentSort {
     DownloadRate,
     UploadRate,
     Queue,
+    Label,
 }
 
 /// Server-side query. `limit == 0` means "no limit".
@@ -32,6 +33,8 @@ pub struct TorrentQuery {
     pub filter: Option<String>,
     /// Restrict to one lifecycle state, using the proto enum code.
     pub state: Option<i32>,
+    /// Restrict to one label name.
+    pub label: Option<String>,
     pub sort: TorrentSort,
     pub descending: bool,
     pub offset: usize,
@@ -271,6 +274,17 @@ impl StateMirror {
     /// paging.
     #[must_use]
     pub fn query_page(&self, query: &TorrentQuery) -> (Vec<TorrentStatus>, usize) {
+        self.query_page_with_labels(query, &BTreeMap::new())
+    }
+
+    /// Like [`Self::query_page`], with the daemon-owned label assignments
+    /// available for filtering and sorting.
+    #[must_use]
+    pub fn query_page_with_labels(
+        &self,
+        query: &TorrentQuery,
+        labels: &BTreeMap<TorrentId, String>,
+    ) -> (Vec<TorrentStatus>, usize) {
         let snapshot = self.snapshot.load_full();
         let needle = query.filter.as_ref().map(|filter| filter.to_lowercase());
 
@@ -283,6 +297,10 @@ impl StateMirror {
                     && query
                         .state
                         .is_none_or(|state| state_code(&status.state) == state)
+                    && query
+                        .label
+                        .as_ref()
+                        .is_none_or(|label| labels.get(&status.id) == Some(label))
             })
             .collect();
 
@@ -294,6 +312,11 @@ impl StateMirror {
                 TorrentSort::DownloadRate => left.download_rate.cmp(&right.download_rate),
                 TorrentSort::UploadRate => left.upload_rate.cmp(&right.upload_rate),
                 TorrentSort::Queue => queue_key(left).cmp(&queue_key(right)),
+                TorrentSort::Label => {
+                    let left = labels.get(&left.id).map(String::as_str).unwrap_or("");
+                    let right = labels.get(&right.id).map(String::as_str).unwrap_or("");
+                    left.cmp(right)
+                }
             };
             let ordering = if query.descending {
                 ordering.reverse()
@@ -535,6 +558,35 @@ mod tests {
     }
 
     #[test]
+    fn label_filter_and_sort_use_the_daemon_assignments() {
+        let mirror = StateMirror::new();
+        mirror.seed(vec![status(1, "Alpha"), status(2, "beta")]);
+        let labels = BTreeMap::from([(1, "zebra".to_owned()), (2, "alpha".to_owned())]);
+
+        let (page, total) = mirror.query_page_with_labels(
+            &TorrentQuery {
+                label: Some("zebra".to_owned()),
+                ..TorrentQuery::default()
+            },
+            &labels,
+        );
+        assert_eq!(total, 1);
+        assert_eq!(page[0].id, 1);
+
+        let page = mirror.query_page_with_labels(
+            &TorrentQuery {
+                sort: TorrentSort::Label,
+                ..TorrentQuery::default()
+            },
+            &labels,
+        );
+        assert_eq!(
+            page.0.iter().map(|status| status.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+    }
+
+    #[test]
     fn query_p95_is_under_50ms_at_4000_torrents() {
         let mirror = StateMirror::new();
         seed_4000(&mirror);
@@ -542,6 +594,7 @@ mod tests {
         let query = TorrentQuery {
             filter: Some("torrent-1".to_owned()),
             state: None,
+            label: None,
             sort: TorrentSort::DownloadRate,
             descending: true,
             offset: 0,
@@ -562,6 +615,39 @@ mod tests {
         durations.sort_unstable();
         let p95 = durations[(durations.len() * 95 / 100).min(durations.len() - 1)];
         println!("state mirror query p95: {p95:?}");
+        assert!(p95 < Duration::from_millis(50), "p95 was {p95:?}");
+    }
+
+    #[test]
+    fn label_query_p95_is_under_50ms_at_4000_torrents() {
+        let mirror = StateMirror::new();
+        seed_4000(&mirror);
+        let labels: BTreeMap<TorrentId, String> = (0..4_000)
+            .map(|id| {
+                let label = if id % 2 == 0 { "even" } else { "odd" };
+                (id, label.to_owned())
+            })
+            .collect();
+        let query = TorrentQuery {
+            label: Some("even".to_owned()),
+            sort: TorrentSort::Label,
+            limit: 50,
+            ..TorrentQuery::default()
+        };
+
+        for _ in 0..10 {
+            let _ = mirror.query_page_with_labels(&query, &labels);
+        }
+        let mut durations: Vec<Duration> = (0..100)
+            .map(|_| {
+                let start = Instant::now();
+                let _ = mirror.query_page_with_labels(&query, &labels);
+                start.elapsed()
+            })
+            .collect();
+        durations.sort_unstable();
+        let p95 = durations[(durations.len() * 95 / 100).min(durations.len() - 1)];
+        println!("label query p95: {p95:?}");
         assert!(p95 < Duration::from_millis(50), "p95 was {p95:?}");
     }
 

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::control::TorrentControl;
+use ferrent_daemon::labels::LabelState;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::{MemoryStore, StateStore};
@@ -13,9 +14,10 @@ use ferrent_engine::{MockEngine, TorrentEngine};
 use ferrent_protocol::client::connect;
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetConfigRequest, GetTorrentRequest, ListTorrentsRequest,
-    PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SortField,
-    TorrentState, WatchRequest,
+    AddTorrentRequest, CreateLabelRequest, DeleteLabelRequest, GetConfigRequest, GetTorrentRequest,
+    Label as ProtoLabel, ListLabelsRequest, ListTorrentsRequest, PauseTorrentRequest,
+    RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SetTorrentLabelRequest,
+    SetTorrentLimitsRequest, SortField, TorrentState, WatchRequest,
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -54,6 +56,7 @@ async fn start_server(token: &str) -> TestServer {
         store,
         ConfigStore::default(),
         TorrentControl::default(),
+        LabelState::default(),
         token,
         std::path::PathBuf::from("."),
         std::path::PathBuf::from("/tmp"),
@@ -85,6 +88,7 @@ fn list_request() -> ListTorrentsRequest {
         offset: 0,
         limit: 10,
         state_filter: 0,
+        label_filter: String::new(),
     }
 }
 
@@ -172,6 +176,147 @@ async fn tls_auth_and_crud() {
         .await
         .expect_err("removed torrent");
     assert_eq!(error.code(), tonic::Code::NotFound);
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn label_crud_assignment_and_filter() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    client
+        .create_label(CreateLabelRequest {
+            label: Some(ProtoLabel {
+                name: "Movies".to_owned(),
+                color: "#1677F2".to_owned(),
+                move_completed_path: "/tmp/movies".to_owned(),
+                download_rate_limit: 1024,
+                upload_rate_limit: 512,
+                connections_limit: 20,
+                upload_slots_limit: 4,
+                match_trackers: Vec::new(),
+                match_name: "^auto-".to_owned(),
+            }),
+        })
+        .await
+        .expect("create label");
+
+    let labels = client
+        .list_labels(ListLabelsRequest {})
+        .await
+        .expect("list labels")
+        .into_inner();
+    assert_eq!(labels.labels.len(), 1);
+    assert_eq!(
+        labels.labels[0].label.as_ref().expect("label").name,
+        "movies"
+    );
+    assert_eq!(labels.labels[0].torrent_count, 0);
+
+    let auto = client
+        .add_torrent(AddTorrentRequest {
+            name: "auto-one".to_owned(),
+            metainfo: vec![1],
+            save_path: "/tmp".to_owned(),
+            total_bytes: 1,
+        })
+        .await
+        .expect("add auto")
+        .into_inner();
+    let other = client
+        .add_torrent(AddTorrentRequest {
+            name: "other".to_owned(),
+            metainfo: vec![2],
+            save_path: "/tmp".to_owned(),
+            total_bytes: 1,
+        })
+        .await
+        .expect("add other")
+        .into_inner();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let auto_torrent = client
+        .get_torrent(GetTorrentRequest { id: auto.id })
+        .await
+        .expect("get auto")
+        .into_inner()
+        .torrent
+        .expect("auto torrent");
+    assert_eq!(auto_torrent.label, "movies");
+
+    client
+        .create_label(CreateLabelRequest {
+            label: Some(ProtoLabel {
+                name: "AutoOther".to_owned(),
+                match_name: "^other$".to_owned(),
+                ..ProtoLabel::default()
+            }),
+        })
+        .await
+        .expect("create auto-other label");
+    let other_torrent = client
+        .get_torrent(GetTorrentRequest { id: other.id })
+        .await
+        .expect("get other")
+        .into_inner()
+        .torrent
+        .expect("other torrent");
+    assert_eq!(other_torrent.label, "autoother");
+
+    client
+        .set_torrent_label(SetTorrentLabelRequest {
+            id: other.id,
+            label: "movies".to_owned(),
+        })
+        .await
+        .expect("set label");
+    let page = client
+        .list_torrents(ListTorrentsRequest {
+            label_filter: "movies".to_owned(),
+            ..list_request()
+        })
+        .await
+        .expect("list label")
+        .into_inner();
+    assert_eq!(page.total, 2);
+    assert!(
+        page.torrents
+            .iter()
+            .all(|torrent| torrent.label == "movies")
+    );
+
+    client
+        .set_torrent_limits(SetTorrentLimitsRequest {
+            id: other.id,
+            download_rate_limit: 2048,
+            upload_rate_limit: 1024,
+            connections_limit: 30,
+            upload_slots_limit: 5,
+            clear: false,
+        })
+        .await
+        .expect("set limits");
+
+    let deleted = client
+        .delete_label(DeleteLabelRequest {
+            name: "movies".to_owned(),
+        })
+        .await
+        .expect("delete label")
+        .into_inner();
+    assert!(deleted.removed);
+    assert_eq!(deleted.cleared_assignments, 2);
+    let other_torrent = client
+        .get_torrent(GetTorrentRequest { id: other.id })
+        .await
+        .expect("get other")
+        .into_inner()
+        .torrent
+        .expect("other torrent");
+    assert!(other_torrent.label.is_empty());
 
     server.shutdown();
 }

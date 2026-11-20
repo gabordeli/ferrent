@@ -15,7 +15,8 @@
 | Engine | per-torrent limitek, `move_storage`, `Moving`, infohash, `Finished`, session/active limitek | `crates/engine/src/{engine,types}.rs` |
 | Események | `Added`, `StateChanged`, `Progress`, `Removed`, `Finished` (pontosan egyszer) | `crates/engine/src/types.rs` |
 | GUI | virtualizált tábla, Details fülek, szerverkezelő; Settings modal 560×380 stub | `crates/gui/src/main.rs` |
-| Label / infohash / move storage / web | nincs | – |
+| Label / infohash / move storage | label CRUD + assignment + policy; infohash; move storage | `crates/daemon/src/labels.rs`, `crates/engine/src/types.rs` |
+| Web | nincs | – |
 
 A Settings gomb és a modal már létezik, de üres: ez a port természetes control plane-je.
 
@@ -85,9 +86,9 @@ A Settings gomb és a modal már létezik, de üres: ez a port természetes cont
 
 ## 3. Célarchitektúra: öt közös alap
 
-1. **Config service** – egy `config.toml` szekciókkal + redb a futásidejű állapotnak; `GetConfig`/`SetConfig` `revision`-nal, atomikus apply, hot reload; hibán a régi snapshot marad. A token redacted. A GUI és a CLI ugyanazt használja. **Kész (2026-11-20):** tipizált séma, env-layering, revision + atomic swap + atomikus fájlírás, RPC és CLI; a redb runtime state a label/watch feladatoknál jön.
+1. **Config service** – egy `config.toml` szekciókkal + redb a futásidejű állapotnak; `GetConfig`/`SetConfig` `revision`-nal, atomikus apply, hot reload; hibán a régi snapshot marad. A token redacted. A GUI és a CLI ugyanazt használja. **Kész (2026-11-20):** tipizált séma, env-layering, revision + atomic swap + atomikus fájlírás, RPC és CLI; a label-definíciók/hozzárendelések redb-ben, a watch/scheduler állapot később.
 2. **Pause authority** – `pause_reasons: {USER, SCHEDULER, DISK_GUARD, RATIO}`; effektív paused = bármelyik ok aktív. Az engine csak az effektív váltást kapja. Restartnál a `USER` perzisztált, a tranziens reasonök újraszámolódnak. **Kész (2026-11-20):** `TorrentControl` + reason-bitset, perzisztált `paused` kulcs, bulk `set_many`, `Torrent.pause_reasons`, ADR 0007.
-3. **Effektív beállítás-feloldás** – torrent override > label policy > session default; a label hozzárendelése/levétele csak újraszámol. A move-on-complete a label policy része; a DiskGuard a célt is látja.
+3. **Effektív beállítás-feloldás** – torrent override > label policy > session default; a label hozzárendelése/levétele csak újraszámol. A move-on-complete a label policy része; a DiskGuard a célt is látja. **Kész (2026-11-20):** a label-definíciók és -hozzárendelések redb-ben élnek (a CRUD nem írja újra a teljes `config.toml`-t), `Torrent.label`, `ListTorrents.label_filter`, `SortField.LABEL`, auto-match és `Finished` → move; ADR 0008.
 4. **Esemény-journal** – perzisztált, sorrendezett domain események (added/finished/removed/error/disk_low/scheduler_changed) + kurzor. Erre épül a hook, a notifications outbox, az Activity fül és a web SSE. Az engine `Finished` eseménye pontosan egyszer jön.
 5. **Infohash** – `TorrentStatus.infohash`, perzisztált rekord, proto `Torrent.infohash`; duplicate add → `AlreadyExists{id}`, a daemon a meglévő ID-t adja vissza.
 
@@ -95,7 +96,7 @@ A Settings gomb és a modal már létezik, de üres: ez a port természetes cont
 
 | Funkció | Adatmodell / RPC | Daemon / engine | GUI |
 |---|---|---|---|
-| Labels | `Label{name,color,policy}`, `Torrent.label`, `SetLabel`, `ListLabels`, CRUD; `ListTorrents.label_filter`, `SortField.LABEL` | effektív feloldás; labelváltásnál limit/move újraszámol; Finished → move | label oszlop, sidebar szűrő, context menü, Settings → Labels |
+| Labels | `Label{name,color,policy}`, `Torrent.label`, `SetLabel`, `ListLabels`, CRUD; `ListTorrents.label_filter`, `SortField.LABEL` | effektív feloldás; labelváltásnál limit/move újraszámol; Finished → move | label oszlop, sidebar szűrő, context menü, Settings → Labels (a GUI oszlop M4-T5) |
 | AutoAdd | `WatchDir{path,enabled,save_path,label,add_paused,queue,action,patterns}` + CRUD/scan | inotify + 30 s reconcile; infohash dedupe; perzisztált invalid retry; post-add action; opcionális disk gate | Settings → AutoAdd + „Scan now” + státusz |
 | Execute | `Hook{event,command,args,timeout,concurrency,enabled}` + CRUD | journal + kurzor; argv placeholderek; env `FERRENT_*`; timeout → process group kill; max 4 párhuzamos | Settings → Hooks; Activity |
 | Notifications | `Channel{kind,config,events,enabled}`, `Rule{events,label,quiet_hours,channels}`; outbox | Telegram Bot API + webhook; retry/backoff; dedupe; digest/coalescing; secrets redacted | Settings → Notifications, „Test” |

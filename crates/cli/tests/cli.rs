@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::control::TorrentControl;
+use ferrent_daemon::labels::LabelState;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::{MemoryStore, StateStore};
@@ -68,6 +69,7 @@ async fn start_server() -> TestServer {
         store,
         ConfigStore::default(),
         TorrentControl::default(),
+        LabelState::default(),
         "secret",
         PathBuf::from("."),
         PathBuf::from("/tmp"),

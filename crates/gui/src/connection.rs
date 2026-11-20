@@ -109,6 +109,7 @@ pub async fn list(client: &AuthClient, query: &ListQuery) -> Result<Page, String
             offset: query.offset,
             limit: query.limit,
             state_filter: query.state.unwrap_or(0),
+            label_filter: String::new(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;

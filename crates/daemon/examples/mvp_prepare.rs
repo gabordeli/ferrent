@@ -145,6 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             metainfo: metainfo.clone(),
             resume_data: resume.remove(id),
             paused_by_user: false,
+            label: None,
         })
         .collect();
     save_torrents(&mut store, &records)?;

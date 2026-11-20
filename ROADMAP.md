@@ -376,13 +376,13 @@
 
 **Acceptance**
 
-- [ ] egy torrent egy label (v1); label törlése → No Label.
-- [ ] effektív limit = torrent override > label > session; levételkor a kézi override megmarad.
-- [ ] `ListTorrents` label szűrő/rendezés; 4 000 torrent p95 < 50 ms.
-- [ ] `Finished` → `move_completed_path`; siker/hiba event; a DiskGuard látja a célt.
-- [ ] auto-match: tracker substring + név regex; új torrentnél és label létrehozásakor is lefut.
+- [x] egy torrent egy label (v1); label törlése → No Label.
+- [x] effektív limit = torrent override > label > session; levételkor a kézi override megmarad.
+- [x] `ListTorrents` label szűrő/rendezés; 4 000 torrent p95 < 50 ms (mért: `label_query_p95...` teszt).
+- [x] `Finished` → `move_completed_path`; siker/hiba event; a DiskGuard látja a célt.
+- [x] auto-match: tracker substring + név regex; új torrentnél és label létrehozásakor is lefut.
 
-**Files:** `crates/daemon/src/labels.rs`, `crates/daemon/src/policy.rs`, `crates/daemon/src/persist.rs`, `crates/daemon/src/state.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `tests/`
+**Files:** `crates/daemon/src/labels.rs`, `crates/daemon/src/persist.rs`, `crates/daemon/src/state.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `docs/adr/0008-labels.md`, `tests/`
 
 ### M4-T5 – GUI Settings workbench + label UI 🤖
 

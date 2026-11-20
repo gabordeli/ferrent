@@ -43,7 +43,8 @@ ferrent-cli config set <file> [--revision N]
 
 - `add`: a `.torrent` fájl nyers bájtjait küldi; a `--save-path` a daemon
   hostján értelmezett útvonal.
-- `list`: szerveroldali szűrés/rendezés/lapozás; `--limit 0` = nincs limit.
+- `list`: szerveroldali szűrés/rendezés/lapozás; `--limit 0` = nincs limit;
+  `--label <name>` labelre szűr; `--sort label` label szerint rendez.
 - `watch`: delta-stream; `Ctrl-C` tisztán leáll; `--count N` N esemény után
   kilép.
 - `config get`: a daemon config TOML dokumentuma és a revízió; `--json`-nal
@@ -61,7 +62,8 @@ ferrent-cli config set <file> [--revision N]
 - `pause` / `resume` / `remove`: `{"ok": true, "id": 0}`
 - `config get`: `{"revision": 0, "env_locked": ["bind"], "toml": "..."}`
 - `config set`: `{"revision": 1}`
-- `<torrent>`: `{"id", "name", "state", "progress", "total_bytes",
+- `<torrent>`: `{"id", "infohash", "name", "save_path", "queue_position",
+  "pause_reasons", "label", "state", "progress", "total_bytes",
   "download_rate", "upload_rate", "error"}`
 - `watch`: soronként egy objektum:
   - `{"event":"added","torrent":<torrent>}`

@@ -15,6 +15,7 @@ const SAVE_PATH: &str = "save_path";
 const METAINFO: &str = "metainfo";
 const FAST_RESUME: &str = "fastresume";
 const PAUSED: &str = "paused";
+const LABEL: &str = "label";
 /// Single record holding the download queue order (ids, little endian u64).
 const QUEUE_ORDER: &str = "queue:order";
 
@@ -52,6 +53,8 @@ pub struct PersistedTorrent {
     pub resume_data: Option<Vec<u8>>,
     /// Manual pause survives a daemon restart; scheduler/guard reasons do not.
     pub paused_by_user: bool,
+    /// Label assignment; `None` means unlabelled.
+    pub label: Option<String>,
 }
 
 impl PersistedTorrent {
@@ -99,6 +102,10 @@ pub fn save_torrents(
             key: key(torrent.id, PAUSED),
             value: vec![u8::from(torrent.paused_by_user)],
         });
+        ops.push(StoreOp::Put {
+            key: key(torrent.id, LABEL),
+            value: torrent.label.clone().unwrap_or_default().into_bytes(),
+        });
         if let Some(data) = &torrent.resume_data {
             ops.push(StoreOp::Put {
                 key: key(torrent.id, FAST_RESUME),
@@ -136,9 +143,21 @@ pub fn save_paused(
     }])
 }
 
+/// Saves (or clears) the label assignment for one torrent.
+pub fn save_torrent_label(
+    store: &mut dyn StateStore,
+    id: TorrentId,
+    label: Option<&str>,
+) -> Result<(), StoreError> {
+    store.batch(vec![StoreOp::Put {
+        key: key(id, LABEL),
+        value: label.unwrap_or_default().as_bytes().to_vec(),
+    }])
+}
+
 /// Deletes all stored keys for one torrent.
 pub fn remove_torrent(store: &mut dyn StateStore, id: TorrentId) -> Result<(), StoreError> {
-    let ops = [NAME, SAVE_PATH, METAINFO, FAST_RESUME, PAUSED]
+    let ops = [NAME, SAVE_PATH, METAINFO, FAST_RESUME, PAUSED, LABEL]
         .into_iter()
         .map(|field| StoreOp::Delete {
             key: key(id, field),
@@ -177,6 +196,15 @@ pub fn load_torrents(store: &dyn StateStore) -> Result<Vec<PersistedTorrent>, St
             METAINFO => record.metainfo = Some(value),
             FAST_RESUME => record.resume_data = Some(value),
             PAUSED => record.paused_by_user = value.first().is_some_and(|byte| *byte != 0),
+            LABEL => {
+                record.label = if value.is_empty() {
+                    None
+                } else {
+                    Some(String::from_utf8(value).map_err(|error| {
+                        StoreError::Backend(format!("invalid label for torrent {id}: {error}"))
+                    })?)
+                };
+            }
             _ => {}
         }
     }
@@ -191,6 +219,7 @@ pub fn load_torrents(store: &dyn StateStore) -> Result<Vec<PersistedTorrent>, St
                 metainfo,
                 resume_data: record.resume_data,
                 paused_by_user: record.paused_by_user,
+                label: record.label,
             });
         }
     }
@@ -204,6 +233,7 @@ struct PartialRecord {
     metainfo: Option<Vec<u8>>,
     resume_data: Option<Vec<u8>>,
     paused_by_user: bool,
+    label: Option<String>,
 }
 
 fn key(id: TorrentId, field: &str) -> String {
@@ -232,6 +262,7 @@ mod tests {
             metainfo: vec![1, 2, 3],
             resume_data: None,
             paused_by_user: false,
+            label: None,
         }
     }
 
@@ -251,9 +282,11 @@ mod tests {
 
         save_fastresumes(&mut store, &[(1, b"resume".to_vec())]).expect("save resume");
         save_paused(&mut store, 1, true).expect("save paused");
+        save_torrent_label(&mut store, 1, Some("movies")).expect("save label");
         let loaded = load_torrents(&store).expect("load resume");
         assert_eq!(loaded[1].resume_data.as_deref(), Some(b"resume".as_slice()));
         assert!(loaded[1].paused_by_user);
+        assert_eq!(loaded[1].label.as_deref(), Some("movies"));
 
         remove_torrent(&mut store, 0).expect("remove 0");
         let loaded = load_torrents(&store).expect("load after remove");

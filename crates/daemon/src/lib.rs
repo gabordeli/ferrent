@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod control;
+pub mod labels;
 pub mod persist;
 pub mod rpc;
 pub mod state;

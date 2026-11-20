@@ -2,26 +2,30 @@
 
 pub mod tls;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use ferrent_engine::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentEngine, TorrentId, TorrentSource,
-    TorrentState as EngineState, TorrentStatus,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentEngine, TorrentId, TorrentLimits,
+    TorrentSource, TorrentState as EngineState, TorrentStatus,
 };
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTorrentResponse, ConfigChanged, GetConfigRequest, GetConfigResponse,
-    GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse,
-    GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse,
-    GetTorrentTrackersRequest, GetTorrentTrackersResponse, ListTorrentsRequest,
-    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
-    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
-    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse, SetConfigRequest,
-    SetConfigResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer,
-    TorrentState, TorrentTracker, WatchRequest, WatchResponse,
+    AddTorrentRequest, AddTorrentResponse, ConfigChanged, CreateLabelRequest, DeleteLabelRequest,
+    DeleteLabelResponse, GetConfigRequest, GetConfigResponse, GetStatusRequest, GetStatusResponse,
+    GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
+    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
+    GetTorrentTrackersResponse, Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest,
+    ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest,
+    MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
+    QueueDirection as ProtoQueueDirection, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
+    ResumeTorrentRequest, ResumeTorrentResponse, SetConfigRequest, SetConfigResponse,
+    SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
+    SetTorrentLimitsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
+    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -35,6 +39,7 @@ use tonic::{Request, Response, Status};
 
 use crate::config::{ConfigError, ConfigStore};
 use crate::control::{PauseReason, TorrentControl};
+use crate::labels::{self, Label as DomainLabel, LabelState};
 use crate::persist::{self, PersistedTorrent};
 use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror, state_code};
 use crate::store::StateStore;
@@ -95,6 +100,7 @@ pub struct AppState {
     config: ConfigStore,
     config_watch: broadcast::Sender<u64>,
     control: Arc<Mutex<TorrentControl>>,
+    labels: Arc<Mutex<LabelState>>,
     store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
     data_dir: PathBuf,
@@ -111,6 +117,7 @@ impl AppState {
         store: Box<dyn StateStore>,
         config: ConfigStore,
         control: TorrentControl,
+        labels: LabelState,
         token: impl Into<String>,
         data_dir: PathBuf,
         download_dir: PathBuf,
@@ -123,6 +130,7 @@ impl AppState {
             config,
             config_watch,
             control: Arc::new(Mutex::new(control)),
+            labels: Arc::new(Mutex::new(labels)),
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
             data_dir,
@@ -246,6 +254,138 @@ impl FerrentService {
         .map_err(|error| Status::internal(error.to_string()))?
         .map_err(|error| Status::internal(format!("state store: {error}")))
     }
+
+    async fn apply_limits(&self, id: TorrentId) -> Result<(), Status> {
+        let limits = {
+            let labels = self.state.labels.lock().expect("label state poisoned");
+            labels.limits(id)
+        };
+        self.with_engine(move |engine| engine.set_torrent_limits(id, limits))
+            .await
+    }
+
+    async fn apply_limits_many(&self, ids: &[TorrentId]) -> Result<(), Status> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let limits: Vec<(TorrentId, TorrentLimits)> = {
+            let labels = self.state.labels.lock().expect("label state poisoned");
+            ids.iter().map(|id| (*id, labels.limits(*id))).collect()
+        };
+        let engine = Arc::clone(&self.state.engine);
+        tokio::task::spawn_blocking(move || {
+            let mut engine = engine.lock().expect("engine mutex poisoned");
+            for (id, limits) in limits {
+                let _ = engine.set_torrent_limits(id, limits);
+            }
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))
+    }
+
+    async fn apply_label_limits(&self, name: &str) -> Result<(), Status> {
+        let ids: Vec<TorrentId> = {
+            let labels = self.state.labels.lock().expect("label state poisoned");
+            labels
+                .assignments()
+                .into_iter()
+                .filter(|(_, label)| label == name)
+                .map(|(id, _)| id)
+                .collect()
+        };
+        self.apply_limits_many(&ids).await
+    }
+
+    async fn match_and_assign(
+        &self,
+        id: TorrentId,
+        name: &str,
+        trackers: &[String],
+    ) -> Result<Option<String>, Status> {
+        let matched = {
+            let labels = self.state.labels.lock().expect("label state poisoned");
+            labels.match_label(name, trackers)
+        };
+        let Some(label) = matched else {
+            return Ok(None);
+        };
+        {
+            let mut labels = self.state.labels.lock().expect("label state poisoned");
+            labels
+                .assign(id, Some(label.clone()))
+                .map_err(Status::invalid_argument)?;
+        }
+        let persisted = label.clone();
+        self.persist(move |store| persist::save_torrent_label(store, id, Some(persisted.as_str())))
+            .await?;
+        self.apply_limits(id).await?;
+        Ok(Some(label))
+    }
+
+    async fn apply_auto_labels(&self) -> Result<usize, Status> {
+        let (has_matchers, assigned) = {
+            let labels = self.state.labels.lock().expect("label state poisoned");
+            (labels.has_matchers(), labels.assignments())
+        };
+        if !has_matchers {
+            return Ok(0);
+        }
+
+        let candidates: Vec<(TorrentId, String)> = self
+            .state
+            .mirror
+            .query(&TorrentQuery::default())
+            .into_iter()
+            .filter(|status| !assigned.contains_key(&status.id))
+            .map(|status| (status.id, status.name))
+            .collect();
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+
+        let ids: Vec<TorrentId> = candidates.iter().map(|(id, _)| *id).collect();
+        let engine = Arc::clone(&self.state.engine);
+        let trackers: Vec<(TorrentId, Vec<String>)> = tokio::task::spawn_blocking(move || {
+            let mut engine = engine.lock().expect("engine mutex poisoned");
+            ids.into_iter()
+                .map(|id| {
+                    let urls = engine
+                        .trackers(id)
+                        .map(|items| items.into_iter().map(|tracker| tracker.url).collect())
+                        .unwrap_or_default();
+                    (id, urls)
+                })
+                .collect()
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?;
+        let tracker_map: BTreeMap<TorrentId, Vec<String>> = trackers.into_iter().collect();
+
+        let mut matched = Vec::new();
+        {
+            let mut labels = self.state.labels.lock().expect("label state poisoned");
+            for (id, name) in candidates {
+                let urls = tracker_map.get(&id).cloned().unwrap_or_default();
+                if let Some(label) = labels.match_label(&name, &urls) {
+                    labels
+                        .assign(id, Some(label.clone()))
+                        .expect("matched label exists");
+                    matched.push((id, label));
+                }
+            }
+        }
+        for (id, label) in &matched {
+            let persisted = label.clone();
+            let id = *id;
+            self.persist(move |store| {
+                persist::save_torrent_label(store, id, Some(persisted.as_str()))
+            })
+            .await?;
+        }
+        let ids: Vec<TorrentId> = matched.iter().map(|(id, _)| *id).collect();
+        self.apply_limits_many(&ids).await?;
+        Ok(matched.len())
+    }
 }
 
 #[tonic::async_trait]
@@ -265,6 +405,7 @@ impl Ferrent for FerrentService {
             resume_data: None,
         };
         let name = spec.name.clone();
+        let match_name = name.clone();
         let save_path = spec.save_path.clone();
         let metainfo = match &spec.source {
             TorrentSource::Metainfo(bytes) => bytes.clone(),
@@ -273,13 +414,22 @@ impl Ferrent for FerrentService {
         let engine = Arc::clone(&self.state.engine);
         let result = tokio::task::spawn_blocking(move || {
             let mut engine = engine.lock().expect("engine mutex poisoned");
-            engine.add_torrent(spec)
+            match engine.add_torrent(spec) {
+                Ok(id) => {
+                    let trackers = engine
+                        .trackers(id)
+                        .map(|items| items.into_iter().map(|tracker| tracker.url).collect())
+                        .unwrap_or_default();
+                    Ok((id, trackers))
+                }
+                Err(error) => Err(error),
+            }
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))?;
-        let (id, duplicate) = match result {
-            Ok(id) => (id, false),
-            Err(EngineError::AlreadyExists { id }) => (id, true),
+        let (id, trackers, duplicate) = match result {
+            Ok((id, trackers)) => (id, trackers, false),
+            Err(EngineError::AlreadyExists { id }) => (id, Vec::new(), true),
             Err(error) => return Err(engine_status(error)),
         };
         if !duplicate {
@@ -290,9 +440,11 @@ impl Ferrent for FerrentService {
                 metainfo,
                 resume_data: None,
                 paused_by_user: false,
+                label: None,
             };
             self.persist(move |store| persist::save_torrent(store, &persisted))
                 .await?;
+            self.match_and_assign(id, &match_name, &trackers).await?;
         }
         Ok(Response::new(AddTorrentResponse { id, duplicate }))
     }
@@ -365,6 +517,11 @@ impl Ferrent for FerrentService {
             .lock()
             .expect("pause control mutex poisoned")
             .clear(id);
+        self.state
+            .labels
+            .lock()
+            .expect("label state poisoned")
+            .remove_torrent(id);
         self.persist(move |store| persist::remove_torrent(store, id))
             .await?;
         Ok(Response::new(RemoveTorrentResponse {}))
@@ -382,6 +539,139 @@ impl Ferrent for FerrentService {
             return Err(Status::not_found(format!("torrent {id}")));
         }
         Ok(Response::new(MoveTorrentResponse {}))
+    }
+
+    async fn list_labels(
+        &self,
+        request: Request<ListLabelsRequest>,
+    ) -> Result<Response<ListLabelsResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let labels = {
+            let state = self.state.labels.lock().expect("label state poisoned");
+            let counts = state.counts();
+            state
+                .list()
+                .into_iter()
+                .map(|label| LabelEntry {
+                    torrent_count: counts.get(&label.name).copied().unwrap_or(0),
+                    label: Some(label_to_proto(&label)),
+                })
+                .collect()
+        };
+        Ok(Response::new(ListLabelsResponse { labels }))
+    }
+
+    async fn create_label(
+        &self,
+        request: Request<CreateLabelRequest>,
+    ) -> Result<Response<LabelResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let label = label_from_proto(request.into_inner().label.unwrap_or_default())?;
+        {
+            let mut state = self.state.labels.lock().expect("label state poisoned");
+            state
+                .upsert(label.clone())
+                .map_err(Status::invalid_argument)?;
+        }
+        let persisted = label.clone();
+        self.persist(move |store| labels::save_label(store, &persisted))
+            .await?;
+        self.apply_auto_labels().await?;
+        self.apply_label_limits(&label.name).await?;
+        Ok(Response::new(LabelResponse {
+            label: Some(label_to_proto(&label)),
+        }))
+    }
+
+    async fn update_label(
+        &self,
+        request: Request<UpdateLabelRequest>,
+    ) -> Result<Response<LabelResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let label = label_from_proto(request.into_inner().label.unwrap_or_default())?;
+        {
+            let mut state = self.state.labels.lock().expect("label state poisoned");
+            state
+                .upsert(label.clone())
+                .map_err(Status::invalid_argument)?;
+        }
+        let persisted = label.clone();
+        self.persist(move |store| labels::save_label(store, &persisted))
+            .await?;
+        self.apply_auto_labels().await?;
+        self.apply_label_limits(&label.name).await?;
+        Ok(Response::new(LabelResponse {
+            label: Some(label_to_proto(&label)),
+        }))
+    }
+
+    async fn delete_label(
+        &self,
+        request: Request<DeleteLabelRequest>,
+    ) -> Result<Response<DeleteLabelResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let name = DomainLabel::normalize_name(&request.into_inner().name);
+        let affected = {
+            let mut state = self.state.labels.lock().expect("label state poisoned");
+            state.remove(&name)
+        };
+        let persisted_name = name.clone();
+        self.persist(move |store| labels::delete_label(store, &persisted_name))
+            .await?;
+        for id in &affected {
+            let id = *id;
+            self.persist(move |store| persist::save_torrent_label(store, id, None))
+                .await?;
+        }
+        self.apply_limits_many(&affected).await?;
+        Ok(Response::new(DeleteLabelResponse {
+            removed: true,
+            cleared_assignments: affected.len() as u32,
+        }))
+    }
+
+    async fn set_torrent_label(
+        &self,
+        request: Request<SetTorrentLabelRequest>,
+    ) -> Result<Response<SetTorrentLabelResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let id = request.id;
+        let name = DomainLabel::normalize_name(&request.label);
+        let label = (!name.is_empty()).then_some(name);
+        {
+            let mut state = self.state.labels.lock().expect("label state poisoned");
+            state
+                .assign(id, label.clone())
+                .map_err(Status::invalid_argument)?;
+        }
+        let persisted = label.clone();
+        self.persist(move |store| persist::save_torrent_label(store, id, persisted.as_deref()))
+            .await?;
+        self.apply_limits(id).await?;
+        Ok(Response::new(SetTorrentLabelResponse {
+            label: label.unwrap_or_default(),
+        }))
+    }
+
+    async fn set_torrent_limits(
+        &self,
+        request: Request<SetTorrentLimitsRequest>,
+    ) -> Result<Response<SetTorrentLimitsResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let limits = (!request.clear).then_some(TorrentLimits {
+            download_rate_limit: request.download_rate_limit,
+            upload_rate_limit: request.upload_rate_limit,
+            connections_limit: request.connections_limit,
+            upload_slots_limit: request.upload_slots_limit,
+        });
+        {
+            let mut state = self.state.labels.lock().expect("label state poisoned");
+            state.set_override(request.id, limits);
+        }
+        self.apply_limits(request.id).await?;
+        Ok(Response::new(SetTorrentLimitsResponse {}))
     }
 
     async fn get_torrent(
@@ -403,6 +693,14 @@ impl Ferrent for FerrentService {
             .expect("pause control mutex poisoned")
             .reasons(id)
             .bits();
+        torrent.label = self
+            .state
+            .labels
+            .lock()
+            .expect("label state poisoned")
+            .label(id)
+            .unwrap_or_default()
+            .to_owned();
         Ok(Response::new(GetTorrentResponse {
             torrent: Some(torrent),
         }))
@@ -417,12 +715,19 @@ impl Ferrent for FerrentService {
         let query = TorrentQuery {
             filter: (!request.filter.is_empty()).then_some(request.filter),
             state: (request.state_filter != 0).then_some(request.state_filter),
+            label: (!request.label_filter.is_empty()).then_some(request.label_filter),
             sort: sort_from_proto(request.sort),
             descending: request.descending,
             offset: request.offset as usize,
             limit: request.limit as usize,
         };
-        let (torrents, total) = self.state.mirror.query_page(&query);
+        let labels = self
+            .state
+            .labels
+            .lock()
+            .expect("label state poisoned")
+            .assignments();
+        let (torrents, total) = self.state.mirror.query_page_with_labels(&query, &labels);
         let reasons = self
             .state
             .control
@@ -436,6 +741,7 @@ impl Ferrent for FerrentService {
                     let id = status.id;
                     let mut torrent = to_proto_torrent(status);
                     torrent.pause_reasons = reasons.get(&id).copied().unwrap_or_default().bits();
+                    torrent.label = labels.get(&id).cloned().unwrap_or_default();
                     torrent
                 })
                 .collect(),
@@ -598,6 +904,7 @@ pub async fn serve(
     state: Arc<AppState>,
     tls: &TlsMaterial,
 ) -> Result<(), tonic::transport::Error> {
+    spawn_label_mover(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),
@@ -607,6 +914,49 @@ pub async fn serve(
         .add_service(FerrentServer::new(FerrentService::new(state)))
         .serve_with_incoming(TcpListenerStream::new(listener))
         .await
+}
+
+/// Moves finished torrents to their label's `move_completed_path`.
+fn spawn_label_mover(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut events = state.watch.subscribe();
+        loop {
+            match events.recv().await {
+                Ok(EngineEvent::Finished { id }) => {
+                    let target = {
+                        let labels = state.labels.lock().expect("label state poisoned");
+                        labels.move_target(id)
+                    };
+                    let Some(target) = target else {
+                        continue;
+                    };
+                    if state
+                        .mirror
+                        .get(id)
+                        .is_some_and(|status| status.save_path == target)
+                    {
+                        continue;
+                    }
+                    let engine = Arc::clone(&state.engine);
+                    let result = tokio::task::spawn_blocking(move || {
+                        let mut engine = engine.lock().expect("engine mutex poisoned");
+                        engine.move_storage(id, target)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => eprintln!("label move failed for torrent {id}: {error}"),
+                        Err(error) => eprintln!("label move task failed for torrent {id}: {error}"),
+                    }
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    eprintln!("label mover lagged by {skipped} events");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 fn engine_status(error: EngineError) -> Status {
@@ -680,6 +1030,7 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
         error,
         queue_position: status.queue_position,
         pause_reasons: 0,
+        label: String::new(),
     }
 }
 
@@ -709,6 +1060,43 @@ fn to_proto_watch(event: EngineEvent) -> WatchResponse {
     WatchResponse { event: Some(event) }
 }
 
+fn label_to_proto(label: &DomainLabel) -> ProtoLabel {
+    ProtoLabel {
+        name: label.name.clone(),
+        color: label.color.clone(),
+        move_completed_path: label
+            .move_completed_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        download_rate_limit: label.download_rate_limit,
+        upload_rate_limit: label.upload_rate_limit,
+        connections_limit: label.connections_limit,
+        upload_slots_limit: label.upload_slots_limit,
+        match_trackers: label.match_trackers.clone(),
+        match_name: label.match_name.clone().unwrap_or_default(),
+    }
+}
+
+fn label_from_proto(label: ProtoLabel) -> Result<DomainLabel, Status> {
+    let move_completed_path = label.move_completed_path.trim();
+    let match_name = label.match_name.trim();
+    let label = DomainLabel {
+        name: DomainLabel::normalize_name(&label.name),
+        color: label.color.trim().to_owned(),
+        move_completed_path: (!move_completed_path.is_empty())
+            .then(|| PathBuf::from(move_completed_path)),
+        download_rate_limit: label.download_rate_limit,
+        upload_rate_limit: label.upload_rate_limit,
+        connections_limit: label.connections_limit,
+        upload_slots_limit: label.upload_slots_limit,
+        match_trackers: label.match_trackers,
+        match_name: (!match_name.is_empty()).then(|| match_name.to_owned()),
+    };
+    label.validate().map_err(Status::invalid_argument)?;
+    Ok(label)
+}
+
 fn sort_from_proto(value: i32) -> TorrentSort {
     match SortField::try_from(value).unwrap_or(SortField::Unspecified) {
         SortField::Name => TorrentSort::Name,
@@ -716,6 +1104,7 @@ fn sort_from_proto(value: i32) -> TorrentSort {
         SortField::DownloadRate => TorrentSort::DownloadRate,
         SortField::UploadRate => TorrentSort::UploadRate,
         SortField::Queue => TorrentSort::Queue,
+        SortField::Label => TorrentSort::Label,
         SortField::Id | SortField::Unspecified => TorrentSort::Id,
     }
 }
@@ -742,6 +1131,7 @@ pub fn spawn_mirror(
 mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use ferrent_engine::{AddTorrent, MockEngine, TorrentEngine, TorrentSource};
     use tokio::sync::broadcast;
@@ -749,6 +1139,7 @@ mod tests {
     use super::*;
     use crate::config::ConfigStore;
     use crate::control::{PauseReason, TorrentControl};
+    use crate::labels::{Label, LabelState};
     use crate::state::StateMirror;
     use crate::store::MemoryStore;
 
@@ -778,6 +1169,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn label_mover_moves_a_finished_torrent() {
+        let mut engine = MockEngine::new();
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "movie".to_owned(),
+                total_bytes: 1,
+                source: TorrentSource::Magnet("magnet:?xt=urn:btih:movie".to_owned()),
+                save_path: PathBuf::from("/tmp/source"),
+                resume_data: None,
+            })
+            .expect("add");
+        let mut labels = LabelState::default();
+        let target = PathBuf::from("/tmp/target");
+        labels
+            .upsert(Label {
+                name: "movies".to_owned(),
+                move_completed_path: Some(target.clone()),
+                ..Label::default()
+            })
+            .expect("label");
+        labels
+            .assign(id, Some("movies".to_owned()))
+            .expect("assign");
+        let (watch, _) = broadcast::channel(8);
+        let state = Arc::new(AppState::new(
+            Box::new(engine),
+            Arc::new(StateMirror::new()),
+            watch,
+            Box::new(MemoryStore::new()),
+            ConfigStore::default(),
+            TorrentControl::default(),
+            labels,
+            "token",
+            PathBuf::from("."),
+            PathBuf::from("/tmp"),
+        ));
+        spawn_label_mover(Arc::clone(&state));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        state
+            .watch
+            .send(EngineEvent::Finished { id })
+            .expect("finished event");
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            let status = state
+                .engine
+                .lock()
+                .expect("engine")
+                .status(id)
+                .expect("status");
+            if status.save_path == target {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "label mover did not move the payload: {status:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
     async fn bulk_reasons_pause_and_resume_through_the_engine() {
         let mut engine = MockEngine::new();
         let id = engine
@@ -797,6 +1251,7 @@ mod tests {
             Box::new(MemoryStore::new()),
             ConfigStore::default(),
             TorrentControl::default(),
+            LabelState::default(),
             "token",
             PathBuf::from("."),
             PathBuf::from("/tmp"),

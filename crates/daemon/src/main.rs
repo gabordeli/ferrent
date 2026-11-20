@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use ferrent_daemon::config::{ConfigStore, ResolvedConfig, read_token_file};
 use ferrent_daemon::control::TorrentControl;
+use ferrent_daemon::labels::LabelState;
 use ferrent_daemon::persist;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::{StateMirror, TorrentQuery};
@@ -91,6 +92,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let mut persisted = persist::load_torrents(&store)?;
     let queue_order = persist::load_queue_order(&store)?;
     order_for_restore(&mut persisted, &queue_order);
+    let labels = LabelState::load(&store, &persisted)?;
     let restored_count = persisted.len();
 
     #[cfg(feature = "libtorrent")]
@@ -131,6 +133,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         store,
         config_store,
         control,
+        labels,
         token,
         data_dir.clone(),
         download_dir.clone(),

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::control::TorrentControl;
+use ferrent_daemon::labels::LabelState;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::MemoryStore;
@@ -76,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(MemoryStore::new()),
         ConfigStore::default(),
         TorrentControl::default(),
+        LabelState::default(),
         "secret",
         data_dir.clone(),
         data_dir.join("downloads"),

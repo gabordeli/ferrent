@@ -82,6 +82,9 @@ enum Command {
         /// Page size; zero means no limit.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Restrict to one label.
+        #[arg(long)]
+        label: Option<String>,
     },
     /// Show one torrent.
     Show {
@@ -148,6 +151,7 @@ enum SortArg {
     Progress,
     Download,
     Upload,
+    Label,
 }
 
 impl SortArg {
@@ -158,6 +162,7 @@ impl SortArg {
             Self::Progress => SortField::Progress as i32,
             Self::Download => SortField::DownloadRate as i32,
             Self::Upload => SortField::UploadRate as i32,
+            Self::Label => SortField::Label as i32,
         }
     }
 }
@@ -249,6 +254,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             desc,
             offset,
             limit,
+            label,
         } => {
             let response = client
                 .list_torrents(ListTorrentsRequest {
@@ -258,6 +264,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     offset,
                     limit,
                     state_filter: 0,
+                    label_filter: label.unwrap_or_default(),
                 })
                 .await?
                 .into_inner();
