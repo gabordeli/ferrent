@@ -59,14 +59,14 @@ if git diff --quiet -- Cargo.toml; then
 else
     git add Cargo.toml
     git commit -q -m "chore(release): $version [skip ci]"
-    git push -q "$remote" "HEAD:${CI_DEFAULT_BRANCH:-main}"
+    git push -q -o ci.skip "$remote" "HEAD:${CI_DEFAULT_BRANCH:-main}"
 fi
 commit=$(git rev-parse HEAD)
 
 # The tag goes through git, so a PAT with write_repository is enough (the
 # tags API additionally needs the api scope).
 git tag -a "$tag" -m "Release $tag" "$commit"
-git push -q "$remote" "refs/tags/$tag"
+git push -q -o ci.skip "$remote" "refs/tags/$tag"
 
 mkdir -p tmp
 cat >tmp/release.env <<EOF

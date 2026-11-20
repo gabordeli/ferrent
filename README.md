@@ -77,7 +77,7 @@ A GUI-hoz ilyenkor `https://localhost:50051` és
 telepített változat configja `/etc/ferrent/config.toml`, a tokenje
 `/etc/ferrent/token`.
 
-## Jelenlegi állapot (v0.1.0 / MVP)
+## Jelenlegi állapot (MVP, v0.1.0 előkészületben)
 
 - 4 000 torrent betölthető; a state mirror és a gRPC API a 4 000 soros
   terhelés alatt is a keretben marad.
