@@ -124,16 +124,14 @@ probe-debian-api:
   rules:
     - if: '$CI_COMMIT_BRANCH'
   script:
-    - printf 'dummy\n' > /tmp/dummy.deb
     - |
-      for u in \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ferrentd/0.1.1-1/dummy.deb" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ferrentd/0.1.1-1/dummy2.deb"; do
-        printf '== PUT %s -> ' "$u"
-        curl -sS -o /tmp/o -w '%{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-          --upload-file /tmp/dummy.deb "$u"
+      printf 'dummy\n' > /tmp/dummy.deb
+      for u in "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ferrentd/0.1.1-1/dummy.deb" \
+               "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ferrentd/0.1.1-1/dummy2.deb"; do
+        printf 'PUT %s -> ' "$u"
+        curl -sS -o /tmp/o -w '%{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file /tmp/dummy.deb "$u"
         head -c 200 /tmp/o; echo
       done
-    - printf '== list packages -> '
-    - curl -sS -o /tmp/l -w '%{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages?per_page=5"
-    - head -c 300 /tmp/l; echo
+      printf 'LIST -> '
+      curl -sS -o /tmp/l -w '%{http_code}\n' --header "JOB-TOKEN: $CI_JOB_TOKEN" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages?per_page=5"
+      head -c 300 /tmp/l; echo
