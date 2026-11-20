@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::ConfigError;
+use crate::autoadd::WatchDir;
 
 const DEFAULT_DATA_DIR: &str = "./ferrent-data";
 const DEFAULT_BIND: &str = "127.0.0.1:50051";
@@ -30,6 +31,8 @@ pub struct FileConfig {
     pub token_file: Option<PathBuf>,
     pub session: SessionConfig,
     pub queue: QueueConfig,
+    /// Watch directories fed into the engine (M5-T1).
+    pub autoadd: Vec<WatchDir>,
 }
 
 /// Session-wide engine limits. `0` means unlimited.
@@ -92,6 +95,18 @@ impl FileConfig {
         if let Some(bind) = self.bind.as_deref() {
             validate_bind(bind)?;
         }
+        let mut seen = BTreeSet::new();
+        for (index, watch) in self.autoadd.iter().enumerate() {
+            watch
+                .validate()
+                .map_err(|message| ConfigError::invalid(format!("autoadd[{index}]: {message}")))?;
+            if !seen.insert(watch.path.clone()) {
+                return Err(ConfigError::invalid(format!(
+                    "autoadd[{index}]: duplicate watch path {}",
+                    watch.path.display()
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -135,6 +150,7 @@ impl FileConfig {
             token_file,
             session: self.session.clone(),
             queue: self.queue.clone(),
+            autoadd: self.autoadd.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -151,6 +167,7 @@ pub struct ResolvedConfig {
     pub token_file: PathBuf,
     pub session: SessionConfig,
     pub queue: QueueConfig,
+    pub autoadd: Vec<WatchDir>,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -286,6 +303,65 @@ bind = "127.0.0.1:50051"
         assert!(resolved.env_locked.contains("data_dir"));
         assert!(resolved.env_locked.contains("bind"));
         assert!(!resolved.env_locked.contains("download_dir"));
+    }
+
+    #[test]
+    fn autoadd_tables_parse_and_validate() {
+        let file = FileConfig::parse(
+            r#"
+[[autoadd]]
+path = "/data/watch"
+label = "movies"
+save_path = "/data/media/movies"
+on_success = "move"
+move_to = "/data/watch/done"
+
+[[autoadd]]
+path = "/data/watch2"
+add_paused = true
+"#,
+        )
+        .expect("autoadd config");
+
+        assert_eq!(file.autoadd.len(), 2);
+        assert_eq!(file.autoadd[0].label.as_deref(), Some("movies"));
+        assert_eq!(file.autoadd[0].on_success, crate::autoadd::OnSuccess::Move);
+        assert!(file.autoadd[1].add_paused);
+        assert_eq!(
+            file.autoadd[1].on_success,
+            crate::autoadd::OnSuccess::Delete
+        );
+
+        let resolved = file.resolve(&env(&[])).expect("resolve");
+        assert_eq!(resolved.autoadd.len(), 2);
+    }
+
+    #[test]
+    fn autoadd_errors_are_reported_with_the_index() {
+        let error = FileConfig::parse(
+            r#"
+[[autoadd]]
+path = "/data/watch"
+on_success = "move"
+"#,
+        )
+        .expect_err("move without a destination");
+        assert!(error.to_string().contains("autoadd[0]"), "{error}");
+
+        let error = FileConfig::parse(
+            r#"
+[[autoadd]]
+path = "/data/watch"
+
+[[autoadd]]
+path = "/data/watch"
+"#,
+        )
+        .expect_err("duplicate watch path");
+        assert!(
+            error.to_string().contains("duplicate watch path"),
+            "{error}"
+        );
     }
 
     #[test]

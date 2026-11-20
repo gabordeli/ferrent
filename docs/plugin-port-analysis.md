@@ -97,7 +97,7 @@ A Settings gomb és a modal már létezik, de üres: ez a port természetes cont
 | Funkció | Adatmodell / RPC | Daemon / engine | GUI |
 |---|---|---|---|
 | Labels | `Label{name,color,policy}`, `Torrent.label`, `SetLabel`, `ListLabels`, CRUD; `ListTorrents.label_filter`, `SortField.LABEL` | effektív feloldás; labelváltásnál limit/move újraszámol; Finished → move | label oszlop, sidebar szűrő, context menü, Settings → Labels (kész, M4-T5) |
-| AutoAdd | `WatchDir{path,enabled,save_path,label,add_paused,queue,action,patterns}` + CRUD/scan | inotify + 30 s reconcile; infohash dedupe; perzisztált invalid retry; post-add action; opcionális disk gate | Settings → AutoAdd + „Scan now” + státusz |
+| AutoAdd | `WatchDir{path,enabled,save_path,label,add_paused,on_success,move_to,min_free_bytes}`, `[[autoadd]]` a configban; `GetAutoAddStatus`/`ScanAutoAdd` | 1 s reconcile + size/mtime stabilitás; infohash dedupe; perzisztált invalid retry; post-add action; opcionális disk gate | Settings → AutoAdd + „Scan now” + státusz (kész, M5-T1) |
 | Execute | `Hook{event,command,args,timeout,concurrency,enabled}` + CRUD | journal + kurzor; argv placeholderek; env `FERRENT_*`; timeout → process group kill; max 4 párhuzamos | Settings → Hooks; Activity |
 | Notifications | `Channel{kind,config,events,enabled}`, `Rule{events,label,quiet_hours,channels}`; outbox | Telegram Bot API + webhook; retry/backoff; dedupe; digest/coalescing; secrets redacted | Settings → Notifications, „Test” |
 | Scheduler | `Schedule{grid[24][7],levels{green,yellow,red},timezone}` | next-boundary tick; suspend után újraszámol; zöld = default, sárga = limitek, piros = `SCHEDULER` reason; bulk pause/resume | Settings → Scheduler rács; status bar |

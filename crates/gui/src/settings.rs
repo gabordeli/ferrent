@@ -5,7 +5,7 @@
 //! `toml_edit`, which preserves comments and the keys the form does not touch.
 
 use ferrent_protocol::v1::{Label as ProtoLabel, LabelEntry};
-use toml_edit::{DocumentMut, Item, Table, value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
 
 /// Fixed size of the settings modal, per the M4-T5 design.
 pub const MODAL_WIDTH: f32 = 900.0;
@@ -16,17 +16,19 @@ pub enum Tab {
     #[default]
     Connection,
     Session,
+    AutoAdd,
     Labels,
 }
 
 impl Tab {
-    pub const ALL: [Self; 3] = [Self::Connection, Self::Session, Self::Labels];
+    pub const ALL: [Self; 4] = [Self::Connection, Self::Session, Self::AutoAdd, Self::Labels];
 
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Connection => "Connection",
             Self::Session => "Session",
+            Self::AutoAdd => "AutoAdd",
             Self::Labels => "Labels",
         }
     }
@@ -36,6 +38,9 @@ impl Tab {
         match self {
             Self::Connection => "Daemon paths and bind address; changes apply on restart.",
             Self::Session => "Engine limits; changes apply as soon as they are saved.",
+            Self::AutoAdd => {
+                "Watch directories; a 1 s scan picks up new .torrent and .magnet files."
+            }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
         }
     }
@@ -347,6 +352,306 @@ pub fn color_from_hex(hex: &str) -> Option<iced::Color> {
     ))
 }
 
+/// What happens to a file after the engine accepted it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SuccessAction {
+    #[default]
+    Delete,
+    Keep,
+    Move,
+}
+
+impl SuccessAction {
+    pub const ALL: [Self; 3] = [Self::Delete, Self::Keep, Self::Move];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Delete => "Delete",
+            Self::Keep => "Keep",
+            Self::Move => "Move",
+        }
+    }
+
+    #[must_use]
+    pub fn as_toml(self) -> &'static str {
+        match self {
+            Self::Delete => "delete",
+            Self::Keep => "keep",
+            Self::Move => "move",
+        }
+    }
+
+    #[must_use]
+    pub fn from_toml(text: &str) -> Self {
+        match text {
+            "keep" => Self::Keep,
+            "move" => Self::Move,
+            _ => Self::Delete,
+        }
+    }
+}
+
+/// One editable AutoAdd watch directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchRow {
+    pub path: String,
+    pub enabled: bool,
+    pub label: String,
+    pub save_path: String,
+    pub add_paused: bool,
+    pub on_success: SuccessAction,
+    pub move_to: String,
+    pub min_free_bytes: String,
+}
+
+impl WatchRow {
+    /// The row as configured (always enabled) for a new entry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            ..Self::default()
+        }
+    }
+
+    /// Replaces one text field.
+    pub fn set(&mut self, field: WatchField, text: String) {
+        match field {
+            WatchField::Path => self.path = text,
+            WatchField::Label => self.label = text,
+            WatchField::SavePath => self.save_path = text,
+            WatchField::MoveTo => self.move_to = text,
+            WatchField::MinFree => self.min_free_bytes = text,
+        }
+    }
+
+    /// Returns the text of one field.
+    #[must_use]
+    pub fn text(&self, field: WatchField) -> &str {
+        match field {
+            WatchField::Path => &self.path,
+            WatchField::Label => &self.label,
+            WatchField::SavePath => &self.save_path,
+            WatchField::MoveTo => &self.move_to,
+            WatchField::MinFree => &self.min_free_bytes,
+        }
+    }
+}
+
+/// One editable text of a watch row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchField {
+    Path,
+    Label,
+    SavePath,
+    MoveTo,
+    MinFree,
+}
+
+impl WatchField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Path => "Watch path",
+            Self::Label => "Label",
+            Self::SavePath => "Save path",
+            Self::MoveTo => "Move to",
+            Self::MinFree => "Defer below free bytes (0 = off)",
+        }
+    }
+}
+
+/// The watch directory table of the configuration document.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AutoAddForm {
+    pub rows: Vec<WatchRow>,
+}
+
+impl AutoAddForm {
+    /// Reads the `[[autoadd]]` array of tables.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("autoadd") else {
+            return Ok(Self::default());
+        };
+        let Item::ArrayOfTables(array) = item else {
+            return Err("autoadd must be an array of tables".to_owned());
+        };
+        let mut rows = Vec::with_capacity(array.len());
+        for table in array.iter() {
+            let text = |key: &str| {
+                table
+                    .get(key)
+                    .and_then(Item::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let flag = |key: &str, default: bool| {
+                table.get(key).and_then(Item::as_bool).unwrap_or(default)
+            };
+            rows.push(WatchRow {
+                path: text("path"),
+                enabled: flag("enabled", true),
+                label: text("label"),
+                save_path: text("save_path"),
+                add_paused: flag("add_paused", false),
+                on_success: SuccessAction::from_toml(&text("on_success")),
+                move_to: text("move_to"),
+                min_free_bytes: table
+                    .get("min_free_bytes")
+                    .and_then(Item::as_integer)
+                    .filter(|value| *value > 0)
+                    .map_or_else(String::new, |value| value.to_string()),
+            });
+        }
+        Ok(Self { rows })
+    }
+
+    /// Checks the rows before they are written to the document.
+    pub fn validate(&self) -> Result<(), String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            let path = row.path.trim();
+            if path.is_empty() {
+                return Err(format!(
+                    "AutoAdd row {}: watch path must not be empty",
+                    index + 1
+                ));
+            }
+            if !seen.insert(path.to_owned()) {
+                return Err(format!("AutoAdd row {}: duplicate watch path", index + 1));
+            }
+            let threshold = row.min_free_bytes.trim();
+            if !threshold.is_empty() {
+                let free: i64 = threshold.parse().map_err(|_| {
+                    format!(
+                        "AutoAdd row {}: free-space threshold must be a whole number",
+                        index + 1
+                    )
+                })?;
+                if free < 0 {
+                    return Err(format!(
+                        "AutoAdd row {}: free-space threshold must not be negative",
+                        index + 1
+                    ));
+                }
+            }
+            if row.on_success == SuccessAction::Move {
+                let target = row.move_to.trim();
+                if target.is_empty() {
+                    return Err(format!(
+                        "AutoAdd row {}: Move needs a destination",
+                        index + 1
+                    ));
+                }
+                if target == path {
+                    return Err(format!(
+                        "AutoAdd row {}: Move destination must differ from the watch path",
+                        index + 1
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Replaces the `autoadd` array in an already rendered document.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        if self.rows.is_empty() {
+            doc.remove("autoadd");
+            return Ok(());
+        }
+        let mut array = ArrayOfTables::new();
+        for row in &self.rows {
+            let mut table = Table::new();
+            table["path"] = value(row.path.trim());
+            table["enabled"] = value(row.enabled);
+            if !row.label.trim().is_empty() {
+                table["label"] = value(row.label.trim());
+            }
+            if !row.save_path.trim().is_empty() {
+                table["save_path"] = value(row.save_path.trim());
+            }
+            if row.add_paused {
+                table["add_paused"] = value(true);
+            }
+            table["on_success"] = value(row.on_success.as_toml());
+            if row.on_success == SuccessAction::Move {
+                table["move_to"] = value(row.move_to.trim());
+            }
+            if let Ok(free) = row.min_free_bytes.trim().parse::<i64>() {
+                if free > 0 {
+                    table["min_free_bytes"] = value(free);
+                }
+            }
+            array.push(table);
+        }
+        doc["autoadd"] = Item::ArrayOfTables(array);
+        Ok(())
+    }
+
+    /// Adds an empty row and returns its index.
+    pub fn add(&mut self) -> usize {
+        self.rows.push(WatchRow::new());
+        self.rows.len() - 1
+    }
+
+    /// Removes one row.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.rows.len() {
+            self.rows.remove(index);
+        }
+    }
+}
+
+/// Runtime counters for one watch directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AutoAddStatusRow {
+    pub path: String,
+    pub enabled: bool,
+    pub label: String,
+    pub move_to: String,
+    pub pending: u32,
+    pub added: u32,
+    pub duplicates: u32,
+    pub invalid: u32,
+    pub deferred: u32,
+    pub last_error: String,
+    pub last_scan_unix: i64,
+}
+
+impl AutoAddStatusRow {
+    /// One-line summary for the table.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if self.added > 0 {
+            parts.push(format!("{} added", self.added));
+        }
+        if self.duplicates > 0 {
+            parts.push(format!("{} duplicate", self.duplicates));
+        }
+        if self.pending > 0 {
+            parts.push(format!("{} pending", self.pending));
+        }
+        if self.invalid > 0 {
+            parts.push(format!("{} invalid", self.invalid));
+        }
+        if self.deferred > 0 {
+            parts.push(format!("{} deferred", self.deferred));
+        }
+        if parts.is_empty() {
+            "idle".to_owned()
+        } else {
+            parts.join(" · ")
+        }
+    }
+}
+
 /// One label row plus its assignment count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelRow {
@@ -529,6 +834,10 @@ pub struct Settings {
     pub raw: String,
     pub baseline: ConfigForm,
     pub form: ConfigForm,
+    pub autoadd: AutoAddForm,
+    pub autoadd_baseline: AutoAddForm,
+    pub autoadd_selected: Option<usize>,
+    pub autoadd_status: Vec<AutoAddStatusRow>,
     pub labels: Vec<LabelRow>,
     pub label_selected: Option<String>,
     pub label_new: bool,
@@ -549,6 +858,10 @@ impl Default for Settings {
             raw: String::new(),
             baseline: ConfigForm::default(),
             form: ConfigForm::default(),
+            autoadd: AutoAddForm::default(),
+            autoadd_baseline: AutoAddForm::default(),
+            autoadd_selected: None,
+            autoadd_status: Vec::new(),
             labels: Vec::new(),
             label_selected: None,
             label_new: false,
@@ -568,17 +881,74 @@ impl Settings {
         env_locked: Vec<String>,
     ) -> Result<(), String> {
         let form = ConfigForm::from_toml(toml)?;
+        let autoadd = AutoAddForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
         self.baseline = form.clone();
         self.form = form;
+        self.autoadd_baseline = autoadd.clone();
+        self.autoadd = autoadd;
+        self.autoadd_selected = None;
         Ok(())
     }
 
     #[must_use]
     pub fn dirty(&self) -> bool {
         self.form != self.baseline
+    }
+
+    /// Whether the given tab has unsaved edits.
+    #[must_use]
+    pub fn dirty_tab(&self, tab: Tab) -> bool {
+        match tab {
+            Tab::AutoAdd => self.autoadd != self.autoadd_baseline,
+            Tab::Labels => self.label_dirty(),
+            Tab::Connection | Tab::Session => self.dirty(),
+        }
+    }
+
+    /// Renders the whole configuration document: the typed fields plus the
+    /// watch directory table.
+    pub fn render(&self) -> Result<String, String> {
+        let mut doc: DocumentMut = self
+            .form
+            .render(&self.raw)?
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        self.autoadd.render_into(&mut doc)?;
+        Ok(doc.to_string())
+    }
+
+    /// The selected watch row.
+    #[must_use]
+    pub fn selected_watch(&self) -> Option<&WatchRow> {
+        let index = self.autoadd_selected?;
+        self.autoadd.rows.get(index)
+    }
+
+    /// The selected watch row, mutably.
+    pub fn selected_watch_mut(&mut self) -> Option<&mut WatchRow> {
+        let index = self.autoadd_selected?;
+        self.autoadd.rows.get_mut(index)
+    }
+
+    /// Adds a watch row and selects it.
+    pub fn add_watch(&mut self) {
+        self.autoadd_selected = Some(self.autoadd.add());
+    }
+
+    /// Removes the selected watch row.
+    pub fn remove_watch(&mut self) {
+        let Some(index) = self.autoadd_selected else {
+            return;
+        };
+        self.autoadd.remove(index);
+        self.autoadd_selected = if self.autoadd.rows.is_empty() {
+            None
+        } else {
+            Some(index.min(self.autoadd.rows.len() - 1))
+        };
     }
 
     #[must_use]
@@ -793,6 +1163,82 @@ mod tests {
 
         form.connections_limit = "-1".to_owned();
         assert!(form.to_label().is_err());
+    }
+
+    #[test]
+    fn autoadd_rows_round_trip_through_the_document() {
+        let raw = "# keep this comment\ndata_dir = \"/srv/ferrent\"\n\n[[autoadd]]\npath = \"/data/watch\"\nlabel = \"movies\"\non_success = \"move\"\nmove_to = \"/data/done\"\n\n[[autoadd]]\npath = \"/data/watch2\"\nenabled = false\nadd_paused = true\n";
+        let form = ConfigForm::from_toml(raw).expect("config");
+        let autoadd = AutoAddForm::from_toml(raw).expect("autoadd");
+        assert_eq!(autoadd.rows.len(), 2);
+        assert_eq!(autoadd.rows[0].label, "movies");
+        assert_eq!(autoadd.rows[0].on_success, SuccessAction::Move);
+        assert!(!autoadd.rows[1].enabled);
+        assert!(autoadd.rows[1].add_paused);
+
+        let mut settings = Settings {
+            raw: raw.to_owned(),
+            form,
+            autoadd,
+            ..Settings::default()
+        };
+        settings.autoadd.rows[0].label = "films".to_owned();
+        settings.autoadd.rows[1].min_free_bytes = "1048576".to_owned();
+        settings.autoadd.rows.push(WatchRow {
+            path: "/data/watch3".to_owned(),
+            enabled: true,
+            on_success: SuccessAction::Keep,
+            ..WatchRow::default()
+        });
+        let rendered = settings.render().expect("render");
+        assert!(rendered.contains("# keep this comment"), "{rendered}");
+        assert!(rendered.contains("label = \"films\""), "{rendered}");
+        assert!(rendered.contains("path = \"/data/watch3\""), "{rendered}");
+        assert_eq!(
+            AutoAddForm::from_toml(&rendered).expect("reparse"),
+            settings.autoadd
+        );
+    }
+
+    #[test]
+    fn autoadd_validation_reports_the_row() {
+        let mut form = AutoAddForm::default();
+        assert!(form.validate().is_ok(), "an empty table is valid");
+        form.add();
+        assert!(form.validate().is_err(), "empty path");
+        form.rows[0].path = "/data/watch".to_owned();
+        assert!(form.validate().is_ok());
+        form.rows[0].on_success = SuccessAction::Move;
+        assert!(form.validate().is_err(), "move without a destination");
+        form.rows[0].move_to = "/data/watch".to_owned();
+        assert!(form.validate().is_err(), "same destination");
+        form.rows[0].move_to = "/data/done".to_owned();
+        assert!(form.validate().is_ok());
+        form.rows.push(WatchRow {
+            path: "/data/watch".to_owned(),
+            ..WatchRow::default()
+        });
+        assert!(form.validate().is_err(), "duplicate path");
+
+        let mut settings = Settings::default();
+        settings.add_watch();
+        assert_eq!(settings.autoadd_selected, Some(0));
+        assert!(settings.dirty_tab(Tab::AutoAdd));
+        settings.remove_watch();
+        assert!(settings.autoadd.rows.is_empty());
+        assert_eq!(settings.autoadd_selected, None);
+        assert!(!settings.dirty_tab(Tab::AutoAdd));
+    }
+
+    #[test]
+    fn autoadd_status_summary_counts_the_runs() {
+        let row = AutoAddStatusRow {
+            added: 3,
+            duplicates: 1,
+            ..AutoAddStatusRow::default()
+        };
+        assert_eq!(row.summary(), "3 added · 1 duplicate");
+        assert_eq!(AutoAddStatusRow::default().summary(), "idle");
     }
 
     #[test]

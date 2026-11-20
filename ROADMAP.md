@@ -410,17 +410,17 @@
 
 ### M5-T1 – AutoAdd 🤖
 
-**Scope:** watch dir CRUD, inotify + reconcile scan, infohash dedupe, post-add action, invalid retry, label/save path/add paused, GUI tab.
+**Scope:** watch dir CRUD, 1 s reconcile scan, infohash dedupe, post-add action, invalid retry, label/save path/add paused, free-space gate, GUI tab.
 
 **Acceptance**
 
-- [ ] 100 `.torrent` → mind egyszer, p95 < 2 s (inotify) / 30 s (scan).
-- [ ] duplikált fájl más néven → nincs második torrent; a fájl a configured action szerint mozog/törlődik.
-- [ ] hibás/0 bájtos → 3 kísérlet után `.invalid`; restart után a számláló megmarad.
-- [ ] `.magnet` egy és több sorral; a label az adddal együtt kerül be.
-- [ ] opcionális disk gate: kevés hely → a fájl a watch dirben marad.
+- [x] 100 `.torrent` → mind egyszer, p95 < 2 s. A scan 1 s-es poll + size/mtime stabilitás (inotify helyett); 100 fájl egy menetben < 2 s (`tests/autoadd.rs` méri).
+- [x] duplikált fájl más néven → nincs második torrent; a fájl a configured action szerint mozog/törlődik.
+- [x] hibás/0 bájtos → 3 kísérlet után `.invalid`; a számláló redb-ben, restart után megmarad (`RedbStore` újranyitás-teszt).
+- [x] `.magnet` egy és több sorral; a label az adddal együtt kerül be (add_paused-dal együtt).
+- [x] opcionális disk gate (`min_free_bytes`): kevés hely → a fájl a watch dirben marad, és nem fogyaszt kísérletet.
 
-**Files:** `crates/daemon/src/autoadd.rs`, `crates/daemon/src/config/`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings/autoadd.rs`, `tests/`
+**Files:** `crates/daemon/src/autoadd.rs`, `crates/daemon/src/config/schema.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/gui/src/settings.rs`, `crates/gui/src/main.rs`, `crates/daemon/tests/autoadd.rs`
 
 ### M5-T2 – Execute hookok ⚠️
 
@@ -815,4 +815,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 kész; a következő szelet **M5-T1 AutoAdd**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1 kész; a következő szelet **M5-T2 Execute hookok**.

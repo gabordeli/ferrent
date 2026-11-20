@@ -14,18 +14,20 @@ use ferrent_engine::{
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTorrentResponse, ConfigChanged, CreateLabelRequest, DeleteLabelRequest,
-    DeleteLabelResponse, GetConfigRequest, GetConfigResponse, GetStatusRequest, GetStatusResponse,
+    AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
+    DeleteLabelRequest, DeleteLabelResponse, GetAutoAddStatusRequest, GetAutoAddStatusResponse,
+    GetConfigRequest, GetConfigResponse, GetStatusRequest, GetStatusResponse,
     GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
     GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
     GetTorrentTrackersResponse, Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest,
     ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest,
     MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
     QueueDirection as ProtoQueueDirection, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
-    ResumeTorrentRequest, ResumeTorrentResponse, SetConfigRequest, SetConfigResponse,
-    SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
-    SetTorrentLimitsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
-    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
+    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
+    SetConfigRequest, SetConfigResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
+    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
+    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
+    WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -94,17 +96,19 @@ pub struct AggregateStatus {
 
 /// Shared daemon state used by the RPC service.
 pub struct AppState {
-    engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
-    mirror: Arc<StateMirror>,
-    watch: broadcast::Sender<EngineEvent>,
-    config: ConfigStore,
-    config_watch: broadcast::Sender<u64>,
-    control: Arc<Mutex<TorrentControl>>,
-    labels: Arc<Mutex<LabelState>>,
-    store: Arc<Mutex<Box<dyn StateStore>>>,
-    auth: Auth,
-    data_dir: PathBuf,
-    download_dir: PathBuf,
+    pub engine: Arc<Mutex<Box<dyn TorrentEngine>>>,
+    pub(crate) mirror: Arc<StateMirror>,
+    pub(crate) watch: broadcast::Sender<EngineEvent>,
+    pub(crate) config: ConfigStore,
+    pub(crate) config_watch: broadcast::Sender<u64>,
+    pub(crate) control: Arc<Mutex<TorrentControl>>,
+    pub labels: Arc<Mutex<LabelState>>,
+    pub(crate) store: Arc<Mutex<Box<dyn StateStore>>>,
+    pub(crate) auth: Auth,
+    pub(crate) data_dir: PathBuf,
+    pub(crate) download_dir: PathBuf,
+    /// AutoAdd scanner counters, shared with `GetAutoAddStatus`.
+    pub(crate) autoadd: Mutex<crate::autoadd::AutoAddStatus>,
 }
 
 impl AppState {
@@ -135,6 +139,7 @@ impl AppState {
             auth: Auth::new(token),
             data_dir,
             download_dir,
+            autoadd: Mutex::new(crate::autoadd::AutoAddStatus::default()),
         }
     }
 
@@ -674,6 +679,89 @@ impl Ferrent for FerrentService {
         Ok(Response::new(SetTorrentLimitsResponse {}))
     }
 
+    async fn get_auto_add_status(
+        &self,
+        request: Request<GetAutoAddStatusRequest>,
+    ) -> Result<Response<GetAutoAddStatusResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let config = self
+            .state
+            .config
+            .resolved()
+            .map_err(|error| Status::internal(error.to_string()))?;
+        let runtime = self.state.autoadd_status();
+        let dirs = config
+            .autoadd
+            .iter()
+            .map(|watch| {
+                let status = runtime
+                    .iter()
+                    .find(|(path, _)| *path == watch.path)
+                    .map(|(_, status)| status);
+                AutoAddDirStatus {
+                    path: watch.path.display().to_string(),
+                    enabled: watch.enabled,
+                    label: watch.label.clone().unwrap_or_default(),
+                    move_to: watch
+                        .move_to
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default(),
+                    pending: status.map_or(0, |status| status.pending),
+                    added: status.map_or(0, |status| status.added),
+                    duplicates: status.map_or(0, |status| status.duplicates),
+                    invalid: status.map_or(0, |status| status.invalid),
+                    deferred: status.map_or(0, |status| status.deferred),
+                    last_error: status
+                        .and_then(|status| status.last_error.clone())
+                        .unwrap_or_default(),
+                    last_scan_unix: status
+                        .and_then(|status| status.last_scan)
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |elapsed| {
+                            i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
+                        }),
+                }
+            })
+            .collect();
+        Ok(Response::new(GetAutoAddStatusResponse { dirs }))
+    }
+
+    async fn scan_auto_add(
+        &self,
+        request: Request<ScanAutoAddRequest>,
+    ) -> Result<Response<ScanAutoAddResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let path = request.into_inner().path;
+        let totals = if path.is_empty() {
+            self.state.scan_now().await
+        } else {
+            let path = PathBuf::from(&path);
+            let labels = self
+                .state
+                .config
+                .resolved()
+                .map_err(|error| Status::internal(error.to_string()))?
+                .autoadd;
+            if !labels.iter().any(|watch| watch.path == path) {
+                return Err(Status::not_found(format!(
+                    "watch directory {path:?} is not configured"
+                )));
+            }
+            self.state
+                .scan_watch_now(&path)
+                .await
+                .ok_or_else(|| Status::not_found("watch directory vanished"))?
+        };
+        Ok(Response::new(ScanAutoAddResponse {
+            added: totals.added,
+            duplicates: totals.duplicates,
+            failed: totals.failed,
+            invalid: totals.invalid,
+            deferred: totals.deferred,
+        }))
+    }
+
     async fn get_torrent(
         &self,
         request: Request<GetTorrentRequest>,
@@ -905,6 +993,7 @@ pub async fn serve(
     tls: &TlsMaterial,
 ) -> Result<(), tonic::transport::Error> {
     spawn_label_mover(Arc::clone(&state));
+    crate::autoadd::spawn_autoadd(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),
@@ -1166,6 +1255,97 @@ mod tests {
             resolve_save_path(dir, "/mnt/other"),
             std::path::PathBuf::from("/mnt/other")
         );
+    }
+
+    fn authorized<T>(message: T) -> Request<T> {
+        let mut request = Request::new(message);
+        request
+            .metadata_mut()
+            .insert("authorization", "Bearer token".parse().expect("metadata"));
+        request
+    }
+
+    #[tokio::test]
+    async fn auto_add_status_and_scan_over_rpc() {
+        let base = std::env::temp_dir().join(format!("ferrent-rpc-autoadd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let watch = base.join("watch");
+        std::fs::create_dir_all(&watch).expect("watch dir");
+        let config = ConfigStore::default();
+        config
+            .apply_toml(
+                &format!(
+                    "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n",
+                    watch.display().to_string()
+                ),
+                0,
+            )
+            .expect("config");
+
+        let mut labels = LabelState::default();
+        labels
+            .upsert(Label {
+                name: "movies".to_owned(),
+                ..Label::default()
+            })
+            .expect("label");
+        let (send, _) = broadcast::channel(8);
+        let state = Arc::new(AppState::new(
+            Box::new(MockEngine::new()),
+            Arc::new(StateMirror::new()),
+            send,
+            Box::new(MemoryStore::new()),
+            config,
+            TorrentControl::default(),
+            labels,
+            "token",
+            base.clone(),
+            base.join("downloads"),
+        ));
+        let service = FerrentService::new(Arc::clone(&state));
+
+        let status = service
+            .get_auto_add_status(authorized(GetAutoAddStatusRequest {}))
+            .await
+            .expect("status")
+            .into_inner();
+        assert_eq!(status.dirs.len(), 1);
+        assert_eq!(status.dirs[0].path, watch.display().to_string());
+        assert_eq!(status.dirs[0].label, "movies");
+        assert_eq!(status.dirs[0].added, 0);
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"d4:infod6:lengthi7e4:name4:showee");
+        std::fs::write(watch.join("a.torrent"), bytes).expect("write");
+        let totals = service
+            .scan_auto_add(authorized(ScanAutoAddRequest {
+                path: String::new(),
+            }))
+            .await
+            .expect("scan")
+            .into_inner();
+        assert_eq!(totals.added, 1, "{totals:?}");
+
+        let status = service
+            .get_auto_add_status(authorized(GetAutoAddStatusRequest {}))
+            .await
+            .expect("status")
+            .into_inner();
+        assert_eq!(status.dirs[0].added, 1);
+        assert!(status.dirs[0].last_scan_unix > 0);
+        assert!(status.dirs[0].last_error.is_empty());
+
+        let missing = service
+            .scan_auto_add(authorized(ScanAutoAddRequest {
+                path: "/nope".to_owned(),
+            }))
+            .await;
+        assert_eq!(
+            missing.expect_err("not found").code(),
+            tonic::Code::NotFound
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[tokio::test]

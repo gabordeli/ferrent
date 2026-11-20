@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
-    CreateLabelRequest, DeleteLabelRequest, GetConfigRequest, GetStatusRequest,
-    GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry,
-    ListLabelsRequest, ListTorrentsRequest, SetConfigRequest, SetTorrentLabelRequest, SortField,
-    Torrent, TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
+    CreateLabelRequest, DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest,
+    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest,
+    SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
+    TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -278,4 +279,62 @@ pub async fn assign_label(client: &AuthClient, id: u64, label: &str) -> Result<S
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.label)
+}
+
+/// Fetches the AutoAdd watch directories with their runtime counters.
+pub async fn auto_add_status(
+    client: &AuthClient,
+) -> Result<Vec<crate::settings::AutoAddStatusRow>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_auto_add_status(GetAutoAddStatusRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response
+        .dirs
+        .into_iter()
+        .map(|dir| crate::settings::AutoAddStatusRow {
+            path: dir.path,
+            enabled: dir.enabled,
+            label: dir.label,
+            move_to: dir.move_to,
+            pending: dir.pending,
+            added: dir.added,
+            duplicates: dir.duplicates,
+            invalid: dir.invalid,
+            deferred: dir.deferred,
+            last_error: dir.last_error,
+            last_scan_unix: dir.last_scan_unix,
+        })
+        .collect())
+}
+
+/// Totals of one manual AutoAdd scan.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScanTotals {
+    pub added: u32,
+    pub duplicates: u32,
+    pub failed: u32,
+    pub invalid: u32,
+    pub deferred: u32,
+}
+
+/// Scans one watch directory, or all of them when `path` is empty.
+pub async fn scan_auto_add(client: &AuthClient, path: &str) -> Result<ScanTotals, String> {
+    let mut client = client.clone();
+    let response = client
+        .scan_auto_add(ScanAutoAddRequest {
+            path: path.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(ScanTotals {
+        added: response.added,
+        duplicates: response.duplicates,
+        failed: response.failed,
+        invalid: response.invalid,
+        deferred: response.deferred,
+    })
 }

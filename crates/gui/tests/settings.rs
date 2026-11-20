@@ -133,3 +133,55 @@ async fn label_crud_over_rpc() {
     server.shutdown();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn auto_add_status_and_manual_scan() {
+    let (client, server, dir) = client("autoadd").await;
+
+    connection::save_label(
+        &client,
+        Label {
+            name: "movies".to_owned(),
+            ..Label::default()
+        },
+        true,
+    )
+    .await
+    .expect("create label");
+
+    let watch = dir.join("watch");
+    std::fs::create_dir_all(&watch).expect("watch dir");
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"d4:infod6:lengthi9e4:name8:demo.mkvee");
+    std::fs::write(watch.join("demo.torrent"), bytes).expect("write torrent");
+
+    let toml = format!(
+        "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n",
+        watch.display().to_string()
+    );
+    let revision = connection::set_config(&client, &toml, 0)
+        .await
+        .expect("set config");
+    assert_eq!(revision, 1);
+
+    let status = connection::auto_add_status(&client).await.expect("status");
+    assert_eq!(status.len(), 1);
+    assert_eq!(status[0].path, watch.display().to_string());
+    assert_eq!(status[0].label, "movies");
+    assert_eq!(status[0].added, 0);
+
+    let totals = connection::scan_auto_add(&client, "").await.expect("scan");
+    assert_eq!(totals.added, 1, "{totals:?}");
+    assert!(!watch.join("demo.torrent").exists(), "file was consumed");
+
+    let status = connection::auto_add_status(&client).await.expect("status");
+    assert_eq!(status[0].added, 1);
+    assert!(status[0].last_scan_unix > 0);
+    assert!(status[0].last_error.is_empty(), "{:?}", status[0]);
+
+    let missing = connection::scan_auto_add(&client, "/nope").await;
+    assert!(missing.is_err(), "an unknown watch path is rejected");
+
+    server.shutdown();
+    let _ = std::fs::remove_dir_all(dir);
+}

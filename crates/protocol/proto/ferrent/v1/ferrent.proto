@@ -44,6 +44,49 @@ service Ferrent {
   rpc SetTorrentLabel(SetTorrentLabelRequest) returns (SetTorrentLabelResponse);
   // Overrides per-torrent limits, or clears the override.
   rpc SetTorrentLimits(SetTorrentLimitsRequest) returns (SetTorrentLimitsResponse);
+  // Returns the AutoAdd watch directories with their runtime counters.
+  rpc GetAutoAddStatus(GetAutoAddStatusRequest) returns (GetAutoAddStatusResponse);
+  // Scans one watch directory (or all of them) immediately.
+  rpc ScanAutoAdd(ScanAutoAddRequest) returns (ScanAutoAddResponse);
+}
+
+// One configured watch directory and what the scanner has done with it.
+message AutoAddDirStatus {
+  string path = 1;
+  bool enabled = 2;
+  string label = 3;
+  // Destination of the move action, when configured.
+  string move_to = 4;
+  // Files waiting for the size/mtime stability check.
+  uint32 pending = 5;
+  // Torrents added since the daemon started.
+  uint32 added = 6;
+  // Duplicate files accepted without a second torrent.
+  uint32 duplicates = 7;
+  // Files renamed to `.invalid`.
+  uint32 invalid = 8;
+  string last_error = 9;
+  // Unix seconds of the last completed scan; `0` when it never ran.
+  int64 last_scan_unix = 10;
+  // Files kept in the watch directory because the free-space gate is low.
+  uint32 deferred = 11;
+}
+
+message GetAutoAddStatusRequest {}
+message GetAutoAddStatusResponse {
+  repeated AutoAddDirStatus dirs = 1;
+}
+
+message ScanAutoAddRequest {
+  // Watch path to scan; empty scans every enabled directory.
+  string path = 1;
+}
+message ScanAutoAddResponse {
+  uint32 added = 1;
+  uint32 duplicates = 2;
+  uint32 failed = 3;
+  uint32 invalid = 4;
+  uint32 deferred = 5;
 }
 
 // Request for aggregate daemon status.

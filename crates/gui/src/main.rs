@@ -11,7 +11,9 @@ use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
-use ferrent_gui::settings::{self, ConfigField, LabelField, Settings, Tab};
+use ferrent_gui::settings::{
+    self, ConfigField, LabelField, Settings, SuccessAction, Tab, WatchField,
+};
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
@@ -166,6 +168,7 @@ enum Message {
         request: u64,
         config: Result<connection::ConfigSnapshot, String>,
         labels: Result<Vec<settings::LabelRow>, String>,
+        auto_add: Result<Vec<settings::AutoAddStatusRow>, String>,
     },
     SettingsSaved {
         request: u64,
@@ -188,6 +191,16 @@ enum Message {
         result: Result<u32, String>,
     },
     LabelsLoaded(Result<Vec<settings::LabelRow>, String>),
+    AutoAddSelected(usize),
+    AutoAddAdd,
+    AutoAddRemove,
+    AutoAddField(WatchField, String),
+    AutoAddEnabled(bool),
+    AutoAddPaused(bool),
+    AutoAddAction(SuccessAction),
+    AutoAddScanNow,
+    AutoAddStatusLoaded(Result<Vec<settings::AutoAddStatusRow>, String>),
+    AutoAddScanned(Result<connection::ScanTotals, String>),
     SelectLabelFilter(String),
     ChooseLabel(Option<String>),
     LabelsAssigned(Result<usize, String>),
@@ -633,7 +646,8 @@ impl App {
                 request,
                 config,
                 labels,
-            } => self.settings_loaded(request, config, labels),
+                auto_add,
+            } => self.settings_loaded(request, config, labels, auto_add),
             Message::SettingsSaved {
                 request,
                 toml,
@@ -664,6 +678,75 @@ impl App {
             Message::LabelDeleteConfirmed => self.delete_label(),
             Message::LabelDeleted { name, result } => self.label_deleted(name, result),
             Message::LabelsLoaded(result) => self.labels_loaded(result),
+            Message::AutoAddSelected(index) => {
+                if index < self.settings.autoadd.rows.len() {
+                    self.settings.autoadd_selected = Some(index);
+                }
+                Task::none()
+            }
+            Message::AutoAddAdd => {
+                self.settings.add_watch();
+                Task::none()
+            }
+            Message::AutoAddRemove => {
+                self.settings.remove_watch();
+                Task::none()
+            }
+            Message::AutoAddField(field, value) => {
+                if let Some(row) = self.settings.selected_watch_mut() {
+                    row.set(field, value);
+                }
+                Task::none()
+            }
+            Message::AutoAddEnabled(value) => {
+                if let Some(row) = self.settings.selected_watch_mut() {
+                    row.enabled = value;
+                }
+                Task::none()
+            }
+            Message::AutoAddPaused(value) => {
+                if let Some(row) = self.settings.selected_watch_mut() {
+                    row.add_paused = value;
+                }
+                Task::none()
+            }
+            Message::AutoAddAction(action) => {
+                if let Some(row) = self.settings.selected_watch_mut() {
+                    row.on_success = action;
+                }
+                Task::none()
+            }
+            Message::AutoAddScanNow => self.run_auto_add_scan(),
+            Message::AutoAddStatusLoaded(result) => {
+                match result {
+                    Ok(rows) => self.settings.autoadd_status = rows,
+                    Err(error) => self.settings.error = Some(format!("AutoAdd: {error}")),
+                }
+                Task::none()
+            }
+            Message::AutoAddScanned(result) => match result {
+                Ok(totals) => {
+                    self.settings.loading = false;
+                    self.settings.message = format!(
+                        "Scan: {} added, {} duplicate, {} failed, {} invalid, {} deferred",
+                        totals.added,
+                        totals.duplicates,
+                        totals.failed,
+                        totals.invalid,
+                        totals.deferred
+                    );
+                    Task::batch([
+                        self.load_auto_add_status(),
+                        self.refresh_page(),
+                        self.load_labels(),
+                    ])
+                }
+                Err(error) => {
+                    self.settings.loading = false;
+                    self.settings.error = Some(error);
+                    Task::none()
+                }
+            },
             Message::SelectLabelFilter(name) => {
                 self.label_filter = name;
                 self.state_filter = None;
@@ -1873,12 +1956,14 @@ impl App {
                 let labels = connection::labels(&client)
                     .await
                     .map(|entries| entries.into_iter().map(settings::LabelRow::from).collect());
-                (request, config, labels)
+                let auto_add = connection::auto_add_status(&client).await;
+                (request, config, labels, auto_add)
             },
-            |(request, config, labels)| Message::SettingsLoaded {
+            |(request, config, labels, auto_add)| Message::SettingsLoaded {
                 request,
                 config,
                 labels,
+                auto_add,
             },
         )
     }
@@ -1888,6 +1973,7 @@ impl App {
         request: u64,
         config: Result<connection::ConfigSnapshot, String>,
         labels: Result<Vec<settings::LabelRow>, String>,
+        auto_add: Result<Vec<settings::AutoAddStatusRow>, String>,
     ) -> Task<Message> {
         if request != self.settings_request {
             return Task::none();
@@ -1916,7 +2002,42 @@ impl App {
                 }
             }
         }
+        match auto_add {
+            Ok(rows) => self.settings.autoadd_status = rows,
+            Err(error) => {
+                if self.settings.error.is_none() {
+                    self.settings.error = Some(format!("autoadd: {error}"));
+                }
+            }
+        }
         Task::none()
+    }
+
+    fn load_auto_add_status(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { connection::auto_add_status(&client).await },
+            Message::AutoAddStatusLoaded,
+        )
+    }
+
+    fn run_auto_add_scan(&mut self) -> Task<Message> {
+        if self.settings.loading {
+            return Task::none();
+        }
+        let Some(client) = self.client.clone() else {
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        self.settings.loading = true;
+        self.settings.error = None;
+        self.settings.message = "Scanning watch directories...".to_owned();
+        Task::perform(
+            async move { connection::scan_auto_add(&client, "").await },
+            Message::AutoAddScanned,
+        )
     }
 
     fn save_settings(&mut self) -> Task<Message> {
@@ -1927,7 +2048,7 @@ impl App {
             self.settings.error = Some("Not connected".to_owned());
             return Task::none();
         };
-        let toml = match self.settings.form.render(&self.settings.raw) {
+        let toml = match self.settings.render() {
             Ok(toml) => toml,
             Err(error) => {
                 self.settings.error = Some(error);
@@ -1970,6 +2091,7 @@ impl App {
                 self.settings.revision = revision;
                 self.settings.raw = toml;
                 self.settings.baseline = self.settings.form.clone();
+                self.settings.autoadd_baseline = self.settings.autoadd.clone();
                 self.settings.error = None;
                 self.settings.message = format!("Saved revision {revision}");
                 Task::batch([self.refresh_page(), self.load_labels()])
@@ -2211,12 +2333,10 @@ impl App {
         let body: Element<Message> = match settings.tab {
             Tab::Connection => self.settings_connection_view(),
             Tab::Session => self.settings_session_view(),
+            Tab::AutoAdd => self.settings_auto_add_view(),
             Tab::Labels => self.settings_labels_view(),
         };
-        let dirty = match settings.tab {
-            Tab::Labels => settings.label_dirty(),
-            Tab::Connection | Tab::Session => settings.dirty(),
-        };
+        let dirty = settings.dirty_tab(settings.tab);
 
         let mut summary = text("")
             .size(11)
@@ -2241,12 +2361,12 @@ impl App {
 
         let save = match settings.tab {
             Tab::Labels => Message::LabelSave,
-            Tab::Connection | Tab::Session => Message::SettingsSave,
+            Tab::Connection | Tab::Session | Tab::AutoAdd => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
                 Tab::Labels => settings.label_new || settings.label_selected.is_some(),
-                Tab::Connection | Tab::Session => true,
+                Tab::Connection | Tab::Session | Tab::AutoAdd => true,
             };
         let footer = row![
             summary,
@@ -2343,6 +2463,225 @@ impl App {
         .spacing(10)
         .max_width(560.0)
         .into()
+    }
+
+    fn settings_auto_add_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let rows: Vec<Element<Message>> = settings
+            .autoadd
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let selected = settings.autoadd_selected == Some(index);
+                let status = settings
+                    .autoadd_status
+                    .iter()
+                    .find(|status| status.path == row.path.trim());
+                let detail: Element<Message> = match status {
+                    Some(status) if !status.last_error.is_empty() => {
+                        text(status.last_error.clone())
+                            .size(10)
+                            .color(theme::ERROR)
+                            .into()
+                    }
+                    Some(status) => text(status.summary())
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .into(),
+                    None if row.enabled => text("not scanned yet")
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .into(),
+                    None => text("disabled").size(10).color(theme::TEXT_MUTED).into(),
+                };
+                let path = if row.path.trim().is_empty() {
+                    "(no path)".to_owned()
+                } else {
+                    row.path.trim().to_owned()
+                };
+                let label = if row.label.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("#{}", row.label.trim())
+                };
+                button(
+                    column![
+                        row![
+                            text(glyph::TAG).font(icons::solid()).size(11.0).color(
+                                if row.enabled {
+                                    theme::PRIMARY
+                                } else {
+                                    theme::TEXT_MUTED
+                                }
+                            ),
+                            text(path).size(12),
+                            horizontal_space(),
+                            text(label).size(10).color(theme::TEXT_MUTED),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                        detail,
+                    ]
+                    .spacing(2),
+                )
+                .on_press(Message::AutoAddSelected(index))
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::SURFACE
+                        } else {
+                            theme::BG_SECONDARY
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_SECONDARY
+                    },
+                    border: iced::Border {
+                        color: if selected {
+                            theme::PRIMARY
+                        } else {
+                            theme::BG_SECONDARY
+                        },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = column![
+            row![
+                text("Watch directories").size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button("Add", Message::AutoAddAdd, !settings.loading),
+                action_button(
+                    "Remove",
+                    Message::AutoAddRemove,
+                    settings.autoadd_selected.is_some() && !settings.loading,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(6)
+        .width(Length::Fixed(330.0))
+        .height(Length::Fill);
+
+        let editor: Element<Message> = if settings.selected_watch().is_some() {
+            self.auto_add_editor_view()
+        } else {
+            column![
+                text("Select a watch directory, or add one.")
+                    .size(12)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .into()
+        };
+
+        let added: u32 = settings
+            .autoadd_status
+            .iter()
+            .map(|status| status.added)
+            .sum();
+        let pending: u32 = settings
+            .autoadd_status
+            .iter()
+            .map(|status| status.pending)
+            .sum();
+        let invalid: u32 = settings
+            .autoadd_status
+            .iter()
+            .map(|status| status.invalid)
+            .sum();
+        let deferred: u32 = settings
+            .autoadd_status
+            .iter()
+            .map(|status| status.deferred)
+            .sum();
+        let totals = text(format!(
+            "{added} added · {pending} pending · {invalid} invalid · {deferred} deferred"
+        ))
+        .size(11)
+        .color(theme::TEXT_MUTED);
+
+        row![
+            list,
+            container(
+                column![
+                    scrollable(editor).height(Length::Fill),
+                    totals,
+                    row![
+                        horizontal_space(),
+                        action_button("Scan now", Message::AutoAddScanNow, !settings.loading),
+                    ],
+                ]
+                .spacing(4)
+                .height(Length::Fill)
+            )
+            .padding([0, 12])
+            .width(Length::Fill)
+            .height(Length::Fill),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn auto_add_editor_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let Some(row) = settings.selected_watch() else {
+            return text("").size(1).into();
+        };
+        let mut editor = column![
+            watch_field_view(row, WatchField::Path, "/data/watch"),
+            row![
+                watch_field_view(row, WatchField::Label, "movies"),
+                watch_field_view(row, WatchField::SavePath, "session default"),
+            ]
+            .spacing(8),
+            row![
+                checkbox("Enabled", row.enabled)
+                    .on_toggle(Message::AutoAddEnabled)
+                    .size(14)
+                    .text_size(12),
+                checkbox("Add paused", row.add_paused)
+                    .on_toggle(Message::AutoAddPaused)
+                    .size(14)
+                    .text_size(12),
+            ]
+            .spacing(16),
+            column![
+                text("After adding").size(11).color(theme::TEXT_MUTED),
+                row![
+                    watch_action(SuccessAction::Delete, row.on_success),
+                    watch_action(SuccessAction::Keep, row.on_success),
+                    watch_action(SuccessAction::Move, row.on_success),
+                ]
+                .spacing(6),
+            ]
+            .spacing(3),
+        ]
+        .spacing(10);
+        editor = editor.push(watch_field_view(row, WatchField::MinFree, "0 (disabled)"));
+        if row.on_success == SuccessAction::Move {
+            editor = editor.push(watch_field_view(
+                row,
+                WatchField::MoveTo,
+                "/data/watch/done",
+            ));
+        }
+        editor.max_width(560.0).into()
     }
 
     fn settings_labels_view(&self) -> Element<'_, Message> {
@@ -3580,6 +3919,55 @@ impl App {
         })
         .into()
     }
+}
+
+fn watch_field_view<'a>(
+    row: &'a settings::WatchRow,
+    field: WatchField,
+    placeholder: &'a str,
+) -> Element<'a, Message> {
+    column![
+        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text_input(placeholder, row.text(field))
+            .style(muted_input_style)
+            .width(Length::Fill)
+            .on_input(move |value| Message::AutoAddField(field, value)),
+    ]
+    .spacing(3)
+    .into()
+}
+
+fn watch_action(action: SuccessAction, current: SuccessAction) -> Element<'static, Message> {
+    let selected = action == current;
+    button(text(action.label()).size(11))
+        .on_press(Message::AutoAddAction(action))
+        .padding([5, 12])
+        .style(move |_theme: &iced::Theme, _status| button::Style {
+            background: Some(
+                if selected {
+                    theme::SURFACE
+                } else {
+                    theme::BG_SECONDARY
+                }
+                .into(),
+            ),
+            text_color: if selected {
+                theme::BRIGHT
+            } else {
+                theme::TEXT_SECONDARY
+            },
+            border: iced::Border {
+                color: if selected {
+                    theme::PRIMARY
+                } else {
+                    theme::BORDER
+                },
+                width: if selected { 1.0 } else { 0.0 },
+                radius: 4.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
 }
 
 fn settings_tab(tab: Tab, active: bool) -> Element<'static, Message> {

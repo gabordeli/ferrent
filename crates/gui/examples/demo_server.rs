@@ -98,12 +98,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .assign(index as u64, Some(name.to_owned()))
             .expect("assign");
     }
+    let watch_dir = data_dir.join("watch");
+    std::fs::create_dir_all(&watch_dir)?;
+    std::fs::write(
+        watch_dir.join("demo-auto.torrent"),
+        b"d4:infod6:lengthi9e4:name8:demo.mkvee",
+    )?;
+    let config = ConfigStore::default();
+    config.apply_toml(
+        &format!(
+            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n",
+            watch_dir.display().to_string()
+        ),
+        0,
+    )?;
     let state = Arc::new(AppState::new(
         Box::new(engine),
         mirror,
         watch,
         Box::new(MemoryStore::new()),
-        ConfigStore::default(),
+        config,
         TorrentControl::default(),
         labels,
         "secret",
