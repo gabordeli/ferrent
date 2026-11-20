@@ -16,7 +16,9 @@ use ferrent_gui::table::{
 };
 use ferrent_gui::theme;
 use ferrent_protocol::client::AuthClient;
-use ferrent_protocol::v1::{SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker};
+use ferrent_protocol::v1::{
+    SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker,
+};
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
@@ -1412,9 +1414,7 @@ impl App {
             self.status = "Only unfinished torrents can be reordered".to_owned();
             return Task::none();
         }
-        ids.sort_by_key(|(position, id)| {
-            (if *position < 0 { i32::MAX } else { *position }, *id)
-        });
+        ids.sort_by_key(|(position, id)| (if *position < 0 { i32::MAX } else { *position }, *id));
         if !up {
             ids.reverse();
         }
@@ -2292,13 +2292,13 @@ impl App {
             .any(|torrent| torrent.state != TorrentState::Seeding as i32);
         let icons = row![
             toolbar_icon(glyph::PLUS, "Add torrent", Message::PickTorrent, true),
-            toolbar_icon(glyph::TRASH, "Remove selected", Message::OpenRemove, selected > 0),
             toolbar_icon(
-                glyph::SEARCH,
-                "Search",
-                Message::ToggleSearch,
-                true
+                glyph::TRASH,
+                "Remove selected",
+                Message::OpenRemove,
+                selected > 0
             ),
+            toolbar_icon(glyph::SEARCH, "Search", Message::ToggleSearch, true),
             toolbar_icon(
                 glyph::PAUSE,
                 "Pause selected",
@@ -2420,21 +2420,33 @@ impl App {
         self.details_error = None;
         match self.details_tab {
             DetailsTab::Files => Task::perform(
-                async move { connection::files(&client, id).await.map(DetailsPayload::Files) },
+                async move {
+                    connection::files(&client, id)
+                        .await
+                        .map(DetailsPayload::Files)
+                },
                 |result| match result {
                     Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
                     Err(error) => Message::DetailsFailed(error),
                 },
             ),
             DetailsTab::Peers => Task::perform(
-                async move { connection::peers(&client, id).await.map(DetailsPayload::Peers) },
+                async move {
+                    connection::peers(&client, id)
+                        .await
+                        .map(DetailsPayload::Peers)
+                },
                 |result| match result {
                     Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
                     Err(error) => Message::DetailsFailed(error),
                 },
             ),
             DetailsTab::Trackers => Task::perform(
-                async move { connection::trackers(&client, id).await.map(DetailsPayload::Trackers) },
+                async move {
+                    connection::trackers(&client, id)
+                        .await
+                        .map(DetailsPayload::Trackers)
+                },
                 |result| match result {
                     Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
                     Err(error) => Message::DetailsFailed(error),
@@ -2477,7 +2489,10 @@ impl App {
         match self.details_tab {
             DetailsTab::General => column![
                 row![
-                    text(&torrent.name).size(13).font(theme::medium()).width(Length::Fill),
+                    text(&torrent.name)
+                        .size(13)
+                        .font(theme::medium())
+                        .width(Length::Fill),
                     text(table::state_label(torrent.state))
                         .size(11)
                         .color(table::state_color(torrent.state)),
@@ -2485,11 +2500,7 @@ impl App {
                 .spacing(12),
                 row![
                     detail_row("Size", format_size(torrent.total_bytes), dim),
-                    detail_row(
-                        "Progress",
-                        format!("{:.1}%", torrent.progress * 100.0),
-                        dim
-                    ),
+                    detail_row("Progress", format!("{:.1}%", torrent.progress * 100.0), dim),
                     detail_row("Down", table::format_rate(torrent.download_rate), dim),
                     detail_row("Up", table::format_rate(torrent.upload_rate), dim),
                 ]
@@ -2550,7 +2561,9 @@ impl App {
                         row![
                             text(&file.path).size(11).width(Length::Fill),
                             text(format_size(file.size)).size(11).color(dim),
-                            text(format!("{:.0}%", file.progress * 100.0)).size(11).color(dim),
+                            text(format!("{:.0}%", file.progress * 100.0))
+                                .size(11)
+                                .color(dim),
                             text(format!("prio {}", file.priority)).size(11).color(dim),
                         ]
                         .spacing(16)
@@ -2576,7 +2589,9 @@ impl App {
                         row![
                             text(&peer.endpoint).size(11).width(Length::Fixed(190.0)),
                             text(&peer.client).size(11).width(Length::Fill),
-                            text(format!("{:.0}%", peer.progress * 100.0)).size(11).color(dim),
+                            text(format!("{:.0}%", peer.progress * 100.0))
+                                .size(11)
+                                .color(dim),
                             text(format!("↓ {}", table::format_rate(peer.download_rate)))
                                 .size(11)
                                 .color(dim),
@@ -2669,7 +2684,10 @@ impl App {
 
     fn pending_details(&self, dim: Color) -> Element<'_, Message> {
         if let Some(error) = &self.details_error {
-            text(format!("Load failed: {error}")).size(12).color(theme::ERROR).into()
+            text(format!("Load failed: {error}"))
+                .size(12)
+                .color(theme::ERROR)
+                .into()
         } else {
             text("Loading…").size(12).color(dim).into()
         }
@@ -2681,17 +2699,17 @@ impl App {
             .last_config
             .as_ref()
             .map_or("", |config| config.server.as_str());
-        let (down, up, active, total) = self.server_status.as_ref().map_or(
-            (0, 0, 0, self.page.total),
-            |status| {
-                (
-                    status.download_rate,
-                    status.upload_rate,
-                    status.active,
-                    status.torrent_count,
-                )
-            },
-        );
+        let (down, up, active, total) =
+            self.server_status
+                .as_ref()
+                .map_or((0, 0, 0, self.page.total), |status| {
+                    (
+                        status.download_rate,
+                        status.upload_rate,
+                        status.active,
+                        status.torrent_count,
+                    )
+                });
         container(
             row![
                 text("●").size(9).color(color),
@@ -2700,8 +2718,12 @@ impl App {
                 horizontal_space(),
                 text(format!("↓ {}", table::format_rate(down))).size(11),
                 text(format!("↑ {}", table::format_rate(up))).size(11),
-                text(format!("{active} active")).size(11).color(theme::TEXT_SECONDARY),
-                text(format!("{total} torrents")).size(11).color(theme::TEXT_SECONDARY),
+                text(format!("{active} active"))
+                    .size(11)
+                    .color(theme::TEXT_SECONDARY),
+                text(format!("{total} torrents"))
+                    .size(11)
+                    .color(theme::TEXT_SECONDARY),
             ]
             .spacing(14)
             .align_y(iced::Alignment::Center),
@@ -2826,10 +2848,7 @@ fn nav_button(
     let selected = active == filter;
     let content: Element<Message> = if expanded {
         row![
-            text(icon)
-                .font(icons::solid())
-                .size(13.0)
-                .color(icon_color),
+            text(icon).font(icons::solid()).size(13.0).color(icon_color),
             text(label).size(13),
             horizontal_space(),
             text(count.to_string()).size(11).color(theme::TEXT_MUTED),
@@ -2838,27 +2857,24 @@ fn nav_button(
         .align_y(iced::Alignment::Center)
         .into()
     } else {
-        container(
-            text(icon)
-                .font(icons::solid())
-                .size(14.0)
-                .color(icon_color),
-        )
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        .into()
+        container(text(icon).font(icons::solid()).size(14.0).color(icon_color))
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .into()
     };
     button(content)
         .on_press(Message::SelectCategory(filter))
         .width(Length::Fill)
         .padding(nav_padding(expanded))
         .style(move |_theme: &iced::Theme, _status| button::Style {
-            background: Some(if selected {
-                theme::SURFACE
-            } else {
-                theme::BG_SECONDARY
-            }
-            .into()),
+            background: Some(
+                if selected {
+                    theme::SURFACE
+                } else {
+                    theme::BG_SECONDARY
+                }
+                .into(),
+            ),
             text_color: if selected {
                 theme::TEXT
             } else {
@@ -2887,10 +2903,7 @@ fn nav_stat(
 ) -> Element<'static, Message> {
     let content: Element<Message> = if expanded {
         row![
-            text(icon)
-                .font(icons::solid())
-                .size(13.0)
-                .color(icon_color),
+            text(icon).font(icons::solid()).size(13.0).color(icon_color),
             text(label).size(13).color(theme::TEXT_SECONDARY),
             horizontal_space(),
             text(count.to_string()).size(11).color(theme::TEXT_MUTED),
@@ -2899,15 +2912,10 @@ fn nav_stat(
         .align_y(iced::Alignment::Center)
         .into()
     } else {
-        container(
-            text(icon)
-                .font(icons::solid())
-                .size(14.0)
-                .color(icon_color),
-        )
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        .into()
+        container(text(icon).font(icons::solid()).size(14.0).color(icon_color))
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .into()
     };
     container(content)
         .padding(nav_padding(expanded))
@@ -2943,22 +2951,24 @@ fn toolbar_icon(
         iced::widget::tooltip::Position::Top,
     )
     .gap(6);
-    let mut control = button(labeled).padding([7, 10]).style(move |_theme, _status| {
-        button::Style {
-            background: Some(if enabled {
-                theme::BG_SECONDARY
-            } else {
-                theme::BG
-            }
-            .into()),
+    let mut control = button(labeled)
+        .padding([7, 10])
+        .style(move |_theme, _status| button::Style {
+            background: Some(
+                if enabled {
+                    theme::BG_SECONDARY
+                } else {
+                    theme::BG
+                }
+                .into(),
+            ),
             border: iced::Border {
                 color: theme::BORDER,
                 width: 1.0,
                 radius: 4.0.into(),
             },
             ..button::Style::default()
-        }
-    });
+        });
     if enabled {
         control = control.on_press(message);
     }
@@ -2995,25 +3005,17 @@ fn icon_nav(
 ) -> Element<'static, Message> {
     let content: Element<Message> = if expanded {
         row![
-            text(icon)
-                .font(icons::solid())
-                .size(13.0)
-                .color(icon_color),
+            text(icon).font(icons::solid()).size(13.0).color(icon_color),
             text(label).size(13).color(theme::TEXT_SECONDARY),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center)
         .into()
     } else {
-        container(
-            text(icon)
-                .font(icons::solid())
-                .size(14.0)
-                .color(icon_color),
-        )
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        .into()
+        container(text(icon).font(icons::solid()).size(14.0).color(icon_color))
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .into()
     };
     button(content)
         .on_press(message)
@@ -3042,10 +3044,7 @@ fn state_style(state: ConnectionState) -> (&'static str, Color) {
 
 fn detail_row<'a>(label: &'a str, value: String, dim: Color) -> Element<'a, Message> {
     row![
-        text(label)
-            .size(11)
-            .width(Length::Fixed(84.0))
-            .color(dim),
+        text(label).size(11).width(Length::Fixed(84.0)).color(dim),
         text(value).size(12),
     ]
     .spacing(8)

@@ -370,15 +370,47 @@ impl Table<'_> {
             }
         };
         let cells = [
-            (format!("ID{}", marker(SortField::Id)), c.id_right, alignment::Horizontal::Right),
-            (format!("NAME{}", marker(SortField::Name)), c.name_x, alignment::Horizontal::Left),
-            ("SIZE".to_owned(), c.size_right, alignment::Horizontal::Right),
+            (
+                format!("ID{}", marker(SortField::Id)),
+                c.id_right,
+                alignment::Horizontal::Right,
+            ),
+            (
+                format!("NAME{}", marker(SortField::Name)),
+                c.name_x,
+                alignment::Horizontal::Left,
+            ),
+            (
+                "SIZE".to_owned(),
+                c.size_right,
+                alignment::Horizontal::Right,
+            ),
             ("STATUS".to_owned(), c.state_x, alignment::Horizontal::Left),
-            (format!("PROGRESS{}", marker(SortField::Progress)), c.bar_x, alignment::Horizontal::Left),
-            (format!("DOWN{}", marker(SortField::DownloadRate)), c.down_right, alignment::Horizontal::Right),
-            (format!("UP{}", marker(SortField::UploadRate)), c.up_right, alignment::Horizontal::Right),
-            ("SEEDS".to_owned(), c.seeds_right, alignment::Horizontal::Right),
-            ("PEERS".to_owned(), c.peers_right, alignment::Horizontal::Right),
+            (
+                format!("PROGRESS{}", marker(SortField::Progress)),
+                c.bar_x,
+                alignment::Horizontal::Left,
+            ),
+            (
+                format!("DOWN{}", marker(SortField::DownloadRate)),
+                c.down_right,
+                alignment::Horizontal::Right,
+            ),
+            (
+                format!("UP{}", marker(SortField::UploadRate)),
+                c.up_right,
+                alignment::Horizontal::Right,
+            ),
+            (
+                "SEEDS".to_owned(),
+                c.seeds_right,
+                alignment::Horizontal::Right,
+            ),
+            (
+                "PEERS".to_owned(),
+                c.peers_right,
+                alignment::Horizontal::Right,
+            ),
             ("ETA".to_owned(), c.eta_right, alignment::Horizontal::Right),
         ];
         for (content, x, horizontal) in cells {
@@ -468,26 +500,124 @@ fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32, width: f32) {
     let regular = crate::theme::regular();
     let mono = Font::MONOSPACE;
 
-    cell(frame, torrent.id.to_string(), c.id_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
-    cell(frame, short_name(&torrent.name), c.name_x, text_y, TEXT, 12.0, alignment::Horizontal::Left, regular);
-    cell(frame, format_size(torrent.total_bytes), c.size_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+    cell(
+        frame,
+        torrent.id.to_string(),
+        c.id_right,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
+    cell(
+        frame,
+        short_name(&torrent.name),
+        c.name_x,
+        text_y,
+        TEXT,
+        12.0,
+        alignment::Horizontal::Left,
+        regular,
+    );
+    cell(
+        frame,
+        format_size(torrent.total_bytes),
+        c.size_right,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
 
     frame.fill_rectangle(Point::new(c.dot_x, y + 9.0), Size::new(6.0, 6.0), accent);
-    cell(frame, state_label(torrent.state).to_owned(), c.state_x, text_y, accent, 11.0, alignment::Horizontal::Left, regular);
+    cell(
+        frame,
+        state_label(torrent.state).to_owned(),
+        c.state_x,
+        text_y,
+        accent,
+        11.0,
+        alignment::Horizontal::Left,
+        regular,
+    );
 
     let progress = torrent.progress.clamp(0.0, 1.0);
     let bar_y = y + (ROW_HEIGHT - BAR_HEIGHT) / 2.0;
-    frame.fill_rectangle(Point::new(c.bar_x, bar_y), Size::new(BAR_WIDTH, BAR_HEIGHT), BAR_TRACK);
+    frame.fill_rectangle(
+        Point::new(c.bar_x, bar_y),
+        Size::new(BAR_WIDTH, BAR_HEIGHT),
+        BAR_TRACK,
+    );
     let filled = (BAR_WIDTH * progress).round();
     if filled > 0.0 {
-        frame.fill_rectangle(Point::new(c.bar_x, bar_y), Size::new(filled, BAR_HEIGHT), accent);
+        frame.fill_rectangle(
+            Point::new(c.bar_x, bar_y),
+            Size::new(filled, BAR_HEIGHT),
+            accent,
+        );
     }
-    cell(frame, format!("{}%", (progress * 100.0).round() as u32), c.pct_x, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Left, mono);
-    cell(frame, format_rate(torrent.download_rate), c.down_right, text_y, TEXT, 11.0, alignment::Horizontal::Right, mono);
-    cell(frame, format_rate(torrent.upload_rate), c.up_right, text_y, TEXT, 11.0, alignment::Horizontal::Right, mono);
-    cell(frame, torrent.seeds.to_string(), c.seeds_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
-    cell(frame, torrent.peers.to_string(), c.peers_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
-    cell(frame, format_eta(torrent.eta_seconds), c.eta_right, text_y, TEXT_DIM, 11.0, alignment::Horizontal::Right, mono);
+    cell(
+        frame,
+        format!("{}%", (progress * 100.0).round() as u32),
+        c.pct_x,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Left,
+        mono,
+    );
+    cell(
+        frame,
+        format_rate(torrent.download_rate),
+        c.down_right,
+        text_y,
+        TEXT,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
+    cell(
+        frame,
+        format_rate(torrent.upload_rate),
+        c.up_right,
+        text_y,
+        TEXT,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
+    cell(
+        frame,
+        torrent.seeds.to_string(),
+        c.seeds_right,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
+    cell(
+        frame,
+        torrent.peers.to_string(),
+        c.peers_right,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
+    cell(
+        frame,
+        format_eta(torrent.eta_seconds),
+        c.eta_right,
+        text_y,
+        TEXT_DIM,
+        11.0,
+        alignment::Horizontal::Right,
+        mono,
+    );
 }
 
 fn format_eta(seconds: u32) -> String {
