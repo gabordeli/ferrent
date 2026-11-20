@@ -51,16 +51,22 @@ sed -i "s/^version = \"$current\"/version = \"$version\"/" Cargo.toml
 
 git config user.name "ferrent-bot"
 git config user.email "ferrent-bot@users.noreply.github.com"
-git add Cargo.toml
-git commit -q -m "chore(release): $version"
+remote="https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+
+# [skip ci]: the tag pipeline would rebuild what this pipeline already publishes.
+if git diff --quiet -- Cargo.toml; then
+    echo "Cargo.toml already at $version, tagging the current commit"
+else
+    git add Cargo.toml
+    git commit -q -m "chore(release): $version [skip ci]"
+    git push -q "$remote" "HEAD:${CI_DEFAULT_BRANCH:-main}"
+fi
 commit=$(git rev-parse HEAD)
 
-remote="https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-git push -q "$remote" "HEAD:${CI_DEFAULT_BRANCH:-main}"
-
-curl -fsS --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    --data "tag_name=$tag" --data "ref=$commit" --data "message=Release $tag" \
-    "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags" >/dev/null
+# The tag goes through git, so a PAT with write_repository is enough (the
+# tags API additionally needs the api scope).
+git tag -a "$tag" -m "Release $tag" "$commit"
+git push -q "$remote" "refs/tags/$tag"
 
 mkdir -p tmp
 cat >tmp/release.env <<EOF
