@@ -28,3 +28,10 @@ tls-fingerprint.txt
 .vscode/
 *.swp
 *~
+
+# web UI build state
+/webui/node_modules/
+/webui/dist/
+/webui/coverage/
+/webui/test-results/
+/webui/.vite/

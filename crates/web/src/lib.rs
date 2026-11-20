@@ -99,7 +99,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/torrents/{id}/pause", post(api::pause))
         .route("/api/torrents/{id}/resume", post(api::resume))
         .route("/api/torrents/{id}/label", put(api::set_label))
-        .route("/api/labels", get(api::labels))
+        .route("/api/labels", get(api::labels).post(api::create_label))
+        .route(
+            "/api/labels/{name}",
+            axum::routing::delete(api::delete_label),
+        )
         .fallback(get(spa))
         .with_state(state)
 }
@@ -201,14 +205,64 @@ async fn events(State(state): State<Arc<AppState>>, _session: Session) -> Respon
     sse::stream(Arc::clone(&state)).into_response()
 }
 
-/// Placeholder until the SPA lands; the reverse proxy serves the real one.
-async fn spa() -> Response {
-    axum::response::Html(
-        "<!doctype html><meta charset=\"utf-8\"><title>Ferrent</title>\
-         <body style=\"background:#0b1220;color:#c9d4e3;font-family:system-ui;padding:2rem\">\
-         <h1>Ferrent</h1><p>The web UI is not built yet; the API is under <code>/api</code>.</p>",
-    )
-    .into_response()
+/// Serves the built SPA from `spa_dir`, falling back to `index.html` for
+/// client-side routes. Without `spa_dir` a placeholder explains the state.
+async fn spa(State(state): State<Arc<AppState>>, uri: axum::http::Uri) -> Response {
+    let Some(dir) = state.config.spa_dir.clone() else {
+        return axum::response::Html(PLACEHOLDER).into_response();
+    };
+    let requested = uri.path().trim_start_matches('/');
+    let candidate = if requested.is_empty() {
+        dir.join("index.html")
+    } else {
+        dir.join(requested)
+    };
+    if candidate
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let file = if candidate.is_file() {
+        candidate
+    } else {
+        dir.join("index.html")
+    };
+    match std::fs::read(&file) {
+        Ok(bytes) => {
+            let mut response =
+                ([(header::CONTENT_TYPE, content_type(&file))], bytes).into_response();
+            if file
+                .extension()
+                .is_some_and(|extension| extension == "html")
+            {
+                response
+                    .headers_mut()
+                    .insert(header::CACHE_CONTROL, "no-cache".parse().expect("header"));
+            }
+            response
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+const PLACEHOLDER: &str = "<!doctype html><meta charset=\"utf-8\"><title>Ferrent</title>\
+<body style=\"background:#0b1220;color:#c9d4e3;font-family:system-ui;padding:2rem\">\
+<h1>Ferrent</h1><p>The web UI is not built yet; the API is under <code>/api</code>.</p>";
+
+fn content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("json" | "webmanifest") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
 
 /// Reads `X-Forwarded-For` on a request (tests and the proxy set it).

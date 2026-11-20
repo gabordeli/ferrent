@@ -1,0 +1,217 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  ForbiddenError,
+  UnauthorizedError,
+  addTorrentFile,
+  addTorrentMagnet,
+  bulkAction,
+  eventsUrl,
+  getLabels,
+  getSession,
+  listTorrents,
+  login,
+  pauseTorrent,
+  removeTorrent,
+  setLabel,
+  stateName,
+  updateTorrent,
+} from "./api";
+
+type Call = { url: string; init: RequestInit };
+
+let calls: Call[] = [];
+
+function mockFetch(body: unknown, status = 200) {
+  calls = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init: RequestInit = {}) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  mockFetch({});
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("request", () => {
+  it("maps 401 and 403 to typed errors", async () => {
+    mockFetch({ error: "login required" }, 401);
+    await expect(getSession()).rejects.toBeInstanceOf(UnauthorizedError);
+
+    mockFetch({ error: "read only" }, 403);
+    await expect(pauseTorrent("1")).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("surfaces the daemon message", async () => {
+    mockFetch({ error: "label is not defined" }, 400);
+    await expect(setLabel("1", "x")).rejects.toThrow("label is not defined");
+  });
+});
+
+describe("torrents", () => {
+  it("maps the filters and the rows", async () => {
+    mockFetch({
+      torrents: [
+        {
+          id: 7,
+          name: "movie.mkv",
+          total_bytes: 1000,
+          state: 3,
+          progress: 0.5,
+          download_rate: 12,
+          upload_rate: 3,
+          seeds: 1,
+          peers: 2,
+          eta_seconds: 30,
+          save_path: "/data",
+          label: "movies",
+          error: "",
+        },
+      ],
+      total: 1,
+      limit: 50,
+    });
+    const page = await listTorrents(
+      { q: "movie", state: "Downloading", label: "movies", sort: "download_payload_rate" },
+      0,
+      50,
+    );
+    const url = decodeURIComponent(calls[0].url);
+    expect(url).toContain("filter=movie");
+    expect(url).toContain("state=downloading");
+    expect(url).toContain("sort=download_rate");
+    expect(url).toContain("label=movies");
+    expect(page.total).toBe(1);
+    expect(page.torrents[0]).toMatchObject({
+      id: "7",
+      state: "Downloading",
+      progress: 50,
+      download_payload_rate: 12,
+      label: "movies",
+    });
+  });
+
+  it("removes with the file flag and pauses via the REST routes", async () => {
+    mockFetch({ id: 7, removed: true });
+    await removeTorrent("7", true);
+    expect(calls[0].url).toBe("/api/torrents/7?delete_files=true");
+    expect(calls[0].init.method).toBe("DELETE");
+
+    mockFetch({ id: 7, paused: true });
+    await expect(pauseTorrent("7")).resolves.toEqual({ state: "Paused" });
+    expect(calls[0].url).toBe("/api/torrents/7/pause");
+  });
+
+  it("adds a magnet with the staging options", async () => {
+    mockFetch({ id: 9 });
+    await addTorrentMagnet("magnet:?xt=urn:btih:aa", {
+      label: "movies",
+      download_location: "/data/_progress",
+      add_paused: true,
+    });
+    const body = JSON.parse(String(calls[0].init.body));
+    expect(body).toMatchObject({
+      magnet: "magnet:?xt=urn:btih:aa",
+      label: "movies",
+      save_path: "/data/_progress",
+      paused: true,
+    });
+  });
+
+  it("uploads a .torrent as base64 metainfo", async () => {
+    mockFetch({ id: 5 });
+    const file = new File([new Uint8Array([1, 2, 3])], "x.torrent");
+    await addTorrentFile(file, { label: "series" });
+    const body = JSON.parse(String(calls[0].init.body));
+    expect(body.metainfo).toBe(btoa(String.fromCharCode(1, 2, 3)));
+    expect(body.name).toBe("x.torrent");
+    expect(body.label).toBe("series");
+  });
+
+  it("bulk actions report the partial result", async () => {
+    mockFetch({ ok: [1, 2], failed: [{ id: 3, error: "missing" }] });
+    const result = await bulkAction({ action: "pause", torrent_ids: ["1", "2", "3"] });
+    expect(calls[0].url).toBe("/api/torrents/bulk");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ action: "pause", ids: [1, 2, 3] });
+    expect(result.ok).toBe(2);
+    expect(result.failed[0]).toEqual({ id: "3", error: "missing" });
+  });
+});
+
+describe("session, labels and events", () => {
+  it("maps the status into the session shape", async () => {
+    mockFetch({ torrents: 3, download_rate: 5, upload_rate: 2, free_space_bytes: 100 });
+    const session = await getSession();
+    expect(session.num_torrents).toBe(3);
+    expect(session.payload_download_rate).toBe(5);
+    expect(session.free_space).toBe(100);
+  });
+
+  it("counts the unlabelled torrents", async () => {
+    calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push({ url, init: {} });
+        if (url === "/api/labels") {
+          return new Response(
+            JSON.stringify({ labels: [{ name: "movies", torrent_count: 2 }] }),
+          );
+        }
+        return new Response(JSON.stringify({ torrents: 5 }));
+      }),
+    );
+    const labels = await getLabels();
+    expect(labels.labels).toEqual([{ id: "movies", count: 2 }]);
+    expect(labels.no_label).toBe(3);
+  });
+
+  it("keeps the SSE URL cookie-based", () => {
+    expect(eventsUrl()).toBe("/api/events");
+  });
+
+  it("logs in with the password only", async () => {
+    mockFetch({ read_only: false, ttl: 60 });
+    await login("web", "secret");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ password: "secret" });
+  });
+});
+
+describe("mapping helpers", () => {
+  it("names the states and merges SSE fields", () => {
+    expect(stateName(4)).toBe("Seeding");
+    expect(stateName(5)).toBe("Paused");
+    const row = {
+      id: "1",
+      name: "x",
+      state: "Queued",
+      progress: 0,
+      label: "",
+      download_payload_rate: 0,
+      upload_payload_rate: 0,
+      eta: 0,
+      ratio: 0,
+      total_size: 0,
+      save_path: "",
+      time_added: 0,
+      message: "",
+    };
+    updateTorrent(row, { state: 3, progress: 0.25, download_rate: 9, label: "movies" });
+    expect(row.state).toBe("Downloading");
+    expect(row.progress).toBe(25);
+    expect(row.download_payload_rate).toBe(9);
+    expect(row.label).toBe("movies");
+  });
+});

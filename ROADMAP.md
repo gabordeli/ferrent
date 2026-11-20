@@ -625,10 +625,10 @@
 
 **Acceptance**
 
-- [ ] a meglévő SPA a Ferrent API-val fut; a webui2 flow-k működnek.
-- [ ] 10k torrent virtualizált lista; 360/390 px-en nincs vízszintes scroll.
-- [ ] HU/EN, light/dark, offline banner; PWA manifest/SW push nélkül.
-- [ ] Playwright smoke mock API ellen; 0 console error.
+- [x] a meglévő SPA a Ferrent API-val fut: `api.ts` adapter (login, lista, detail, add magnet/fájl, pause/resume/remove, label, bulk, SSE `deltas`); a Deluge-only panelek (queue, per-file priority, push, dirs) default értékkel.
+- [x] 10k torrent: a lista 10 DOM-sort tart (`10001 torrent 50 betöltve`), 360/390 px-en nincs vízszintes scroll (Playwright méri).
+- [x] HU/EN, light/dark, offline banner (`navigator.onLine`), PWA manifest/SW átnevezve Ferrentre.
+- [x] Playwright smoke mock API ellen (3 teszt, 0 console error) + vitest 150 zöld; `webui/dist` kiszolgálása a gatewayből (`spa_dir`, SPA-fallback).
 
 **Files:** `webui/src/api.ts`, `webui/src/types.ts`, `webui/src/App.vue`, `webui/e2e/`
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1 és M7-T2 kész** (gateway + auth + SSE + REST, a REST valódi daemon ellen tesztelve), a következő szelet az **M7-T3 SPA port**.
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T3 kész** (gateway + auth + SSE + REST + SPA port, mobil nézetben ellenőrizve), a következő szelet az **M7-T4 deployment + acceptance**.

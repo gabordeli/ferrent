@@ -1,0 +1,58 @@
+/// <reference types="vitest/config" />
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath, URL } from "node:url";
+import vue from "@vitejs/plugin-vue";
+import { defineConfig, loadEnv } from "vite";
+
+const pkg = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
+) as { version: string };
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const proxyTarget = env.VITE_API_PROXY || "http://127.0.0.1:18099";
+
+  return {
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
+    plugins: [vue()],
+    resolve: {
+      alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+      },
+    },
+    build: {
+      outDir: fileURLToPath(new URL("./dist", import.meta.url)),
+      emptyOutDir: true,
+    },
+    server: {
+      proxy: {
+        "/api": { target: proxyTarget, changeOrigin: true },
+        "/health": { target: proxyTarget, changeOrigin: true },
+      },
+    },
+    test: {
+      environment: "happy-dom",
+      include: ["src/**/*.spec.ts"],
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "lcov"],
+        reportsDirectory: "coverage",
+        include: ["src/**/*.ts", "src/**/*.vue"],
+        exclude: [
+          "src/**/*.spec.ts",
+          "src/env.d.ts",
+          "src/components/__fixtures__.ts",
+        ],
+        thresholds: {
+          statements: 75,
+          branches: 65,
+          functions: 75,
+          lines: 78,
+        },
+      },
+    },
+  };
+});

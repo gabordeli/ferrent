@@ -14,9 +14,10 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
-    ListLabelsRequest, ListTorrentsRequest, PauseTorrentRequest, RemoveTorrentRequest,
-    ResumeTorrentRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentState,
+    AddTorrentRequest, CreateLabelRequest, DeleteLabelRequest, GetStatusRequest,
+    GetTorrentFilesRequest, GetTorrentRequest, Label, ListLabelsRequest, ListTorrentsRequest,
+    PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest, SetTorrentLabelRequest,
+    SortField, Torrent, TorrentState,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -493,6 +494,69 @@ pub async fn labels(
         })
         .collect();
     Ok(Json(json!({ "labels": labels })).into_response())
+}
+
+/// Body of a label creation.
+#[derive(Debug, Default, Deserialize)]
+pub struct LabelCreate {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub color: String,
+}
+
+/// `POST /api/labels`
+pub async fn create_label(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Json(body): Json<LabelCreate>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let name = body.name.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return Err(ApiError::bad("label name must not be empty"));
+    }
+    if name.chars().count() > 64 {
+        return Err(ApiError::bad("label name is too long"));
+    }
+    let color = if body.color.trim().is_empty() {
+        "#2f81f7".to_owned()
+    } else {
+        body.color.trim().to_owned()
+    };
+    let mut client = client(&state)?;
+    client
+        .create_label(CreateLabelRequest {
+            label: Some(Label {
+                name: name.clone(),
+                color,
+                ..Label::default()
+            }),
+        })
+        .await
+        .map_err(grpc)?;
+    Ok((StatusCode::CREATED, Json(json!({ "name": name }))).into_response())
+}
+
+/// `DELETE /api/labels/{name}`
+pub async fn delete_label(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(name): Path<String>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    let response = client
+        .delete_label(DeleteLabelRequest { name: name.clone() })
+        .await
+        .map_err(grpc)?
+        .into_inner();
+    Ok(Json(json!({
+        "name": name,
+        "removed": response.removed,
+        "cleared": response.cleared_assignments,
+    }))
+    .into_response())
 }
 
 #[cfg(test)]
