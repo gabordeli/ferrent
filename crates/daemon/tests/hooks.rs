@@ -39,7 +39,6 @@ impl Fixture {
             LabelState::default(),
             "token",
             base.clone(),
-            base.join("downloads"),
         ));
         Self { base, state }
     }

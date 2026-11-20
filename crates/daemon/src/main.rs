@@ -136,7 +136,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
         labels,
         token,
         data_dir.clone(),
-        download_dir.clone(),
     ));
 
     let listener = TcpListener::bind(&bind).await?;

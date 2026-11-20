@@ -97,6 +97,7 @@ pub async fn add(
             metainfo,
             save_path: save_path.to_owned(),
             total_bytes: 0,
+            label: String::new(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;

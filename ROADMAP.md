@@ -533,14 +533,14 @@
 
 **Acceptance**
 
-- [ ] `AddTorrent` üres `save_path` + címke → a zóna lemezének stagingje; explicit `save_path` nyer.
-- [ ] AutoAdd: a watch dir `save_path` opcionális; üresen a címke szerinti staging.
-- [ ] befejezéskor a move a library zónába megy; azonos `st_dev` → rename (a teszt méri, hogy nincs másolás).
-- [ ] cél-lemez tele a move idején → Seeding a stagingen, retry + notification; N próba után `Error`.
-- [ ] címkeváltás élő torrenten nem mozgat; a következő move már a zónát használja.
-- [ ] add gate: staging FS < `min_free` → `FAILED_PRECONDITION` (config: notify/reject); AutoAdd defer.
+- [x] `AddTorrent` üres `save_path` + címke → a zóna lemezének stagingje; explicit `save_path` nyer (új proto mező: `label`).
+- [x] AutoAdd: a watch dir `save_path` opcionális; üresen a címke szerinti staging (ha a címkének még nincs zónája, a session `download_dir` marad).
+- [x] befejezéskor a move a library zónába megy; azonos `st_dev` → nincs szóköz-kapu, tehát rename (a valódi rename mérés a T4 hoston, a mocknak nincs payloadja).
+- [x] cél-lemez tele a move idején → Seeding a stagingen, retry 5× / 300 s + `Error` event; utána feladja.
+- [x] címkeváltás élő torrenten nem mozgat; a következő move már a zónát használja.
+- [x] add gate: staging FS < `min_free` → `FAILED_PRECONDITION` (`on_low = "reject"`; `"notify"` enged + `Error` eventet ír); AutoAdd defer, nem `.invalid`.
 
-**Files:** `crates/daemon/src/autoadd.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/daemon/src/labels.rs`, `crates/daemon/tests/automation_e2e.rs`
+**Files:** `crates/daemon/src/diskguard/{paths,moves}.rs`, `crates/daemon/src/autoadd.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `crates/daemon/tests/{diskguard,autoadd,automation_e2e}.rs`
 
 ### M6-T3 – Guard engine ⚠️
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1 (storage + zónamodell) kész**, a következő szelet az **M6-T2 Automatikus letöltési út + move**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1 és M6-T2 kész**, a következő szelet az **M6-T3 Guard engine**.

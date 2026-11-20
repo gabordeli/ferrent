@@ -710,8 +710,7 @@ impl crate::rpc::AppState {
         };
         let mut totals = ScanTotals::default();
         for watch in config.autoadd.iter().filter(|watch| watch.enabled) {
-            self.scan_dir(watch, &self.download_dir, &mut totals, force)
-                .await;
+            self.scan_dir(watch, &config, &mut totals, force).await;
         }
         totals
     }
@@ -747,15 +746,14 @@ impl crate::rpc::AppState {
             .expect("autoadd status mutex poisoned")
             .clear_fingerprints_for(path);
         let mut totals = ScanTotals::default();
-        self.scan_dir(&watch, &self.download_dir, &mut totals, true)
-            .await;
+        self.scan_dir(&watch, &config, &mut totals, true).await;
         Some(totals)
     }
 
     async fn scan_dir(
         &self,
         watch: &WatchDir,
-        session_dir: &Path,
+        config: &crate::config::ResolvedConfig,
         totals: &mut ScanTotals,
         force: bool,
     ) {
@@ -798,7 +796,7 @@ impl crate::rpc::AppState {
                     .note_result(&path, &FileResult::waiting());
                 continue;
             }
-            let result = self.process_file(watch, &path, session_dir).await;
+            let result = self.process_file(watch, &path, config).await;
             {
                 let mut status = self.autoadd.lock().expect("autoadd status mutex poisoned");
                 status.note_result(&path, &result);
@@ -822,12 +820,50 @@ impl crate::rpc::AppState {
             .end_scan(&watch.path, None);
     }
 
-    async fn process_file(&self, watch: &WatchDir, path: &Path, session_dir: &Path) -> FileResult {
+    async fn process_file(
+        &self,
+        watch: &WatchDir,
+        path: &Path,
+        config: &crate::config::ResolvedConfig,
+    ) -> FileResult {
         let sources = match read_source(path) {
             Ok(sources) => sources,
             Err(error) => return FileResult::outcome(self.fail(path, &error)),
         };
-        let save_path = watch.save_path(session_dir);
+        // A label resolves to the staging folder of its own disk; without a
+        // label the watch folder's path (or the session default) applies.
+        let save_path = match &watch.save_path {
+            Some(path) => path.clone(),
+            None => {
+                let label = watch.label.as_deref().unwrap_or_default();
+                match crate::diskguard::paths::download_path(config, "", label) {
+                    Ok(path) => path,
+                    Err(message) => {
+                        self.autoadd
+                            .lock()
+                            .expect("autoadd status mutex poisoned")
+                            .note_error(path, format!("staging: {message}"));
+                        return FileResult::outcome(FileOutcome::Deferred);
+                    }
+                }
+            }
+        };
+        match crate::diskguard::paths::space_gate(config, &save_path) {
+            crate::diskguard::paths::SpaceGate::Ok => {}
+            crate::diskguard::paths::SpaceGate::Low(message) => {
+                self.autoadd
+                    .lock()
+                    .expect("autoadd status mutex poisoned")
+                    .note_error(path, message);
+            }
+            crate::diskguard::paths::SpaceGate::Reject(message) => {
+                self.autoadd
+                    .lock()
+                    .expect("autoadd status mutex poisoned")
+                    .note_error(path, message);
+                return FileResult::outcome(FileOutcome::Deferred);
+            }
+        }
         if watch.min_free_bytes > 0 {
             let free = free_bytes(&save_path);
             if free < watch.min_free_bytes {

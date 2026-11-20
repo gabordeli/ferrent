@@ -248,6 +248,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     metainfo,
                     save_path,
                     total_bytes: 0,
+                    label: String::new(),
                 })
                 .await?
                 .into_inner();

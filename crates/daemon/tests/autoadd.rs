@@ -84,7 +84,6 @@ impl Fixture {
             labels,
             "token",
             base.clone(),
-            base.join("downloads"),
         ));
         Self {
             base,
@@ -324,4 +323,30 @@ fn attempt_counters_survive_a_store_reopen() {
         let _ = store.get("nothing");
     }
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[tokio::test]
+async fn a_low_staging_disk_defers_the_add() {
+    let fixture = Fixture::new("lowdisk", watch());
+    let raw = fixture.state.config.toml();
+    let revision = fixture.state.config.revision();
+    fixture
+        .state
+        .config
+        .apply_toml(
+            &format!("{raw}\n[diskguard]\nmin_free_bytes = {}\n", u64::MAX / 2),
+            revision,
+        )
+        .expect("config");
+    fixture.write_torrent("waiting.torrent", "waiting.mkv", 10);
+
+    fixture.state.scan_once().await;
+    let totals = fixture.state.scan_once().await;
+    assert_eq!(totals.deferred, 1, "{totals:?}");
+    assert_eq!(fixture.engine_count(), 0);
+    assert!(
+        fixture.watch.join("waiting.torrent").exists(),
+        "the file stays for a later scan"
+    );
+    assert!(!fixture.watch.join("waiting.torrent.invalid").exists());
 }

@@ -180,6 +180,8 @@ message AddTorrentRequest {
   string save_path = 3;
   // Known size in bytes, or zero when unknown.
   uint64 total_bytes = 4;
+  // Label whose staging folder receives the download; empty for none.
+  string label = 5;
 }
 
 // Response with the engine-assigned torrent id.

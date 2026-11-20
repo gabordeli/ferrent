@@ -203,6 +203,7 @@ async fn hook_runs_appear_in_the_status() {
         .add_torrent(AddTorrentRequest {
             name: "hook.mkv".to_owned(),
             total_bytes: 5,
+            label: String::new(),
             metainfo,
             save_path: String::new(),
         })

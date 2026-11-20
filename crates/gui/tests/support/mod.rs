@@ -46,7 +46,6 @@ pub async fn start_server(port: u16, tls: TlsMaterial) -> TestServer {
         LabelState::default(),
         "secret",
         PathBuf::from("."),
-        PathBuf::from("/tmp"),
     ));
 
     let listener = TcpListener::bind(("127.0.0.1", port))

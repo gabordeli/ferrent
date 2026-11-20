@@ -241,7 +241,6 @@ async fn a_published_event_reaches_the_webhook_and_acks() {
         LabelState::default(),
         "token",
         std::env::temp_dir(),
-        std::env::temp_dir(),
     ));
 
     state
@@ -287,7 +286,6 @@ async fn an_event_without_matching_channels_queues_nothing() {
         TorrentControl::default(),
         LabelState::default(),
         "token",
-        std::env::temp_dir(),
         std::env::temp_dir(),
     ));
     state

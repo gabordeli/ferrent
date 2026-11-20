@@ -114,6 +114,17 @@ impl NotifyConfig {
     }
 }
 
+/// What an add does when the staging filesystem is below the floor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LowAction {
+    /// Refuse the add.
+    #[default]
+    Reject,
+    /// Allow the add and journal a warning.
+    Notify,
+}
+
 /// Storage zones and the disk guard thresholds.
 ///
 /// Zones are the source of truth for where a label's finished payload lives
@@ -130,6 +141,8 @@ pub struct DiskGuardConfig {
     pub margin_bytes: u64,
     /// Poll interval in seconds.
     pub poll_secs: u64,
+    /// Add behaviour below `min_free_bytes`.
+    pub on_low: LowAction,
     /// Library and staging folders.
     pub zone: Vec<Zone>,
 }
@@ -141,6 +154,7 @@ impl Default for DiskGuardConfig {
             min_free_bytes: 0,
             margin_bytes: 0,
             poll_secs: 30,
+            on_low: LowAction::Reject,
             zone: Vec::new(),
         }
     }

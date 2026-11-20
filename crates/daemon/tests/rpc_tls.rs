@@ -59,7 +59,6 @@ async fn start_server(token: &str) -> TestServer {
         LabelState::default(),
         token,
         std::path::PathBuf::from("."),
-        std::path::PathBuf::from("/tmp"),
     ));
 
     let tls = TlsMaterial::generate().expect("generate TLS material");
@@ -105,6 +104,7 @@ async fn tls_auth_and_crud() {
             metainfo: Vec::new(),
             save_path: "/tmp".to_owned(),
             total_bytes: 123,
+            label: String::new(),
         })
         .await
         .expect("add")
@@ -117,6 +117,7 @@ async fn tls_auth_and_crud() {
             metainfo: Vec::new(),
             save_path: "/tmp".to_owned(),
             total_bytes: 123,
+            label: String::new(),
         })
         .await
         .expect("duplicate add")
@@ -222,6 +223,7 @@ async fn label_crud_assignment_and_filter() {
             metainfo: vec![1],
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
+            label: String::new(),
         })
         .await
         .expect("add auto")
@@ -232,6 +234,7 @@ async fn label_crud_assignment_and_filter() {
             metainfo: vec![2],
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
+            label: String::new(),
         })
         .await
         .expect("add other")
@@ -371,6 +374,7 @@ async fn watch_streams_added_and_stays_idle() {
             metainfo: Vec::new(),
             save_path: "/tmp".to_owned(),
             total_bytes: 1,
+            label: String::new(),
         })
         .await
         .expect("add");

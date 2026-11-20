@@ -108,11 +108,12 @@ pub struct AppState {
     pub store: Arc<Mutex<Box<dyn StateStore>>>,
     pub(crate) auth: Auth,
     pub(crate) data_dir: PathBuf,
-    pub(crate) download_dir: PathBuf,
     /// AutoAdd scanner counters, shared with `GetAutoAddStatus`.
     pub(crate) autoadd: Mutex<crate::autoadd::AutoAddStatus>,
     /// Scheduler runtime state, shared with `GetStatus`.
     pub(crate) scheduler: Mutex<crate::scheduler::SchedulerState>,
+    /// Completion moves waiting for space or a target folder.
+    pub(crate) moves: Mutex<BTreeMap<TorrentId, crate::diskguard::moves::PendingMove>>,
 }
 
 impl AppState {
@@ -128,7 +129,6 @@ impl AppState {
         labels: LabelState,
         token: impl Into<String>,
         data_dir: PathBuf,
-        download_dir: PathBuf,
     ) -> Self {
         let (config_watch, _) = broadcast::channel(16);
         Self {
@@ -142,9 +142,9 @@ impl AppState {
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
             data_dir,
-            download_dir,
             autoadd: Mutex::new(crate::autoadd::AutoAddStatus::default()),
             scheduler: Mutex::new(crate::scheduler::SchedulerState::default()),
+            moves: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -332,6 +332,20 @@ impl FerrentService {
         Ok(Some(label))
     }
 
+    /// Assigns an explicit label (already normalised) and its limits.
+    async fn assign_label(&self, id: TorrentId, label: &str) -> Result<(), Status> {
+        {
+            let mut labels = self.state.labels.lock().expect("label state poisoned");
+            labels
+                .assign(id, Some(label.to_owned()))
+                .map_err(Status::invalid_argument)?;
+        }
+        let persisted = label.to_owned();
+        self.persist(move |store| persist::save_torrent_label(store, id, Some(persisted.as_str())))
+            .await?;
+        self.apply_limits(id).await
+    }
+
     async fn apply_auto_labels(&self) -> Result<usize, Status> {
         let (has_matchers, assigned) = {
             let labels = self.state.labels.lock().expect("label state poisoned");
@@ -406,7 +420,34 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<AddTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let request = request.into_inner();
-        let save_path = resolve_save_path(&self.state.download_dir, &request.save_path);
+        let label = crate::labels::Label::normalize_name(&request.label);
+        if !label.is_empty()
+            && self
+                .state
+                .labels
+                .lock()
+                .expect("label state poisoned")
+                .get(&label)
+                .is_none()
+        {
+            return Err(Status::invalid_argument(format!(
+                "label {label:?} is not defined"
+            )));
+        }
+        let config = self
+            .state
+            .config
+            .resolved()
+            .map_err(|error| Status::internal(error.to_string()))?;
+        let save_path = crate::diskguard::paths::download_path(&config, &request.save_path, &label)
+            .map_err(Status::failed_precondition)?;
+        let low = match crate::diskguard::paths::space_gate(&config, &save_path) {
+            crate::diskguard::paths::SpaceGate::Ok => None,
+            crate::diskguard::paths::SpaceGate::Low(message) => Some(message),
+            crate::diskguard::paths::SpaceGate::Reject(message) => {
+                return Err(Status::failed_precondition(message));
+            }
+        };
         let spec = AddTorrent {
             name: request.name,
             total_bytes: request.total_bytes,
@@ -458,7 +499,19 @@ impl Ferrent for FerrentService {
             };
             self.persist(move |store| persist::save_torrent(store, &persisted))
                 .await?;
-            self.match_and_assign(id, &match_name, &trackers).await?;
+            if label.is_empty() {
+                self.match_and_assign(id, &match_name, &trackers).await?;
+            } else {
+                self.assign_label(id, &label).await?;
+            }
+            if let Some(message) = low {
+                let event =
+                    crate::events::NewEvent::new(crate::events::EventKind::Error, id, name.clone())
+                        .with_error(Some(message));
+                if let Err(error) = self.state.publish_event(event).await {
+                    eprintln!("hook journal: {error}");
+                }
+            }
             let event = crate::hooks::added_event(id, &name, &save_path, &infohash);
             if let Err(error) = self.state.publish_event(event).await {
                 eprintln!("hook journal: {error}");
@@ -1113,6 +1166,7 @@ pub async fn serve(
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
     crate::notify::spawn_notifier(Arc::clone(&state));
+    crate::diskguard::moves::spawn_move_retry(Arc::clone(&state));
     let tls_config = ServerTlsConfig::new().identity(Identity::from_pem(
         tls.cert_pem.as_bytes(),
         tls.key_pem.as_bytes(),
@@ -1144,44 +1198,7 @@ pub fn spawn_engine_watcher(state: Arc<AppState>) -> tokio::task::JoinHandle<()>
                             eprintln!("hook journal: {error}");
                         }
                     }
-                    let target = {
-                        let labels = state.labels.lock().expect("label state poisoned");
-                        labels.move_target(id)
-                    };
-                    let Some(target) = target else {
-                        continue;
-                    };
-                    if state
-                        .mirror
-                        .get(id)
-                        .is_some_and(|status| status.save_path == target)
-                    {
-                        continue;
-                    }
-                    let engine = Arc::clone(&state.engine);
-                    let destination = target.clone();
-                    let result = tokio::task::spawn_blocking(move || {
-                        let mut engine = engine.lock().expect("engine mutex poisoned");
-                        engine.move_storage(id, destination)
-                    })
-                    .await;
-                    match result {
-                        Ok(Ok(())) => {
-                            state.mirror.set_save_path(id, &target);
-                            let store = Arc::clone(&state.store);
-                            let _ = tokio::task::spawn_blocking(move || {
-                                let mut store = store.lock().expect("state store mutex poisoned");
-                                if let Err(error) =
-                                    crate::persist::save_torrent_path(&mut **store, id, &target)
-                                {
-                                    eprintln!("save path persist failed for torrent {id}: {error}");
-                                }
-                            })
-                            .await;
-                        }
-                        Ok(Err(error)) => eprintln!("label move failed for torrent {id}: {error}"),
-                        Err(error) => eprintln!("label move task failed for torrent {id}: {error}"),
-                    }
+                    state.handle_finished_move(id).await;
                 }
                 Ok(EngineEvent::StateChanged {
                     id,
@@ -1233,7 +1250,7 @@ fn config_status(error: ConfigError) -> Status {
 /// An empty path means "the daemon default". Relative paths are anchored to
 /// that directory so the result never depends on the daemon's working
 /// directory.
-fn resolve_save_path(download_dir: &Path, requested: &str) -> PathBuf {
+pub(crate) fn resolve_save_path(download_dir: &Path, requested: &str) -> PathBuf {
     let requested = requested.trim();
     if requested.is_empty() {
         return download_dir.to_path_buf();
@@ -1461,7 +1478,6 @@ mod tests {
             labels,
             "token",
             base.clone(),
-            base.join("downloads"),
         ));
         let service = FerrentService::new(Arc::clone(&state));
 
@@ -1544,7 +1560,6 @@ mod tests {
             labels,
             "token",
             PathBuf::from("."),
-            PathBuf::from("/tmp"),
         ));
         let _watcher = spawn_engine_watcher(Arc::clone(&state));
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1595,7 +1610,6 @@ mod tests {
             LabelState::default(),
             "token",
             PathBuf::from("."),
-            PathBuf::from("/tmp"),
         );
 
         assert_eq!(
@@ -1633,5 +1647,119 @@ mod tests {
                 .state,
             EngineState::Paused
         );
+    }
+
+    #[tokio::test]
+    async fn adding_with_a_label_writes_into_its_staging_folder() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("ferrent-add-zone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let staging = base.join("_progress");
+        let library = base.join("Filmek");
+        std::fs::create_dir_all(&staging).expect("staging");
+        std::fs::create_dir_all(&library).expect("library");
+        let config = ConfigStore::default();
+        config
+            .apply_toml(
+                &format!(
+                    r#"
+download_dir = {downloads:?}
+
+[[diskguard.zone]]
+path = {library:?}
+label = "filmek"
+
+[[diskguard.zone]]
+path = {staging:?}
+staging = true
+"#,
+                    downloads = base.join("downloads").display().to_string(),
+                    library = library.display().to_string(),
+                    staging = staging.display().to_string(),
+                ),
+                0,
+            )
+            .expect("config");
+        let mut labels = LabelState::default();
+        labels
+            .upsert(Label {
+                name: "filmek".to_owned(),
+                ..Label::default()
+            })
+            .expect("label");
+        let (watch, _) = broadcast::channel(8);
+        let state = Arc::new(AppState::new(
+            Box::new(MockEngine::new()),
+            Arc::new(StateMirror::new()),
+            watch,
+            Box::new(MemoryStore::new()),
+            config,
+            TorrentControl::default(),
+            labels,
+            "token",
+            base.clone(),
+        ));
+        let service = FerrentService::new(Arc::clone(&state));
+        let added = service
+            .add_torrent(authorized(AddTorrentRequest {
+                name: "film.mkv".to_owned(),
+                metainfo: Vec::new(),
+                save_path: String::new(),
+                total_bytes: 1,
+                label: "Filmek".to_owned(),
+            }))
+            .await
+            .expect("add")
+            .into_inner();
+        assert_eq!(
+            state
+                .engine
+                .lock()
+                .expect("engine")
+                .status(added.id)
+                .expect("status")
+                .save_path,
+            staging
+        );
+        assert_eq!(
+            state.labels.lock().expect("labels").label(added.id),
+            Some("filmek")
+        );
+
+        // The same add is refused when the staging disk is below the floor.
+        let config = ConfigStore::default();
+        config
+            .apply_toml(
+                &format!("[diskguard]\nmin_free_bytes = {}\n", u64::MAX / 2),
+                0,
+            )
+            .expect("config");
+        let state = Arc::new(AppState::new(
+            Box::new(MockEngine::new()),
+            Arc::new(StateMirror::new()),
+            broadcast::channel(8).0,
+            Box::new(MemoryStore::new()),
+            config,
+            TorrentControl::default(),
+            LabelState::default(),
+            "token",
+            base.clone(),
+        ));
+        let service = FerrentService::new(state);
+        let error = service
+            .add_torrent(authorized(AddTorrentRequest {
+                name: "low.mkv".to_owned(),
+                metainfo: Vec::new(),
+                save_path: String::new(),
+                total_bytes: 1,
+                label: String::new(),
+            }))
+            .await
+            .expect_err("low disk");
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition, "{error}");
+        assert!(error.message().contains("required"), "{error}");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

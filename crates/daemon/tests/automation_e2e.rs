@@ -205,7 +205,6 @@ impl Harness {
             labels,
             "token",
             paths.base.clone(),
-            paths.downloads.clone(),
         ));
         tasks.push(spawn_engine_watcher(Arc::clone(&state)));
         Self {
@@ -341,6 +340,14 @@ events = ["finished"]
 path = {watch:?}
 label = "movies"
 
+[[diskguard.zone]]
+path = {library:?}
+label = "movies"
+
+[[diskguard.zone]]
+path = {staging:?}
+staging = true
+
 [[hook]]
 event = "added"
 command = {added_hook:?}
@@ -350,6 +357,8 @@ event = "finished"
 command = {finished_hook:?}
 "#,
                 watch = paths.watch.display().to_string(),
+                library = paths.moved.display().to_string(),
+                staging = paths.downloads.display().to_string(),
                 added_hook = added_hook.display().to_string(),
                 finished_hook = finished_hook.display().to_string(),
             ),
@@ -362,7 +371,6 @@ command = {finished_hook:?}
         .upsert(Label {
             name: "movies".to_owned(),
             color: "#112233".to_owned(),
-            move_completed_path: Some(paths.moved.clone()),
             download_rate_limit: 1024,
             upload_rate_limit: 2048,
             ..Label::default()
