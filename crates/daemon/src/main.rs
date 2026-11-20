@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ferrent_daemon::config::{ConfigStore, ResolvedConfig, read_token_file};
+use ferrent_daemon::control::TorrentControl;
 use ferrent_daemon::persist;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::{StateMirror, TorrentQuery};
@@ -106,10 +107,19 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let (watch, _) = broadcast::channel(1024);
     let _mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
 
+    let mut control = TorrentControl::default();
     for torrent in persisted {
         let id = torrent.id;
+        let paused_by_user = torrent.paused_by_user;
         if let Err(error) = engine.restore_torrent(id, torrent.into_add_torrent()) {
             eprintln!("failed to restore torrent {id}: {error}");
+            continue;
+        }
+        if paused_by_user {
+            control.set_user(id, true);
+            if let Err(error) = engine.pause(id) {
+                eprintln!("failed to pause restored torrent {id}: {error}");
+            }
         }
     }
 
@@ -120,6 +130,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         watch,
         store,
         config_store,
+        control,
         token,
         data_dir.clone(),
         download_dir.clone(),

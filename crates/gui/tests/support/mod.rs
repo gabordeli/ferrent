@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ferrent_daemon::config::ConfigStore;
+use ferrent_daemon::control::TorrentControl;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::MemoryStore;
@@ -40,6 +41,7 @@ pub async fn start_server(port: u16, tls: TlsMaterial) -> TestServer {
         watch,
         store,
         ConfigStore::default(),
+        TorrentControl::default(),
         "secret",
         PathBuf::from("."),
         PathBuf::from("/tmp"),

@@ -11,9 +11,11 @@ use crate::error::CliError;
 pub fn torrent_json(torrent: &Torrent) -> Value {
     json!({
         "id": torrent.id,
+        "infohash": torrent.infohash,
         "name": torrent.name,
         "save_path": torrent.save_path,
         "queue_position": torrent.queue_position,
+        "pause_reasons": torrent.pause_reasons,
         "state": state_label(torrent.state),
         "progress": torrent.progress,
         "total_bytes": torrent.total_bytes,

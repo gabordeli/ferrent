@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use ferrent_engine::{
-    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentEngine, TorrentSource,
+    AddTorrent, EngineError, EngineEvent, EngineSettings, TorrentEngine, TorrentId, TorrentSource,
     TorrentState as EngineState, TorrentStatus,
 };
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
@@ -34,6 +34,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 use crate::config::{ConfigError, ConfigStore};
+use crate::control::{PauseReason, TorrentControl};
 use crate::persist::{self, PersistedTorrent};
 use crate::state::{StateMirror, TorrentQuery, TorrentSort, run_mirror, state_code};
 use crate::store::StateStore;
@@ -93,6 +94,7 @@ pub struct AppState {
     watch: broadcast::Sender<EngineEvent>,
     config: ConfigStore,
     config_watch: broadcast::Sender<u64>,
+    control: Arc<Mutex<TorrentControl>>,
     store: Arc<Mutex<Box<dyn StateStore>>>,
     auth: Auth,
     data_dir: PathBuf,
@@ -108,6 +110,7 @@ impl AppState {
         watch: broadcast::Sender<EngineEvent>,
         store: Box<dyn StateStore>,
         config: ConfigStore,
+        control: TorrentControl,
         token: impl Into<String>,
         data_dir: PathBuf,
         download_dir: PathBuf,
@@ -119,11 +122,42 @@ impl AppState {
             watch,
             config,
             config_watch,
+            control: Arc::new(Mutex::new(control)),
             store: Arc::new(Mutex::new(store)),
             auth: Auth::new(token),
             data_dir,
             download_dir,
         }
+    }
+
+    /// Applies one pause reason to many torrents.
+    ///
+    /// The scheduler and the disk guard use this; the engine only sees the
+    /// torrents whose effective state changed.
+    pub async fn set_pause_reason(
+        &self,
+        ids: &[TorrentId],
+        reason: PauseReason,
+        active: bool,
+    ) -> Result<usize, Status> {
+        let changed = {
+            let mut control = self.control.lock().expect("pause control mutex poisoned");
+            control.set_many(ids, reason, active)
+        };
+        if changed.is_empty() {
+            return Ok(0);
+        }
+        let engine = Arc::clone(&self.engine);
+        tokio::task::spawn_blocking(move || {
+            let mut engine = engine.lock().expect("engine mutex poisoned");
+            if active {
+                engine.pause_many(&changed)
+            } else {
+                engine.resume_many(&changed)
+            }
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))
     }
 
     #[must_use]
@@ -255,6 +289,7 @@ impl Ferrent for FerrentService {
                 save_path,
                 metainfo,
                 resume_data: None,
+                paused_by_user: false,
             };
             self.persist(move |store| persist::save_torrent(store, &persisted))
                 .await?;
@@ -268,7 +303,27 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<PauseTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        self.with_engine(move |engine| engine.pause(id)).await?;
+        let (changed, paused) = {
+            let mut control = self
+                .state
+                .control
+                .lock()
+                .expect("pause control mutex poisoned");
+            let changed = control.set_user(id, true);
+            (changed, control.is_paused(id))
+        };
+        if changed && paused {
+            if let Err(error) = self.with_engine(move |engine| engine.pause(id)).await {
+                self.state
+                    .control
+                    .lock()
+                    .expect("pause control mutex poisoned")
+                    .set_user(id, false);
+                return Err(error);
+            }
+        }
+        self.persist(move |store| persist::save_paused(store, id, true))
+            .await?;
         Ok(Response::new(PauseTorrentResponse {}))
     }
 
@@ -278,7 +333,20 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<ResumeTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        self.with_engine(move |engine| engine.resume(id)).await?;
+        let (changed, paused) = {
+            let mut control = self
+                .state
+                .control
+                .lock()
+                .expect("pause control mutex poisoned");
+            let changed = control.set_user(id, false);
+            (changed, control.is_paused(id))
+        };
+        if changed && !paused {
+            self.with_engine(move |engine| engine.resume(id)).await?;
+        }
+        self.persist(move |store| persist::save_paused(store, id, false))
+            .await?;
         Ok(Response::new(ResumeTorrentResponse {}))
     }
 
@@ -292,6 +360,11 @@ impl Ferrent for FerrentService {
         let delete_files = request.delete_files;
         self.with_engine(move |engine| engine.remove(id, delete_files))
             .await?;
+        self.state
+            .control
+            .lock()
+            .expect("pause control mutex poisoned")
+            .clear(id);
         self.persist(move |store| persist::remove_torrent(store, id))
             .await?;
         Ok(Response::new(RemoveTorrentResponse {}))
@@ -322,8 +395,16 @@ impl Ferrent for FerrentService {
             .mirror
             .get(id)
             .ok_or_else(|| Status::not_found(format!("torrent {id} not found")))?;
+        let mut torrent = to_proto_torrent(status);
+        torrent.pause_reasons = self
+            .state
+            .control
+            .lock()
+            .expect("pause control mutex poisoned")
+            .reasons(id)
+            .bits();
         Ok(Response::new(GetTorrentResponse {
-            torrent: Some(to_proto_torrent(status)),
+            torrent: Some(torrent),
         }))
     }
 
@@ -342,8 +423,22 @@ impl Ferrent for FerrentService {
             limit: request.limit as usize,
         };
         let (torrents, total) = self.state.mirror.query_page(&query);
+        let reasons = self
+            .state
+            .control
+            .lock()
+            .expect("pause control mutex poisoned")
+            .snapshot();
         Ok(Response::new(ListTorrentsResponse {
-            torrents: torrents.into_iter().map(to_proto_torrent).collect(),
+            torrents: torrents
+                .into_iter()
+                .map(|status| {
+                    let id = status.id;
+                    let mut torrent = to_proto_torrent(status);
+                    torrent.pause_reasons = reasons.get(&id).copied().unwrap_or_default().bits();
+                    torrent
+                })
+                .collect(),
             total: total as u32,
         }))
     }
@@ -584,6 +679,7 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
         eta_seconds: status.eta_seconds,
         error,
         queue_position: status.queue_position,
+        pause_reasons: 0,
     }
 }
 
@@ -644,7 +740,17 @@ pub fn spawn_mirror(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_save_path;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use ferrent_engine::{AddTorrent, MockEngine, TorrentEngine, TorrentSource};
+    use tokio::sync::broadcast;
+
+    use super::*;
+    use crate::config::ConfigStore;
+    use crate::control::{PauseReason, TorrentControl};
+    use crate::state::StateMirror;
+    use crate::store::MemoryStore;
 
     #[test]
     fn empty_save_path_uses_the_daemon_default() {
@@ -668,6 +774,68 @@ mod tests {
         assert_eq!(
             resolve_save_path(dir, "/mnt/other"),
             std::path::PathBuf::from("/mnt/other")
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_reasons_pause_and_resume_through_the_engine() {
+        let mut engine = MockEngine::new();
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "bulk".to_owned(),
+                total_bytes: 1,
+                source: TorrentSource::Magnet("magnet:?xt=urn:btih:bulk".to_owned()),
+                save_path: PathBuf::from("/tmp"),
+                resume_data: None,
+            })
+            .expect("add");
+        let (watch, _) = broadcast::channel(8);
+        let state = AppState::new(
+            Box::new(engine),
+            Arc::new(StateMirror::new()),
+            watch,
+            Box::new(MemoryStore::new()),
+            ConfigStore::default(),
+            TorrentControl::default(),
+            "token",
+            PathBuf::from("."),
+            PathBuf::from("/tmp"),
+        );
+
+        assert_eq!(
+            state
+                .set_pause_reason(&[id], PauseReason::Scheduler, true)
+                .await
+                .expect("pause"),
+            1
+        );
+        assert_eq!(
+            state
+                .engine
+                .lock()
+                .expect("engine")
+                .status(id)
+                .expect("status")
+                .state,
+            EngineState::Paused
+        );
+
+        assert_eq!(
+            state
+                .set_pause_reason(&[id], PauseReason::Scheduler, false)
+                .await
+                .expect("resume"),
+            1
+        );
+        assert_ne!(
+            state
+                .engine
+                .lock()
+                .expect("engine")
+                .status(id)
+                .expect("status")
+                .state,
+            EngineState::Paused
         );
     }
 }

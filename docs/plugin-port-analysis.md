@@ -86,7 +86,7 @@ A Settings gomb és a modal már létezik, de üres: ez a port természetes cont
 ## 3. Célarchitektúra: öt közös alap
 
 1. **Config service** – egy `config.toml` szekciókkal + redb a futásidejű állapotnak; `GetConfig`/`SetConfig` `revision`-nal, atomikus apply, hot reload; hibán a régi snapshot marad. A token redacted. A GUI és a CLI ugyanazt használja. **Kész (2026-11-20):** tipizált séma, env-layering, revision + atomic swap + atomikus fájlírás, RPC és CLI; a redb runtime state a label/watch feladatoknál jön.
-2. **Pause authority** – `pause_reasons: {USER, SCHEDULER, DISK_GUARD, RATIO}`; effektív paused = bármelyik ok aktív. Az engine csak az effektív váltást kapja. Restartnál a `USER` perzisztált, a tranziens reasonök újraszámolódnak.
+2. **Pause authority** – `pause_reasons: {USER, SCHEDULER, DISK_GUARD, RATIO}`; effektív paused = bármelyik ok aktív. Az engine csak az effektív váltást kapja. Restartnál a `USER` perzisztált, a tranziens reasonök újraszámolódnak. **Kész (2026-11-20):** `TorrentControl` + reason-bitset, perzisztált `paused` kulcs, bulk `set_many`, `Torrent.pause_reasons`, ADR 0007.
 3. **Effektív beállítás-feloldás** – torrent override > label policy > session default; a label hozzárendelése/levétele csak újraszámol. A move-on-complete a label policy része; a DiskGuard a célt is látja.
 4. **Esemény-journal** – perzisztált, sorrendezett domain események (added/finished/removed/error/disk_low/scheduler_changed) + kurzor. Erre épül a hook, a notifications outbox, az Activity fül és a web SSE. Az engine `Finished` eseménye pontosan egyszer jön.
 5. **Infohash** – `TorrentStatus.infohash`, perzisztált rekord, proto `Torrent.infohash`; duplicate add → `AlreadyExists{id}`, a daemon a meglévő ID-t adja vissza.

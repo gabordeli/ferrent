@@ -220,6 +220,8 @@ message Torrent {
   int32 queue_position = 13;
   // v1 info hash as 40 lowercase hex characters.
   string infohash = 14;
+  // Active pause reasons: 1 user, 2 scheduler, 4 disk guard, 8 ratio.
+  uint32 pause_reasons = 15;
 }
 
 // Sort key for the torrent list.

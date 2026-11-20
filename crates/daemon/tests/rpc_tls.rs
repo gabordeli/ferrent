@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrent_daemon::config::ConfigStore;
+use ferrent_daemon::control::TorrentControl;
 use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::{MemoryStore, StateStore};
@@ -52,6 +53,7 @@ async fn start_server(token: &str) -> TestServer {
         watch,
         store,
         ConfigStore::default(),
+        TorrentControl::default(),
         token,
         std::path::PathBuf::from("."),
         std::path::PathBuf::from("/tmp"),
@@ -143,11 +145,20 @@ async fn tls_auth_and_crud() {
         .torrent
         .expect("torrent");
     assert_eq!(paused.state, TorrentState::Paused as i32);
+    assert_ne!(paused.pause_reasons & 1, 0, "manual pause must be visible");
 
     client
         .resume_torrent(ResumeTorrentRequest { id: added.id })
         .await
         .expect("resume");
+    let resumed = client
+        .get_torrent(GetTorrentRequest { id: added.id })
+        .await
+        .expect("get resumed")
+        .into_inner()
+        .torrent
+        .expect("torrent");
+    assert_eq!(resumed.pause_reasons, 0);
     client
         .remove_torrent(RemoveTorrentRequest {
             id: added.id,

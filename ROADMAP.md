@@ -362,13 +362,13 @@
 
 **Acceptance**
 
-- [ ] property teszt: effektív paused = bármely reason aktív.
-- [ ] kézi pause → scheduler/guard `ok` nem indítja újra; kézi resume → guard `low` újra pause-ol.
-- [ ] restart után a `USER` megmarad, a tranziens reasonök újraszámolódnak.
-- [ ] 10 000 torrenten a bulk váltás < 1 s; csak a korábban futókat resume-olja.
-- [ ] `GetStatus`/`Torrent` tartalmazza a reason kódot; a GUI tooltipben mutatja.
+- [x] property teszt: effektív paused = bármely reason aktív.
+- [x] kézi pause → scheduler/guard `ok` nem indítja újra; kézi resume → guard `low` újra pause-ol.
+- [x] restart után a `USER` megmarad, a tranziens reasonök újraszámolódnak.
+- [x] 10 000 torrenten a bulk váltás < 1 s; csak a korábban futókat resume-olja.
+- [x] `Torrent.pause_reasons` (uint32) a protóban; a GUI General fülön „Paused by” sor.
 
-**Files:** `crates/daemon/src/control.rs`, `crates/daemon/src/state.rs`, `crates/daemon/src/persist.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `docs/adr/0007-pause-authority.md`
+**Files:** `crates/daemon/src/control.rs`, `crates/daemon/src/rpc/mod.rs`, `crates/daemon/src/persist.rs`, `crates/daemon/src/main.rs`, `crates/gui/src/main.rs`, `crates/protocol/proto/ferrent/v1/ferrent.proto`, `docs/adr/0007-pause-authority.md`
 
 ### M4-T4 – Labels core 🤖
 

@@ -2509,6 +2509,18 @@ impl App {
                     ),
                 ]
                 .spacing(24),
+                if torrent.pause_reasons == 0 {
+                    Element::<Message>::from(text(""))
+                } else {
+                    Element::<Message>::from(
+                        text(format!(
+                            "Paused by: {}",
+                            pause_reason_label(torrent.pause_reasons)
+                        ))
+                        .size(11)
+                        .color(theme::TEXT_SECONDARY),
+                    )
+                },
                 if torrent.error.is_empty() {
                     Element::<Message>::from(text(""))
                 } else {
@@ -3046,6 +3058,27 @@ fn action_button<'a>(label: &'a str, message: Message, enabled: bool) -> Element
         button.on_press(message).into()
     } else {
         button.into()
+    }
+}
+
+fn pause_reason_label(bits: u32) -> String {
+    let mut names = Vec::new();
+    if bits & 1 != 0 {
+        names.push("user");
+    }
+    if bits & 2 != 0 {
+        names.push("scheduler");
+    }
+    if bits & 4 != 0 {
+        names.push("disk guard");
+    }
+    if bits & 8 != 0 {
+        names.push("ratio");
+    }
+    if names.is_empty() {
+        "-".to_owned()
+    } else {
+        names.join(", ")
     }
 }
 
