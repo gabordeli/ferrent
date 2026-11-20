@@ -326,7 +326,7 @@ fn the_add_path_of_a_label_points_at_its_staging() {
         base.join("downloads").join("custom")
     );
     assert_eq!(
-        diskguard::paths::space_gate(&resolved, &staging),
+        diskguard::paths::space_gate(&resolved, &staging, 0),
         diskguard::paths::SpaceGate::Ok
     );
 

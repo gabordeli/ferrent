@@ -50,6 +50,7 @@ cargo test --release -p ferrent-daemon --lib a_thousand_zones -- --nocapture
 | Pause alkalmazása | a fenti mérés szerint < 35 ms 4 000 torrentnél |
 | Move retry tele cél esetén | 300 s, max 5 próba, utána `Error` event |
 | Add-kapu (alacsony staging) | azonnali `FAILED_PRECONDITION` (nincs poll) |
+| Preallocate-kapu (`require_space_for_torrent`) | azonnali `FAILED_PRECONDITION`, ha `free < payload + margin`; a méret a metainfóból |
 
 ## M4 – Éles, több lemezes ellenőrzés (2026-11-20)
 

@@ -143,6 +143,8 @@ pub struct DiskGuardConfig {
     pub poll_secs: u64,
     /// Add behaviour below `min_free_bytes`.
     pub on_low: LowAction,
+    /// Refuses an add whose payload plus the margin does not fit.
+    pub require_space_for_torrent: bool,
     /// Library and staging folders.
     pub zone: Vec<Zone>,
 }
@@ -155,6 +157,7 @@ impl Default for DiskGuardConfig {
             margin_bytes: 0,
             poll_secs: 30,
             on_low: LowAction::Reject,
+            require_space_for_torrent: false,
             zone: Vec::new(),
         }
     }

@@ -848,7 +848,8 @@ impl crate::rpc::AppState {
                 }
             }
         };
-        match crate::diskguard::paths::space_gate(config, &save_path) {
+        let payload = sources.iter().map(Source::total_bytes).max().unwrap_or(0);
+        match crate::diskguard::paths::space_gate(config, &save_path, payload) {
             crate::diskguard::paths::SpaceGate::Ok => {}
             crate::diskguard::paths::SpaceGate::Low(message) => {
                 self.autoadd

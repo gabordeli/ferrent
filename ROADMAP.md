@@ -576,9 +576,9 @@
 
 **Acceptance**
 
-- [ ] `[diskguard] require_space_for_torrent = true` (default `false`).
-- [ ] bekapcsolva: `free < total_bytes + margin` → add `FAILED_PRECONDITION`, érthető üzenettel (lemez, kell / van); AutoAdd defer, nem `.invalid`.
-- [ ] kikapcsolva a mai viselkedés (csak `min_free` gate).
+- [x] `[diskguard] require_space_for_torrent = true` (default `false`), GUI checkbox a Storage fülön.
+- [x] bekapcsolva: `free < total_bytes + margin` → add `FAILED_PRECONDITION`, érthető üzenettel (lemez, kell / van); AutoAdd defer, nem `.invalid`. A méret a metainfóból jön, ha a kliens nem küldi.
+- [x] kikapcsolva a mai viselkedés (csak `min_free` gate).
 
 **Files:** `crates/daemon/src/diskguard/`, `crates/daemon/src/rpc/mod.rs`, `tests/`
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1–T4 kész**, a következő az **M6-T5 preallocate-kapu**.
+**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1–T5 kész, M6 teljes**; a következő mérföldkő az **M7 ferrent-web**.

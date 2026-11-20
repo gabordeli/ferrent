@@ -1953,6 +1953,8 @@ pub struct StorageForm {
     pub poll_secs: String,
     /// `true` allows an add below the floor, `false` rejects it.
     pub on_low_notify: bool,
+    /// Refuses an add whose payload plus the margin does not fit.
+    pub require_space: bool,
     pub zones: Vec<ZoneRow>,
 }
 
@@ -1964,6 +1966,7 @@ impl Default for StorageForm {
             margin: "0".to_owned(),
             poll_secs: "30".to_owned(),
             on_low_notify: false,
+            require_space: false,
             zones: Vec::new(),
         }
     }
@@ -1999,6 +2002,10 @@ impl StorageForm {
                 .get("on_low")
                 .and_then(Item::as_str)
                 .is_some_and(|value| value == "notify"),
+            require_space: table
+                .get("require_space_for_torrent")
+                .and_then(Item::as_bool)
+                .unwrap_or(false),
             zones: Vec::new(),
         };
         if let Some(Item::ArrayOfTables(array)) = table.get("zone") {
@@ -2092,6 +2099,7 @@ impl StorageForm {
         } else {
             "reject"
         });
+        table["require_space_for_torrent"] = value(self.require_space);
         if !self.zones.is_empty() {
             let mut array = ArrayOfTables::new();
             for zone in &self.zones {
@@ -2838,6 +2846,7 @@ min_free_bytes = 1073741824
 margin_bytes = 536870912
 poll_secs = 30
 on_low = "notify"
+require_space_for_torrent = true
 
 [[diskguard.zone]]
 path = "/mnt/usbhdd2/Filmek"
@@ -2858,6 +2867,7 @@ staging = true
         assert_eq!(settings.storage.min_free, "1073741824");
         assert_eq!(settings.storage.margin, "536870912");
         assert!(settings.storage.on_low_notify);
+        assert!(settings.storage.require_space);
         assert_eq!(settings.storage.zones.len(), 2);
         assert!(settings.storage.zones[1].staging);
 
@@ -2870,6 +2880,7 @@ staging = true
         assert_eq!(reparsed.zones[2].label, "seed");
         assert!(reparsed.zones[2].enabled);
         assert_eq!(reparsed.poll_secs, "30");
+        assert!(reparsed.require_space);
     }
 
     #[test]

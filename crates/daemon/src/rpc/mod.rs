@@ -448,7 +448,15 @@ impl Ferrent for FerrentService {
             .map_err(|error| Status::internal(error.to_string()))?;
         let save_path = crate::diskguard::paths::download_path(&config, &request.save_path, &label)
             .map_err(Status::failed_precondition)?;
-        let low = match crate::diskguard::paths::space_gate(&config, &save_path) {
+        // The client knows the size only for magnets; a metainfo add gets it
+        // from the info dictionary, which the preallocate gate needs.
+        let total_bytes = if request.total_bytes > 0 {
+            request.total_bytes
+        } else {
+            crate::autoadd::Summary::parse(&request.metainfo)
+                .map_or(0, |summary| summary.total_bytes)
+        };
+        let low = match crate::diskguard::paths::space_gate(&config, &save_path, total_bytes) {
             crate::diskguard::paths::SpaceGate::Ok => None,
             crate::diskguard::paths::SpaceGate::Low(message) => Some(message),
             crate::diskguard::paths::SpaceGate::Reject(message) => {
@@ -457,7 +465,7 @@ impl Ferrent for FerrentService {
         };
         let spec = AddTorrent {
             name: request.name,
-            total_bytes: request.total_bytes,
+            total_bytes,
             source: TorrentSource::Metainfo(request.metainfo),
             save_path,
             resume_data: None,
@@ -1837,6 +1845,39 @@ staging = true
             .expect_err("low disk");
         assert_eq!(error.code(), tonic::Code::FailedPrecondition, "{error}");
         assert!(error.message().contains("required"), "{error}");
+
+        // The preallocate gate refuses a payload that cannot fit.
+        let config = ConfigStore::default();
+        config
+            .apply_toml(
+                "[diskguard]\nrequire_space_for_torrent = true\nmargin_bytes = 0\n",
+                0,
+            )
+            .expect("config");
+        let state = Arc::new(AppState::new(
+            Box::new(MockEngine::new()),
+            Arc::new(StateMirror::new()),
+            broadcast::channel(8).0,
+            Box::new(MemoryStore::new()),
+            config,
+            TorrentControl::default(),
+            LabelState::default(),
+            "token",
+            base.clone(),
+        ));
+        let service = FerrentService::new(state);
+        let error = service
+            .add_torrent(authorized(AddTorrentRequest {
+                name: "huge.mkv".to_owned(),
+                metainfo: Vec::new(),
+                save_path: String::new(),
+                total_bytes: u64::MAX / 2,
+                label: String::new(),
+            }))
+            .await
+            .expect_err("payload does not fit");
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition, "{error}");
+        assert!(error.message().contains("payload"), "{error}");
 
         let _ = std::fs::remove_dir_all(&base);
     }

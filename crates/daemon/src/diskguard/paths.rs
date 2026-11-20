@@ -46,14 +46,28 @@ pub enum SpaceGate {
     Reject(String),
 }
 
-/// Checks the resolved download path against `diskguard.min_free_bytes`.
-pub fn space_gate(config: &ResolvedConfig, path: &Path) -> SpaceGate {
+/// Checks the resolved download path against the disk guard floors.
+///
+/// `total_bytes` is the payload size when known (zero for a magnet without
+/// metadata); the optional preallocate gate needs it to refuse an add that
+/// cannot fit.
+pub fn space_gate(config: &ResolvedConfig, path: &Path, total_bytes: u64) -> SpaceGate {
     let minimum = config.diskguard.min_free_bytes;
-    if minimum == 0 {
+    let preallocate = config.diskguard.require_space_for_torrent && total_bytes > 0;
+    if minimum == 0 && !preallocate {
         return SpaceGate::Ok;
     }
     let free = disk_stat(path).map_or(0, |stat| stat.free);
-    if free >= minimum {
+    if preallocate {
+        let needed = total_bytes.saturating_add(config.diskguard.margin_bytes);
+        if free < needed {
+            return SpaceGate::Reject(format!(
+                "{} has {free} bytes free, {needed} required for the payload plus margin",
+                path.display()
+            ));
+        }
+    }
+    if minimum == 0 || free >= minimum {
         return SpaceGate::Ok;
     }
     let message = format!(
@@ -137,18 +151,30 @@ staging = true
     fn the_space_gate_rejects_or_warns() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"));
         let reject = config(&format!("[diskguard]\nmin_free_bytes = {}\n", u64::MAX / 2));
-        assert!(matches!(space_gate(&reject, path), SpaceGate::Reject(_)));
+        assert!(matches!(space_gate(&reject, path, 0), SpaceGate::Reject(_)));
 
         let notify = config(&format!(
             "[diskguard]\nmin_free_bytes = {}\non_low = \"notify\"\n",
             u64::MAX / 2
         ));
-        assert!(matches!(space_gate(&notify, path), SpaceGate::Low(_)));
+        assert!(matches!(space_gate(&notify, path, 0), SpaceGate::Low(_)));
 
         let off = config("");
-        assert_eq!(space_gate(&off, path), SpaceGate::Ok);
+        assert_eq!(space_gate(&off, path, 0), SpaceGate::Ok);
 
         let roomy = config("[diskguard]\nmin_free_bytes = 1\n");
-        assert_eq!(space_gate(&roomy, path), SpaceGate::Ok);
+        assert_eq!(space_gate(&roomy, path, 0), SpaceGate::Ok);
+
+        // The preallocate gate needs the payload size and ignores unknown ones.
+        let payload =
+            "[diskguard]\nrequire_space_for_torrent = true\nmargin_bytes = 0\n".to_owned();
+        let gate = config(&payload);
+        assert_eq!(space_gate(&gate, path, 0), SpaceGate::Ok, "unknown size");
+        assert_eq!(space_gate(&gate, path, 1024), SpaceGate::Ok);
+        let huge = u64::MAX / 2;
+        match space_gate(&gate, path, huge) {
+            SpaceGate::Reject(message) => assert!(message.contains("required")),
+            other => panic!("expected a rejection, got {other:?}"),
+        }
     }
 }

@@ -232,6 +232,7 @@ enum Message {
     AddLabelChanged(String),
     StorageEnabled(bool),
     StorageOnLow(bool),
+    StorageRequireSpace(bool),
     StorageNumber(StorageField, String),
     ZonePath(usize, String),
     ZoneLabel(usize, String),
@@ -712,6 +713,10 @@ impl App {
             }
             Message::StorageOnLow(notify) => {
                 self.settings.storage.on_low_notify = notify;
+                Task::none()
+            }
+            Message::StorageRequireSpace(value) => {
+                self.settings.storage.require_space = value;
                 Task::none()
             }
             Message::StorageNumber(field, value) => {
@@ -3740,6 +3745,10 @@ impl App {
                 .width(Length::Fixed(80.0)),
             checkbox("Allow low add", storage.on_low_notify)
                 .on_toggle(Message::StorageOnLow)
+                .size(14)
+                .text_size(12),
+            checkbox("Require room for the payload", storage.require_space)
+                .on_toggle(Message::StorageRequireSpace)
                 .size(14)
                 .text_size(12),
         ]

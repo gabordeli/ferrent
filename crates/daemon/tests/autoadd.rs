@@ -350,3 +350,32 @@ async fn a_low_staging_disk_defers_the_add() {
     );
     assert!(!fixture.watch.join("waiting.torrent.invalid").exists());
 }
+
+#[tokio::test]
+async fn a_preallocate_gate_defers_the_add() {
+    let fixture = Fixture::new("prealloc", watch());
+    let raw = fixture.state.config.toml();
+    let revision = fixture.state.config.revision();
+    fixture
+        .state
+        .config
+        .apply_toml(
+            &format!(
+                "{raw}\n[diskguard]\nrequire_space_for_torrent = true\nmargin_bytes = {}\n",
+                u64::MAX / 2
+            ),
+            revision,
+        )
+        .expect("config");
+    fixture.write_torrent("big.torrent", "big.mkv", 10);
+
+    fixture.state.scan_once().await;
+    let totals = fixture.state.scan_once().await;
+    assert_eq!(totals.deferred, 1, "{totals:?}");
+    assert_eq!(fixture.engine_count(), 0);
+    assert!(
+        fixture.watch.join("big.torrent").exists(),
+        "stays for later"
+    );
+    assert!(!fixture.watch.join("big.torrent.invalid").exists());
+}
