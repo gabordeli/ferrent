@@ -598,11 +598,11 @@
 
 **Acceptance**
 
-- [ ] csatlakozik a daemonhoz TLS pinninggel; a tokent nem logolja.
-- [ ] login → session token/cookie; read-only mód; 5/perc limit; logout.
-- [ ] SSE: csak változott torrentek, ≤ 1 msg/s/kliens, 15 s heartbeat; reconnect után read API szinkron.
-- [ ] `/health` és SPA azonos originon; nincs CORS.
-- [ ] ADR 0010: külön binary vs embedded döntés.
+- [x] csatlakozik a daemonhoz TLS pinninggel (CA + opcionális SHA-256 fingerprint); a tokent nem logolja.
+- [x] login → HttpOnly session cookie; read-only mód; 5/perc limit; logout.
+- [x] SSE: csak változott torrentek, coalesce ablak (alap 1 s), 15 s keep-alive; a reconnect utáni read-szinkron a T2 API-val jön.
+- [x] `/health` és a placeholder SPA azonos originon; nincs CORS réteg.
+- [x] ADR 0010: külön binary (nginx terminálja a TLS-t).
 
 **Files:** `crates/web/src/{main,config,auth,sse}.rs`, `docs/adr/0010-web-gateway.md`
 
@@ -853,4 +853,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4-T1–T5 és M5-T1–T6 kész (**M5 teljes**); **M6-T1–T5 kész, M6 teljes**; a következő mérföldkő az **M7 ferrent-web**.
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1 kész** (gateway + auth + SSE, élő smoke a demo daemonnal), a következő szelet az **M7-T2 REST API**.

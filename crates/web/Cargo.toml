@@ -1,0 +1,31 @@
+[package]
+name = "ferrent-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Ferrent web gateway: auth, REST and an SSE bridge to the daemon"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ferrent-web"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+ferrent-protocol = { path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2"
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+toml = "0.8"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

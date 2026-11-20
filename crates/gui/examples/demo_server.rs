@@ -151,10 +151,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )),
         }
     }
+    let downloads = data_dir.join("downloads");
+    std::fs::create_dir_all(&downloads)?;
     let config = ConfigStore::default();
     config.apply_toml(
         &format!(
-            "[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"true\"]\n\n[diskguard]\nenabled = true\nmin_free_bytes = 2147483648\nmargin_bytes = 1073741824\npoll_secs = 30\n\n{zones}",
+            "download_dir = {:?}\n\n[[autoadd]]\npath = {:?}\nlabel = \"movies\"\n\n[[hook]]\nevent = \"added\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"true\"]\n\n[diskguard]\nenabled = true\nmin_free_bytes = 2147483648\nmargin_bytes = 1073741824\npoll_secs = 30\n\n{zones}",
+            downloads.display().to_string(),
             watch_dir.display().to_string()
         ),
         0,
