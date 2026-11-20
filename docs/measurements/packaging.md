@@ -165,3 +165,25 @@ bukó job. A Pages beállítás (branch: `gh-pages`) és a kliens útmutató
 (`docs/apt-install.md`) dokumentálva.
 
 
+
+## M7 – Verzió-lánc (2026-11-20)
+
+`packaging/debian/version.sh` az egyetlen leképezés: a `Cargo.toml` a
+verzióforrás, a tagot ellenőrzi, és csak a Debian-verziót rendereli másképp
+(a pre-release utótag `~`-t kap, hogy az rc **kisebb** legyen a finalnál).
+
+| Tag | Cargo | `.deb` |
+|---|---|---|
+| `v0.1.0` | `0.1.0` | `0.1.0-1` |
+| `v0.1.0-rc1` | `0.1.0-rc1` | `0.1.0~rc1-1` |
+| `v0.2.0` | `0.2.0` | `0.2.0-1` (revízió: `DEB_REVISION`) |
+
+A `build.sh` a `TAG` env-ből számol és `--deb-version`-nel adja át a
+`cargo deb`-nek. Ellenőrzés: `packaging/debian/version.sh --self-test`
+(4 assert), és a `cargo deb --deb-version 0.1.0-2` kézzel is
+`ferrentd_0.1.0-2_amd64.deb`-et adott.
+
+GitLab release: `.gitlab-ci.yml` `release-deb` job `v*` tagon — verzió
+ellenőrzés, amd64+arm64 build, majd `packaging/apt/publish-gitlab.sh` a
+Debian Package Registrybe (`bookworm`/`trixie`/`noble` kódnevekre; a
+`Release`-t a GitLab írja alá a saját kulcsával).

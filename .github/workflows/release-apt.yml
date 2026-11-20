@@ -27,10 +27,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build amd64
-        run: packaging/debian/build.sh debian:12 amd64
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; else tag=""; fi
+          TAG="$tag" packaging/debian/build.sh debian:12 amd64
 
       - name: Build arm64
-        run: packaging/debian/build.sh debian:12 arm64
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; else tag=""; fi
+          TAG="$tag" packaging/debian/build.sh debian:12 arm64
 
       - uses: actions/upload-artifact@v4
         with:

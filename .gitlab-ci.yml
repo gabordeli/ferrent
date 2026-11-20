@@ -2,6 +2,7 @@ stages:
   - cleanup
   - quality
   - sonar
+  - release
 
 # The project runner is a shell executor, so run the tools in Docker explicitly.
 # A previous Docker run can leave root-owned build files; the cleanup job fixes
@@ -57,3 +58,24 @@ sonarqube:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# Tag-driven release: builds both architectures and publishes them to the
+# project's Debian Package Registry (Packages & Registries in the UI). The tag
+# must match the Cargo.toml version; only the Debian rendering differs
+# (v0.1.0-rc1 -> 0.1.0~rc1-1). Verification (systemd containers, qemu) runs
+# locally and in the GitHub workflow, not here.
+release-deb:
+  stage: release
+  needs: []
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]/'
+  script:
+    - packaging/debian/version.sh --self-test
+    - packaging/debian/version.sh "$CI_COMMIT_TAG"
+    - TAG="$CI_COMMIT_TAG" packaging/debian/build.sh debian:12 amd64
+    - TAG="$CI_COMMIT_TAG" packaging/debian/build.sh debian:12 arm64
+    - packaging/apt/publish-gitlab.sh target/debian-dist
+  artifacts:
+    paths:
+      - target/debian-dist/*.deb
+    expire_in: 30 days

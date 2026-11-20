@@ -854,4 +854,4 @@
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
 
-**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T4 kész** LAN-módban (gateway + auth + SSE + REST + SPA + HTTPS + unit/doksi; a publikus reverse proxy későbbi döntés). **M3-T1 kész**: `.deb` + unit + man page, 31 assertes konténer-teszt Debian 12/13-on (`docs/measurements/packaging.md`).
+**Állapot (2026-11-20):** M4, M5 és M6 teljes; **M7-T1–T4 kész** LAN-módban (gateway + auth + SSE + REST + SPA + HTTPS + unit/doksi; a publikus reverse proxy későbbi döntés). **M3-T1 kész** (`.deb` + unit + man page, 32 assertes konténer-teszt), **M3-T2** (statikus libtorrent, egy csomag Debian 12/13 + Ubuntu 24.04-ra, arm64 cross), **M3-T3** (aláírt APT repó + GitLab Debian Package Registry). **Verzió-lánc kész**: Cargo.toml az igazság, tag-ellenőrzés, `0.1.0-rc1` → `0.1.0~rc1-1`.

@@ -26,6 +26,15 @@ esac
 tag="ferrent-deb-builder:${suite/:/}-${arch}"
 out="$root/target/debian-dist"
 
+# Cargo.toml is the version source of truth; a release tag must match it and
+# only changes how the Debian version is rendered (0.1.0-rc1 -> 0.1.0~rc1-1).
+if [ -n "${TAG:-}" ]; then
+    deb_version=$(DEB_REVISION="${DEB_REVISION:-1}" "$root/packaging/debian/version.sh" "$TAG")
+else
+    deb_version=$(DEB_REVISION="${DEB_REVISION:-1}" "$root/packaging/debian/version.sh")
+fi
+echo "== version $deb_version${TAG:+ (tag $TAG)}"
+
 case "$arch" in
 amd64)
     arch_apt=""
@@ -61,6 +70,7 @@ trap 'rm -rf "$work"' EXIT
 
 cat > "$work/Dockerfile" <<EOF
 FROM $base
+ARG DEB_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 $arch_pre
 RUN apt-get update \\
@@ -93,12 +103,14 @@ WORKDIR /src
 ENV PKG_CONFIG_PATH=$pkg_config_path FERRENT_LIBTORRENT_STATIC=1
 $link_env
 RUN cargo build --release -p ferrent-daemon --features libtorrent $cargo_target \\
- && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target --output /out
+ && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target \
+      --deb-version "\$DEB_VERSION" --output /out
 RUN dpkg-deb -f /out/*.deb Depends Architecture
 EOF
 
 echo "== building $tag (libtorrent $LT_VERSION, static)"
-docker build -q -f "$work/Dockerfile" -t "$tag" "$root" >/dev/null
+docker build -q -f "$work/Dockerfile" --build-arg DEB_VERSION="$deb_version" \
+    -t "$tag" "$root" >/dev/null
 
 cid=$(docker create "$tag")
 mkdir -p "$out"
