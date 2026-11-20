@@ -1,8 +1,8 @@
 # MVP (v0.1.0) – end-to-end mérés
 
 Mérve 2026-11-19, Debian 13.7, Intel Iris Xe, 4 000 torrentes
-libtorrent 2.0.11 daemon. A soak még fut; a záró értéket a 24 óra letelte
-után kell beírni.
+libtorrent 2.0.11 daemon; a 24 órás soakot 2026-11-20-án **10 000 torrenten**
+megismételtük (lásd lent).
 
 ## R1 – 4 000 torrent, restart recheck nélkül
 
@@ -66,16 +66,37 @@ stabil állapotból (`/proc/<pid>/status`).
 
 ## 24 órás soak
 
-A soak a 4 000 torrentes daemonon fut, 60 s-os mintavétellel. A nyers
-idősor a futtató gépen `/tmp/ferrent-mvp-soak.csv`; a kezdeti értékek:
+### 10 000 torrentes futás (2026-11-19 18:58 → 2026-11-20 18:58)
+
+A végleges mérés a **10 000 torrentes** daemonon futott, 60 s-os
+mintavétellel (`ci/soak.sh`), commit `8639e0b` (active_limit 20 000). A nyers
+idősor: `/tmp/ferrent-soak-10k.csv` (1 440 minta + záró sor).
+
+| Metrika | Érték | Kapu | Eredmény |
+|---|---:|---|---|
+| Futásidő | 24 óra 14 s, 1 440 minta | 24 óra | ✅ |
+| Crash | 0 (`soak complete` sor) | nincs crash | ✅ |
+| RSS kezdet → vég | 133,7 → 152,9 MB (**+14,3%**) | < 10% | ❌ |
+| RSS csúcs | 160,2 MB (+19,8%) | ≤ 1 GB | ✅ |
+| RSS plateau | 2026-11-20 03:53-tól ~153 MB, 15 órán át lapos | — | ✅ (nem szivárgás) |
+| CPU medián | 6,7% (csúcs 71,1%, induláskor) | — | ✅ |
+| API-válasz | 144/144 tízperces minta, `total=10000` | ≥ 10 percenként | ✅ |
+| `list` RPC | medián 97,5 ms, p95 150 ms, max 224 ms | — | ✅ |
+| `state.redb` / letöltések | 33 MB / 40 MB (10 000 fájl) | — | ~13,7 KB/torrent |
+
+**Értékelés:** a futás crash nélkül végigment, az API minden mintában
+válaszolt, és az RSS a 9. óra után **platón állt** — a +14,3% egyszeri
+növekedés (state + libtorrent handle-ek), nem folyamatos szivárgás. A
+szigorú `<10%` kapu ettől még **piros**; elfogadásáról külön döntés kell.
+
+A korábbi, 4 000 torrentes (félbehagyott) futás referenciaként:
 
 | Idő | RSS | Megjegyzés |
 |---|---:|---|
 | 2026-11-19 16:00 | 69 496 KB | baseline |
 | 2026-11-19 16:04 | 69 716 KB | +0,3% |
 
-A záró értéket és a `nincs crash` / `<10%` eredményt a 24 óra letelte után
-kell beírni. A mintavevő: `ci/soak.sh`.
+A mintavevő: `ci/soak.sh`.
 
 ## Távoli GUI
 
