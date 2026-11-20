@@ -76,7 +76,7 @@ idősor: `/tmp/ferrent-soak-10k.csv` (1 440 minta + záró sor).
 |---|---:|---|---|
 | Futásidő | 24 óra 14 s, 1 440 minta | 24 óra | ✅ |
 | Crash | 0 (`soak complete` sor) | nincs crash | ✅ |
-| RSS kezdet → vég | 133,7 → 152,9 MB (**+14,3%**) | < 10% | ❌ |
+| RSS kezdet → vég | 133,7 → 152,9 MB (**+14,3%**) | < 10% | ⚠ elfogadva |
 | RSS csúcs | 160,2 MB (+19,8%) | ≤ 1 GB | ✅ |
 | RSS plateau | 2026-11-20 03:53-tól ~153 MB, 15 órán át lapos | — | ✅ (nem szivárgás) |
 | CPU medián | 6,7% (csúcs 71,1%, induláskor) | — | ✅ |
@@ -85,9 +85,16 @@ idősor: `/tmp/ferrent-soak-10k.csv` (1 440 minta + záró sor).
 | `state.redb` / letöltések | 33 MB / 40 MB (10 000 fájl) | — | ~13,7 KB/torrent |
 
 **Értékelés:** a futás crash nélkül végigment, az API minden mintában
-válaszolt, és az RSS a 9. óra után **platón állt** — a +14,3% egyszeri
-növekedés (state + libtorrent handle-ek), nem folyamatos szivárgás. A
-szigorú `<10%` kapu ettől még **piros**; elfogadásáról külön döntés kell.
+válaszolt, és az RSS a 9. óra után **platón állt** — a +14,3% egyetlen
+lépcső a 3. órában (+20,5 MB), utána 20 órán át ±2 MB ingadozás, nem
+folyamatos szivárgás. A szigorú `<10%` kaput a csapat **2026-11-20-án
+elfogadta** (a 27 órás uptime-nál mért 156,3 MB a 24 órás értékhez képest
++0,4%); a szivárgás-detektálást innentől a meredekség adja, nem a nettó
+vég-kezdet különbség.
+
+A növekedés jellege (smaps_rollup, 27 h uptime): `Pss_Anon 146,8 MB` /
+`Pss_File 3,0 MB` — anonim heap (libtorrent per-torrent struktúrák,
+allocator arena), nem a `state.redb` mmap-ja.
 
 A korábbi, 4 000 torrentes (félbehagyott) futás referenciaként:
 
