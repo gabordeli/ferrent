@@ -253,8 +253,10 @@ mod tests {
         let start = Instant::now();
         store.batch(ops).expect("batch");
         let batch_elapsed = start.elapsed();
+        // The debug budget has slack for a busy workstation (a running daemon,
+        // GUI and browser add tens of milliseconds); release keeps the tight one.
         let batch_budget = if cfg!(debug_assertions) {
-            Duration::from_millis(250)
+            Duration::from_millis(400)
         } else {
             Duration::from_millis(100)
         };

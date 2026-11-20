@@ -3365,6 +3365,8 @@ impl App {
                 .color(theme::TEXT_MUTED),
                 text_input(placeholder, &value)
                     .style(muted_input_style)
+                    .padding([4, 8])
+                    .size(12)
                     .width(Length::Fill)
                     .on_input(move |text| Message::SchedulerField(field, text)),
             ]
@@ -3522,6 +3524,8 @@ impl App {
                         text(field.label()).size(11).color(theme::TEXT_MUTED),
                         text_input(placeholder, row.text(field))
                             .style(muted_input_style)
+                            .padding([4, 8])
+                            .size(12)
                             .width(Length::Fill)
                             .on_input(move |value| Message::NotifyField(field, value)),
                     ]
@@ -3548,6 +3552,8 @@ impl App {
                         text(field.label()).size(11).color(theme::TEXT_MUTED),
                         text_input(placeholder, row.text(field))
                             .style(muted_input_style)
+                            .padding([4, 8])
+                            .size(12)
                             .width(Length::Fill)
                             .on_input(move |value| Message::NotifyTelegramField(field, value)),
                     ]
@@ -3726,23 +3732,11 @@ impl App {
             );
         }
 
-        let thresholds = row![
+        let flags = row![
             checkbox("Guard enabled", storage.enabled)
                 .on_toggle(Message::StorageEnabled)
                 .size(14)
                 .text_size(12),
-            text_input("0", storage.text(StorageField::MinFree))
-                .style(muted_input_style)
-                .on_input(|value| Message::StorageNumber(StorageField::MinFree, value))
-                .width(Length::Fixed(140.0)),
-            text_input("0", storage.text(StorageField::Margin))
-                .style(muted_input_style)
-                .on_input(|value| Message::StorageNumber(StorageField::Margin, value))
-                .width(Length::Fixed(140.0)),
-            text_input("30", storage.text(StorageField::Poll))
-                .style(muted_input_style)
-                .on_input(|value| Message::StorageNumber(StorageField::Poll, value))
-                .width(Length::Fixed(80.0)),
             checkbox("Allow low add", storage.on_low_notify)
                 .on_toggle(Message::StorageOnLow)
                 .size(14)
@@ -3752,8 +3746,27 @@ impl App {
                 .size(14)
                 .text_size(12),
         ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
+        .spacing(14)
+        .wrap();
+
+        let number = |caption: &'static str, field: StorageField, width: f32| {
+            column![
+                text(caption).size(10).color(theme::TEXT_MUTED),
+                text_input("0", storage.text(field))
+                    .style(muted_input_style)
+                    .padding([4, 8])
+                    .size(12)
+                    .on_input(move |value| Message::StorageNumber(field, value))
+                    .width(Length::Fixed(width)),
+            ]
+            .spacing(2)
+        };
+        let numbers = row![
+            number("Minimum free (bytes)", StorageField::MinFree, 150.0),
+            number("Recovery margin (bytes)", StorageField::Margin, 150.0),
+            number("Poll (s)", StorageField::Poll, 80.0),
+        ]
+        .spacing(10);
 
         let mut zones = column![row![
             text("PATH")
@@ -3786,6 +3799,8 @@ impl App {
             let selected = settings.zone_selected == Some(index);
             let path = text_input("/mnt/usbhdd2/Filmek", &zone.path)
                 .style(muted_input_style)
+                .padding([4, 8])
+                .size(12)
                 .on_input(move |value| Message::ZonePath(index, value))
                 .width(Length::FillPortion(6));
             let label: Element<Message> = if zone.staging {
@@ -3797,6 +3812,8 @@ impl App {
             } else {
                 text_input("Filmek", &zone.label)
                     .style(muted_input_style)
+                    .padding([4, 8])
+                    .size(12)
                     .on_input(move |value| Message::ZoneLabel(index, value))
                     .width(Length::FillPortion(3))
                     .into()
@@ -3831,7 +3848,8 @@ impl App {
             text("Filesystems").size(12).font(theme::medium()),
             disks,
             text("Guard").size(12).font(theme::medium()),
-            thresholds,
+            flags,
+            numbers,
             row![
                 text("Minimum free and margin apply per filesystem; the guard pauses writers only, never seeds.")
                     .size(10)
@@ -3978,12 +3996,33 @@ impl App {
             .spacing(3)
             .into()
         };
+        // Preset colours: the theme's accent family plus a few neutrals.
+        let palette = [
+            "#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0090ff", "#8e4ec6", "#6e7681",
+        ];
+        let mut swatches = row![].spacing(4);
+        for hex in palette {
+            let color = settings::color_from_hex(hex).unwrap_or(theme::TEXT_MUTED);
+            swatches = swatches.push(
+                button("")
+                    .on_press(Message::LabelField(LabelField::Color, hex.to_owned()))
+                    .width(Length::Fixed(18.0))
+                    .height(Length::Fixed(18.0))
+                    .padding(0)
+                    .style(move |_, _| iced::widget::button::Style {
+                        background: Some(color.into()),
+                        border: iced::border::rounded(4),
+                        ..iced::widget::button::Style::default()
+                    }),
+            );
+        }
         let editor = column![
             row![
                 name,
                 label_field_view(form, LabelField::Color, "#RRGGBB", false),
             ]
             .spacing(8),
+            swatches,
             label_field_view(form, LabelField::MovePath, "/mnt/media/movies", false),
             row![
                 label_field_view(form, LabelField::DownloadRateLimit, "0", false),
@@ -4015,7 +4054,7 @@ impl App {
                     .color(theme::QUEUED)
                     .width(Length::Fill),
                 action_button("Cancel", Message::LabelDeleteCancelled, true),
-                action_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
+                danger_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
@@ -4023,7 +4062,7 @@ impl App {
         } else {
             row![
                 horizontal_space(),
-                action_button("Delete", Message::LabelDeleteRequested, !settings.loading),
+                danger_button("Delete", Message::LabelDeleteRequested, !settings.loading),
             ]
             .into()
         };
@@ -4521,17 +4560,26 @@ impl App {
         let error = TorrentState::Error as i32;
         let moving = TorrentState::Moving as i32;
 
-        let free: u64 = self.disks.iter().map(|disk| disk.free).sum();
-        let low = self.disks.iter().any(|disk| disk.low);
-        let disks_line: Element<Message> = if expanded && !self.disks.is_empty() {
+        // Only the disks that carry zones matter to the guard, so the sidebar
+        // counts those; the Storage tab still offers every filesystem.
+        let (zoned_count, zoned_free, zoned_low) = zoned_disks(&self.disks);
+        let disks_line: Element<Message> = if expanded && zoned_count > 0 {
             button(
                 column![
-                    text(format!("{} disks", self.disks.len()))
+                    text(if zoned_count == 1 {
+                        "1 disk".to_owned()
+                    } else {
+                        format!("{zoned_count} disks")
+                    })
+                    .size(10)
+                    .color(theme::TEXT_MUTED),
+                    text(format!("{} free", format_size(zoned_free)))
                         .size(10)
-                        .color(theme::TEXT_MUTED),
-                    text(format!("{} free", format_size(free)))
-                        .size(10)
-                        .color(if low { theme::ERROR } else { theme::TEXT_MUTED }),
+                        .color(if zoned_low {
+                            theme::ERROR
+                        } else {
+                            theme::TEXT_MUTED
+                        }),
                 ]
                 .spacing(1),
             )
@@ -5150,6 +5198,8 @@ fn watch_field_view<'a>(
         text(field.label()).size(11).color(theme::TEXT_MUTED),
         text_input(placeholder, row.text(field))
             .style(muted_input_style)
+            .padding([4, 8])
+            .size(12)
             .width(Length::Fill)
             .on_input(move |value| Message::AutoAddField(field, value)),
     ]
@@ -5166,6 +5216,8 @@ fn hook_field_view<'a>(
         text(field.label()).size(11).color(theme::TEXT_MUTED),
         text_input(placeholder, row.text(field))
             .style(muted_input_style)
+            .padding([4, 8])
+            .size(12)
             .width(Length::Fill)
             .on_input(move |value| Message::HooksField(field, value)),
     ]
@@ -5279,6 +5331,8 @@ fn digest_field<'a>(
         text(field.label()).size(11).color(theme::TEXT_MUTED),
         text_input(placeholder, notify.digest_text(field))
             .style(muted_input_style)
+            .padding([4, 8])
+            .size(12)
             .width(Length::Fill)
             .on_input(move |value| Message::DigestChanged(field, value)),
     ]
@@ -5335,6 +5389,8 @@ fn settings_field<'a>(
         row![text(field.label()).size(11).color(theme::TEXT_MUTED), hint,].spacing(6),
         text_input(placeholder, form.text(field))
             .style(muted_input_style)
+            .padding([4, 8])
+            .size(12)
             .on_input(move |value| Message::SettingsField(field, value))
             .width(Length::Fill),
     ]
@@ -5406,6 +5462,8 @@ fn label_field_view<'a>(
 ) -> Element<'a, Message> {
     let input = text_input(placeholder, form.text(field))
         .style(muted_input_style)
+        .padding([4, 8])
+        .size(12)
         .width(Length::Fill);
     let input = if readonly {
         input
@@ -5846,6 +5904,32 @@ fn action_button<'a>(label: &'a str, message: Message, enabled: bool) -> Element
     }
 }
 
+/// A destructive action: muted red, compact, visibly different from Save.
+fn danger_button<'a>(label: &'a str, message: Message, enabled: bool) -> Element<'a, Message> {
+    let widget =
+        button(text(label))
+            .padding([4, 12])
+            .style(|_, status| iced::widget::button::Style {
+                background: Some(match status {
+                    iced::widget::button::Status::Hovered => {
+                        iced::Color::from_rgb(0.30, 0.13, 0.14).into()
+                    }
+                    iced::widget::button::Status::Pressed => {
+                        iced::Color::from_rgb(0.36, 0.15, 0.16).into()
+                    }
+                    _ => iced::Color::from_rgb(0.20, 0.11, 0.12).into(),
+                }),
+                text_color: iced::Color::from_rgb(0.95, 0.48, 0.48),
+                border: iced::border::rounded(6),
+                ..iced::widget::button::Style::default()
+            });
+    if enabled {
+        widget.on_press(message).into()
+    } else {
+        widget.into()
+    }
+}
+
 fn pause_reason_label(bits: u32) -> String {
     let mut names = Vec::new();
     if bits & 1 != 0 {
@@ -5865,6 +5949,14 @@ fn pause_reason_label(bits: u32) -> String {
     } else {
         names.join(", ")
     }
+}
+
+/// Count, free space and low state of the disks that carry zones.
+fn zoned_disks(disks: &[DiskRow]) -> (usize, u64, bool) {
+    let zoned: Vec<&DiskRow> = disks.iter().filter(|disk| !disk.zones.is_empty()).collect();
+    let free = zoned.iter().map(|disk| disk.free).sum();
+    let low = zoned.iter().any(|disk| disk.low);
+    (zoned.len(), free, low)
 }
 
 fn format_size(bytes: u64) -> String {
@@ -5920,6 +6012,30 @@ fn main() -> iced::Result {
 #[cfg(test)]
 mod status_bar_tests {
     use super::*;
+
+    #[test]
+    fn only_zoned_disks_reach_the_sidebar() {
+        let disk = |zones: usize, free: u64, low: bool| DiskRow {
+            mount: format!("/mnt/{zones}"),
+            free,
+            low,
+            zones: vec![ferrent_gui::settings::ZoneView::default(); zones],
+            ..DiskRow::default()
+        };
+        assert_eq!(
+            zoned_disks(&[disk(0, 10, true), disk(0, 20, true)]),
+            (0, 0, false),
+            "system disks alone show nothing"
+        );
+        assert_eq!(
+            zoned_disks(&[disk(0, 10, true), disk(2, 100, false)]),
+            (1, 100, false)
+        );
+        assert_eq!(
+            zoned_disks(&[disk(1, 50, true), disk(1, 60, false)]),
+            (2, 110, true)
+        );
+    }
 
     fn status() -> ServerStatus {
         ServerStatus {
