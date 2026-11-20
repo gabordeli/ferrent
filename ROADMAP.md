@@ -562,7 +562,7 @@
 
 **Acceptance**
 
-- [ ] `GetDisks`: mount, fs, total/free/used, low, zónák (path, label|staging, enabled), torrentszám zónánként.
+- [x] `GetDisks`: mount, fs, total/free/used, low, zónák (path, label|staging, enabled), torrentszám; a zóna nélküli valódi mountok is (statvfs), `unknown[]`; CLI `ferrent disks [--json]`, `ferrent add --label`.
 - [ ] Settings → Storage: lemez-tábla (total/free/min/margin) + zóna-lista hozzáadás/törlés, **egy** Save + explicit Reload.
 - [ ] Add-torrent dialog: letöltési út mező, címke választásra frissül, szerkeszthető; címke nélkül warning.
 - [ ] sidebar „N disks · X free”, low → piros, kattintás a Storage tabra.

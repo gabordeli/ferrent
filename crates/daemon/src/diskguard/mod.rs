@@ -145,7 +145,7 @@ pub fn report_with(
             total: stat.total,
             free: stat.free,
             used: stat.used,
-            low: min_free > 0 && stat.free < min_free,
+            low: min_free > 0 && stat.total > 0 && stat.free < min_free,
             torrents: torrent_counts.get(&filesystem).copied().unwrap_or(0),
             labels,
             zones,
@@ -155,6 +155,49 @@ pub fn report_with(
     unknown.sort();
     unknown.dedup();
     StorageReport { disks, unknown }
+}
+
+/// Adds the real mounts that carry no zone.
+///
+/// A storage panel wants to offer every filesystem, not only the configured
+/// ones; the guard still looks at zones only.
+pub fn include_unzoned(
+    report: &mut StorageReport,
+    mounts: &[Mount],
+    min_free: u64,
+    stat: impl Fn(&Path) -> Option<DiskStat>,
+) {
+    for mount in real_mounts(mounts) {
+        if report
+            .disks
+            .iter()
+            .any(|disk| disk.mount == mount.mountpoint)
+        {
+            continue;
+        }
+        let Some(stat) = stat(&mount.mountpoint) else {
+            continue;
+        };
+        // gvfs/sshfs mounts often report a zero size; they are not disks.
+        if stat.total == 0 {
+            continue;
+        }
+        report.disks.push(DiskReport {
+            mount: mount.mountpoint.clone(),
+            device: mount.device.clone(),
+            fstype: mount.fstype.clone(),
+            total: stat.total,
+            free: stat.free,
+            used: stat.used,
+            low: min_free > 0 && stat.free < min_free,
+            zones: Vec::new(),
+            labels: Vec::new(),
+            torrents: 0,
+        });
+    }
+    report
+        .disks
+        .sort_by(|left, right| left.mount.cmp(&right.mount));
 }
 
 /// Reads the live mount table and free space.
@@ -292,6 +335,34 @@ tmpfs /run tmpfs rw 0 0
     }
 
     #[test]
+    fn unzoned_mounts_are_offered_without_zones() {
+        let mounts = parse_mounts(TABLE);
+        let mut report = report_with(
+            &zones(),
+            &[],
+            &mounts,
+            0,
+            fake_stat,
+            fake_device,
+            fake_device,
+        );
+        let before = report.disks.len();
+        include_unzoned(&mut report, &mounts, 0, fake_stat);
+        assert!(report.disks.len() > before, "{report:?}");
+        let root = report
+            .disks
+            .iter()
+            .find(|disk| disk.mount == *"/")
+            .expect("root mount");
+        assert!(root.zones.is_empty());
+        assert_eq!(root.torrents, 0);
+        assert!(
+            !report.disks.iter().any(|disk| disk.mount == *"/proc"),
+            "pseudo filesystems stay out"
+        );
+    }
+
+    #[test]
     fn low_follows_the_threshold_and_is_off_by_default() {
         let mounts = parse_mounts(TABLE);
         let report = report_with(
@@ -359,6 +430,10 @@ tmpfs /run tmpfs rw 0 0
         let elapsed = started.elapsed();
         assert_eq!(report.disks.len(), 1);
         assert_eq!(report.disks[0].zones.len(), 1_000);
+        println!(
+            "diskguard scan: 1 000 zones grouped in {:.2} ms",
+            elapsed.as_secs_f64() * 1_000.0
+        );
         assert!(
             elapsed < Duration::from_millis(50),
             "grouping took {elapsed:?}"

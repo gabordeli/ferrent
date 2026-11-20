@@ -95,6 +95,21 @@ impl crate::rpc::AppState {
         self.disks.lock().expect("disk payload poisoned").clone()
     }
 
+    /// Scans the zones and caches the payload as the last good one.
+    pub async fn scan_storage(&self) -> Option<StorageReport> {
+        let config = self.config.resolved().ok()?;
+        let guard = &config.diskguard;
+        let torrents: Vec<(u64, PathBuf)> = self
+            .mirror
+            .all()
+            .into_iter()
+            .map(|status| (status.id, status.save_path))
+            .collect();
+        let report = snapshot(&guard.zone, &torrents, guard.min_free_bytes).await?;
+        *self.disks.lock().expect("disk payload poisoned") = Some(report.clone());
+        Some(report)
+    }
+
     /// One guard pass: scan, evaluate, pause or resume.
     ///
     /// `None` when the guard is disabled or the scan did not finish (the
@@ -105,14 +120,7 @@ impl crate::rpc::AppState {
         if !guard.enabled {
             return None;
         }
-        let torrents: Vec<(u64, PathBuf)> = self
-            .mirror
-            .all()
-            .into_iter()
-            .map(|status| (status.id, status.save_path))
-            .collect();
-        let report = snapshot(&guard.zone, &torrents, guard.min_free_bytes).await?;
-        *self.disks.lock().expect("disk payload poisoned") = Some(report.clone());
+        let report = self.scan_storage().await?;
 
         let previous = self
             .disk_levels

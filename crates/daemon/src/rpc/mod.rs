@@ -15,8 +15,9 @@ use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
-    DeleteLabelRequest, DeleteLabelResponse, GetAutoAddStatusRequest, GetAutoAddStatusResponse,
-    GetConfigRequest, GetConfigResponse, GetHookStatusRequest, GetHookStatusResponse,
+    DeleteLabelRequest, DeleteLabelResponse, Disk as ProtoDisk, DiskZone as ProtoDiskZone,
+    GetAutoAddStatusRequest, GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse,
+    GetDisksRequest, GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse,
     GetNotificationStatusRequest, GetNotificationStatusResponse, GetStatusRequest,
     GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
     GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
@@ -1082,6 +1083,76 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn get_disks(
+        &self,
+        request: Request<GetDisksRequest>,
+    ) -> Result<Response<GetDisksResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let config = self
+            .state
+            .config
+            .resolved()
+            .map_err(|error| Status::internal(error.to_string()))?;
+        let report = match self.state.scan_storage().await {
+            Some(report) => report,
+            None => self
+                .state
+                .storage_payload()
+                .ok_or_else(|| Status::unavailable("the storage scan did not finish"))?,
+        };
+        // The panel offers every filesystem; the guard only consults zones.
+        let min_free = config.diskguard.min_free_bytes;
+        let report = tokio::task::spawn_blocking(move || {
+            let mut report = report;
+            let mounts = crate::diskguard::mount_table();
+            crate::diskguard::include_unzoned(
+                &mut report,
+                &mounts,
+                min_free,
+                crate::diskguard::disk_stat,
+            );
+            report
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?;
+        Ok(Response::new(GetDisksResponse {
+            disks: report
+                .disks
+                .iter()
+                .map(|disk| ProtoDisk {
+                    mount: disk.mount.display().to_string(),
+                    device: disk.device.clone(),
+                    fs: disk.fstype.clone(),
+                    total_bytes: disk.total,
+                    free_bytes: disk.free,
+                    used_bytes: disk.used,
+                    low: disk.low,
+                    torrents: u32::try_from(disk.torrents).unwrap_or(u32::MAX),
+                    labels: disk.labels.clone(),
+                    zones: disk
+                        .zones
+                        .iter()
+                        .map(|zone| ProtoDiskZone {
+                            path: zone.path.display().to_string(),
+                            label: zone.label.clone().unwrap_or_default(),
+                            staging: zone.staging,
+                            enabled: zone.enabled,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            unknown: report
+                .unknown
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            total_free_bytes: report.total_free(),
+            min_free_bytes: config.diskguard.min_free_bytes,
+            margin_bytes: config.diskguard.margin_bytes,
+            enabled: config.diskguard.enabled,
+        }))
+    }
+
     async fn send_test_notification(
         &self,
         request: Request<SendTestNotificationRequest>,
@@ -1766,6 +1837,80 @@ staging = true
             .expect_err("low disk");
         assert_eq!(error.code(), tonic::Code::FailedPrecondition, "{error}");
         assert!(error.message().contains("required"), "{error}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn disks_report_the_configured_zones() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("ferrent-disks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let staging = base.join("_progress");
+        let library = base.join("Filmek");
+        std::fs::create_dir_all(&staging).expect("staging");
+        std::fs::create_dir_all(&library).expect("library");
+        let config = ConfigStore::default();
+        config
+            .apply_toml(
+                &format!(
+                    r#"
+[diskguard]
+enabled = true
+min_free_bytes = 1048576
+margin_bytes = 1048576
+
+[[diskguard.zone]]
+path = {library:?}
+label = "filmek"
+
+[[diskguard.zone]]
+path = {staging:?}
+staging = true
+"#,
+                    library = library.display().to_string(),
+                    staging = staging.display().to_string(),
+                ),
+                0,
+            )
+            .expect("config");
+        let (watch, _) = broadcast::channel(8);
+        let state = Arc::new(AppState::new(
+            Box::new(MockEngine::new()),
+            Arc::new(StateMirror::new()),
+            watch,
+            Box::new(MemoryStore::new()),
+            config,
+            TorrentControl::default(),
+            LabelState::default(),
+            "token",
+            base.clone(),
+        ));
+        let service = FerrentService::new(Arc::clone(&state));
+        let disks = service
+            .get_disks(authorized(GetDisksRequest {}))
+            .await
+            .expect("disks")
+            .into_inner();
+
+        assert!(disks.enabled);
+        assert_eq!(disks.min_free_bytes, 1 << 20);
+        assert_eq!(disks.margin_bytes, 1 << 20);
+        // Every real filesystem is offered; the zoned one is ours.
+        let disk = disks
+            .disks
+            .iter()
+            .find(|disk| !disk.zones.is_empty())
+            .expect("zoned disk");
+        assert!(disk.mount.starts_with('/'), "{disk:?}");
+        assert!(disk.free_bytes > 0, "{disk:?}");
+        assert_eq!(disk.zones.len(), 2);
+        assert_eq!(disk.labels, vec!["filmek".to_owned()]);
+        assert_eq!(disk.zones[1].path, staging.display().to_string());
+        assert!(disk.zones[1].staging);
+        assert!(disks.total_free_bytes >= disk.free_bytes);
+        assert!(!disk.low, "plenty of space");
 
         let _ = std::fs::remove_dir_all(&base);
     }

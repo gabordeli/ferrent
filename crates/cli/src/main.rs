@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetConfigRequest, GetNotificationStatusRequest, GetTorrentRequest,
-    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, QueueDirection,
-    RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
-    SortField, WatchRequest,
+    AddTorrentRequest, GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest,
+    GetTorrentRequest, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
+    QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest,
+    SetConfigRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -62,9 +62,13 @@ enum Command {
         /// Display name (defaults to the file name).
         #[arg(long)]
         name: Option<String>,
-        /// Save path on the daemon host (default: the daemon's download dir).
+        /// Save path on the daemon host (default: the label's staging folder,
+        /// or the daemon's download dir without a label).
         #[arg(long, default_value = "")]
         save_path: String,
+        /// Label of the torrent; its staging folder receives the download.
+        #[arg(long, default_value = "")]
+        label: String,
     },
     /// List torrents.
     List {
@@ -87,6 +91,8 @@ enum Command {
         #[arg(long)]
         label: Option<String>,
     },
+    /// Show the storage payload: filesystems, zones and free space.
+    Disks,
     /// Show one torrent.
     Show {
         /// Torrent id.
@@ -235,6 +241,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             file,
             name,
             save_path,
+            label,
         } => {
             let metainfo = std::fs::read(&file)?;
             let name = name.unwrap_or_else(|| {
@@ -248,7 +255,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     metainfo,
                     save_path,
                     total_bytes: 0,
-                    label: String::new(),
+                    label,
                 })
                 .await?
                 .into_inner();
@@ -355,6 +362,58 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                             None => break,
                         }
                     }
+                }
+            }
+        }
+        Command::Disks => {
+            let response = client.get_disks(GetDisksRequest {}).await?.into_inner();
+            if json {
+                output::print_json(&json!({
+                    "enabled": response.enabled,
+                    "min_free_bytes": response.min_free_bytes,
+                    "margin_bytes": response.margin_bytes,
+                    "total_free_bytes": response.total_free_bytes,
+                    "unknown": response.unknown,
+                    "disks": response.disks.iter().map(|disk| json!({
+                        "mount": disk.mount,
+                        "device": disk.device,
+                        "fs": disk.fs,
+                        "total_bytes": disk.total_bytes,
+                        "free_bytes": disk.free_bytes,
+                        "used_bytes": disk.used_bytes,
+                        "low": disk.low,
+                        "torrents": disk.torrents,
+                        "labels": disk.labels,
+                        "zones": disk.zones.iter().map(|zone| json!({
+                            "path": zone.path,
+                            "label": zone.label,
+                            "staging": zone.staging,
+                            "enabled": zone.enabled,
+                        })).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                }));
+            } else {
+                for disk in &response.disks {
+                    println!(
+                        "{}  {}  {}  {} free / {}  {} torrents{}",
+                        disk.mount,
+                        disk.fs,
+                        disk.device,
+                        output::format_bytes(disk.free_bytes),
+                        output::format_bytes(disk.total_bytes),
+                        disk.torrents,
+                        if disk.low { "  LOW" } else { "" }
+                    );
+                    for zone in &disk.zones {
+                        println!(
+                            "  {} {}",
+                            if zone.staging { "staging" } else { "library" },
+                            zone.path
+                        );
+                    }
+                }
+                for path in &response.unknown {
+                    println!("unknown  {path}");
                 }
             }
         }

@@ -320,3 +320,19 @@ async fn watch_ctrl_c_exits_zero() {
 
     server.shutdown();
 }
+
+#[tokio::test]
+async fn cli_disks_reports_the_store_volume() {
+    let server = start_server().await;
+    let output = run_cli(&server, &["--json", "disks"]).await;
+    assert!(output.status.success(), "{}", stderr(&output));
+    let body: Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(body["enabled"], false);
+    let disks = body["disks"].as_array().expect("disks array");
+    assert!(!disks.is_empty(), "{body}");
+    let first = &disks[0];
+    assert!(first["mount"].as_str().expect("mount").starts_with('/'));
+    assert!(first["free_bytes"].as_u64().expect("free") > 0);
+    assert!(first["zones"].is_array());
+    server.shutdown();
+}

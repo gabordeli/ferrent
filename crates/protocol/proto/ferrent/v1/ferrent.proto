@@ -54,6 +54,8 @@ service Ferrent {
   rpc GetNotificationStatus(GetNotificationStatusRequest) returns (GetNotificationStatusResponse);
   // Queues a test delivery to every enabled webhook.
   rpc SendTestNotification(SendTestNotificationRequest) returns (SendTestNotificationResponse);
+  // Returns the storage payload: filesystems, zones and free space.
+  rpc GetDisks(GetDisksRequest) returns (GetDisksResponse);
 }
 
 message GetNotificationStatusRequest {}
@@ -191,6 +193,50 @@ message AddTorrentResponse {
   // True when the same info hash was already present; the id is the existing
   // torrent.
   bool duplicate = 2;
+}
+
+// Request for the storage payload.
+message GetDisksRequest {}
+
+// One storage zone (a labelled library folder or a staging folder).
+message DiskZone {
+  // Absolute path on the daemon host.
+  string path = 1;
+  // Label of a library zone; empty for a staging zone.
+  string label = 2;
+  // True when this is the download folder of its filesystem.
+  bool staging = 3;
+  bool enabled = 4;
+}
+
+// One filesystem with the zones that live on it.
+message Disk {
+  // Longest mount point of the filesystem.
+  string mount = 1;
+  // Source device from the mount table.
+  string device = 2;
+  // Filesystem type.
+  string fs = 3;
+  uint64 total_bytes = 4;
+  uint64 free_bytes = 5;
+  uint64 used_bytes = 6;
+  // True when free space is below the configured floor.
+  bool low = 7;
+  // Torrents whose save path is on this filesystem.
+  uint32 torrents = 8;
+  // Labels whose library zone lives here.
+  repeated string labels = 9;
+  repeated DiskZone zones = 10;
+}
+
+message GetDisksResponse {
+  repeated Disk disks = 1;
+  // Configured paths that could not be mapped to a filesystem.
+  repeated string unknown = 2;
+  uint64 total_free_bytes = 3;
+  uint64 min_free_bytes = 4;
+  uint64 margin_bytes = 5;
+  bool enabled = 6;
 }
 
 // Request to pause a torrent.

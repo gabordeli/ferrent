@@ -544,3 +544,77 @@ async fn the_guard_pauses_writers_and_resumes_them_after_recovery() {
         "{events:?}"
     );
 }
+
+#[tokio::test]
+async fn the_guard_handles_four_thousand_torrents() {
+    let base = base("guard-scale");
+    let mut engine = MockEngine::new();
+    let mut ids = Vec::with_capacity(4_000);
+    for index in 0..4_000_u64 {
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: format!("torrent-{index}.mkv"),
+                total_bytes: 100,
+                source: TorrentSource::Magnet(format!("magnet:?xt=urn:btih:{index:040x}")),
+                save_path: base.clone(),
+                resume_data: None,
+            })
+            .expect("add");
+        engine.advance(id, 0.5, 1, 0).expect("advance");
+        ids.push(id);
+    }
+    let mirror = Arc::new(StateMirror::new());
+    for status in engine.list() {
+        mirror.apply(EngineEvent::Added(status));
+    }
+    mirror.publish();
+
+    let (watch, _) = tokio::sync::broadcast::channel(8);
+    let state = Arc::new(AppState::new(
+        Box::new(engine),
+        mirror,
+        watch,
+        Box::new(MemoryStore::new()),
+        ConfigStore::default(),
+        TorrentControl::default(),
+        LabelState::default(),
+        "token",
+        base.clone(),
+    ));
+    let report = |free: u64| diskguard::StorageReport {
+        disks: vec![DiskReport {
+            mount: base.clone(),
+            device: "test".to_owned(),
+            fstype: "ext4".to_owned(),
+            total: 10_000,
+            free,
+            used: 10_000 - free,
+            low: false,
+            zones: Vec::new(),
+            labels: Vec::new(),
+            torrents: 4_000,
+        }],
+        unknown: Vec::new(),
+    };
+
+    let started = std::time::Instant::now();
+    let pass = state
+        .apply_levels(&report(10), &[(base.clone(), Level::Low, true)])
+        .await;
+    let pause = started.elapsed();
+    assert_eq!(pass.paused, 4_000, "{pass:?}");
+
+    let started = std::time::Instant::now();
+    let pass = state
+        .apply_levels(&report(9_000), &[(base.clone(), Level::Ok, true)])
+        .await;
+    let resume = started.elapsed();
+    assert_eq!(pass.resumed, 4_000, "{pass:?}");
+    assert_eq!(ids.len(), 4_000);
+
+    println!(
+        "diskguard scale: 4 000 torrents, pause {:.1} ms, resume {:.1} ms",
+        pause.as_secs_f64() * 1_000.0,
+        resume.as_secs_f64() * 1_000.0
+    );
+}

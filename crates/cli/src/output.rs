@@ -154,7 +154,7 @@ fn format_rate(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub fn format_bytes(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B".to_owned();
     }
