@@ -47,6 +47,7 @@ pub mod glyph {
     pub const PLAY: char = '\u{f04b}';
     pub const PAUSE: char = '\u{f04c}';
     pub const SEARCH: char = '\u{f002}';
+    pub const TAG: char = '\u{f02b}';
     pub const ARROW_UP: char = '\u{f062}';
     pub const ARROW_DOWN: char = '\u{f063}';
 }

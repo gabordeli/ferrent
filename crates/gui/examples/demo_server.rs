@@ -70,6 +70,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let events = engine.subscribe();
     let (watch, _) = broadcast::channel(256);
     let mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
+    let mut labels = LabelState::default();
+    for (name, color) in [
+        ("movies", "#2f81f7"),
+        ("series", "#a17bf0"),
+        ("music", "#21c55d"),
+        ("archive", "#f2cc15"),
+    ] {
+        labels
+            .upsert(ferrent_daemon::labels::Label {
+                name: name.to_owned(),
+                color: color.to_owned(),
+                download_rate_limit: 0,
+                upload_rate_limit: 0,
+                ..ferrent_daemon::labels::Label::default()
+            })
+            .expect("demo label");
+    }
+    for index in 0..torrents.min(40) {
+        let name = match index % 4 {
+            0 => "movies",
+            1 => "series",
+            2 => "music",
+            _ => "archive",
+        };
+        labels
+            .assign(index as u64, Some(name.to_owned()))
+            .expect("assign");
+    }
     let state = Arc::new(AppState::new(
         Box::new(engine),
         mirror,
@@ -77,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(MemoryStore::new()),
         ConfigStore::default(),
         TorrentControl::default(),
-        LabelState::default(),
+        labels,
         "secret",
         data_dir.clone(),
         data_dir.join("downloads"),

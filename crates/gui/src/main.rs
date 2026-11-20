@@ -11,13 +11,14 @@ use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
+use ferrent_gui::settings::{self, ConfigField, LabelField, Settings, Tab};
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
 use ferrent_gui::theme;
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker,
+    Label as ProtoLabel, SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker,
 };
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
@@ -155,6 +156,41 @@ enum Message {
     FileDropped(PathBuf),
     OpenServers,
     OpenSettings,
+    SettingsTab(Tab),
+    SettingsField(ConfigField, String),
+    SettingsSeedMode(bool),
+    SettingsQueueEnabled(bool),
+    SettingsReload,
+    SettingsSave,
+    SettingsLoaded {
+        request: u64,
+        config: Result<connection::ConfigSnapshot, String>,
+        labels: Result<Vec<settings::LabelRow>, String>,
+    },
+    SettingsSaved {
+        request: u64,
+        toml: String,
+        result: Result<u64, String>,
+    },
+    LabelSelected(String),
+    LabelNew,
+    LabelField(LabelField, String),
+    LabelSave,
+    LabelSaved {
+        count: u32,
+        result: Result<ProtoLabel, String>,
+    },
+    LabelDeleteRequested,
+    LabelDeleteCancelled,
+    LabelDeleteConfirmed,
+    LabelDeleted {
+        name: String,
+        result: Result<u32, String>,
+    },
+    LabelsLoaded(Result<Vec<settings::LabelRow>, String>),
+    SelectLabelFilter(String),
+    ChooseLabel(Option<String>),
+    LabelsAssigned(Result<usize, String>),
     CloseModal,
     ModalDragStart,
     CursorMoved(Point),
@@ -212,6 +248,7 @@ enum Modal {
     Settings,
     AddTorrent,
     Remove,
+    SetLabel,
 }
 
 impl Modal {
@@ -221,15 +258,17 @@ impl Modal {
             Self::Settings => "Settings",
             Self::AddTorrent => "Add torrent",
             Self::Remove => "Remove torrents",
+            Self::SetLabel => "Set label",
         }
     }
 
     fn size(self) -> (f32, f32) {
         match self {
             Self::Servers => (880.0, 620.0),
-            Self::Settings => (560.0, 380.0),
+            Self::Settings => (settings::MODAL_WIDTH, settings::MODAL_HEIGHT),
             Self::AddTorrent => (620.0, 320.0),
             Self::Remove => (480.0, 260.0),
+            Self::SetLabel => (420.0, 420.0),
         }
     }
 }
@@ -249,6 +288,7 @@ struct App {
     filter: String,
     filter_id: text_input::Id,
     filter_settle: u64,
+    label_filter: String,
     sort: SortField,
     descending: bool,
     page: Page,
@@ -275,6 +315,8 @@ struct App {
     modal_offset: (f32, f32),
     modal_drag: Option<(Point, (f32, f32))>,
     cursor: Point,
+    settings: Settings,
+    settings_request: u64,
     server_rows: Vec<ServerRow>,
     server_testing: bool,
     server_message: String,
@@ -336,6 +378,7 @@ impl Default for App {
             filter: String::new(),
             filter_id: text_input::Id::new("filter"),
             filter_settle: 0,
+            label_filter: String::new(),
             sort: SortField::Queue,
             descending: false,
             page: Page::default(),
@@ -360,6 +403,8 @@ impl Default for App {
             modal_offset: (0.0, 0.0),
             modal_drag: None,
             cursor: Point::ORIGIN,
+            settings: Settings::default(),
+            settings_request: 0,
             server_rows: Vec::new(),
             server_testing: false,
             server_message: String::new(),
@@ -466,6 +511,7 @@ impl App {
             }
             Message::SelectCategory(filter) => {
                 self.state_filter = filter;
+                self.label_filter.clear();
                 self.scroll = 0.0;
                 self.refresh_page()
             }
@@ -561,13 +607,75 @@ impl App {
             Message::TorrentAdded(result) => self.torrent_added(result),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenServers => self.open_servers(),
-            Message::OpenSettings => {
-                self.open_modal(Modal::Settings);
+            Message::OpenSettings => self.open_settings(),
+            Message::SettingsTab(tab) => {
+                self.settings.tab = tab;
+                self.settings.message.clear();
                 Task::none()
             }
+            Message::SettingsField(field, value) => {
+                if !self.settings.locked(field) {
+                    self.settings.form.set_text(field, value);
+                }
+                Task::none()
+            }
+            Message::SettingsSeedMode(value) => {
+                self.settings.form.seed_mode = value;
+                Task::none()
+            }
+            Message::SettingsQueueEnabled(value) => {
+                self.settings.form.queue_enabled = value;
+                Task::none()
+            }
+            Message::SettingsReload => self.load_settings(),
+            Message::SettingsSave => self.save_settings(),
+            Message::SettingsLoaded {
+                request,
+                config,
+                labels,
+            } => self.settings_loaded(request, config, labels),
+            Message::SettingsSaved {
+                request,
+                toml,
+                result,
+            } => self.settings_saved(request, toml, result),
+            Message::LabelSelected(name) => {
+                self.settings.select_label(&name);
+                Task::none()
+            }
+            Message::LabelNew => {
+                self.settings.new_label();
+                Task::none()
+            }
+            Message::LabelField(field, value) => {
+                self.settings.label_form.set(field, value);
+                Task::none()
+            }
+            Message::LabelSave => self.save_label(),
+            Message::LabelSaved { count, result } => self.label_saved(count, result),
+            Message::LabelDeleteRequested => {
+                self.settings.confirming_delete = true;
+                Task::none()
+            }
+            Message::LabelDeleteCancelled => {
+                self.settings.confirming_delete = false;
+                Task::none()
+            }
+            Message::LabelDeleteConfirmed => self.delete_label(),
+            Message::LabelDeleted { name, result } => self.label_deleted(name, result),
+            Message::LabelsLoaded(result) => self.labels_loaded(result),
+            Message::SelectLabelFilter(name) => {
+                self.label_filter = name;
+                self.state_filter = None;
+                self.reset_page();
+                self.request_page(0)
+            }
+            Message::ChooseLabel(choice) => self.assign_label(choice),
+            Message::LabelsAssigned(result) => self.labels_assigned(result),
             Message::CloseModal => {
                 self.modal = None;
                 self.modal_drag = None;
+                self.settings.confirming_delete = false;
                 Task::none()
             }
             Message::ModalDragStart => {
@@ -813,7 +921,11 @@ impl App {
                 self.measure_started = self.measure.then(Instant::now);
                 self.measure_finished = false;
                 self.frames = 0;
-                Task::batch([self.request_page(0), self.schedule_poll()])
+                Task::batch([
+                    self.request_page(0),
+                    self.load_labels(),
+                    self.schedule_poll(),
+                ])
             }
             Err(error) => {
                 self.client = None;
@@ -945,6 +1057,7 @@ impl App {
         let query = ListQuery {
             filter: self.filter.clone(),
             state: self.state_filter,
+            label: self.label_filter.clone(),
             sort: self.sort,
             descending: self.descending,
             offset: u32::try_from(offset).unwrap_or(u32::MAX),
@@ -1047,6 +1160,7 @@ impl App {
                 let action = match action {
                     MenuAction::Pause => TorrentAction::Pause,
                     MenuAction::Resume => TorrentAction::Resume,
+                    MenuAction::Label => return self.open_set_label(),
                     MenuAction::Remove => return self.open_remove_modal(),
                 };
                 return self.start_action(action);
@@ -1391,6 +1505,15 @@ impl App {
         Task::none()
     }
 
+    fn open_set_label(&mut self) -> Task<Message> {
+        if self.selected.is_empty() {
+            self.status = "Select a torrent first".to_owned();
+            return Task::none();
+        }
+        self.open_modal(Modal::SetLabel);
+        Task::none()
+    }
+
     fn confirm_remove(&mut self) -> Task<Message> {
         self.modal = None;
         self.start_action(TorrentAction::Remove {
@@ -1593,6 +1716,7 @@ impl App {
             if matches!(key.as_ref(), Key::Named(Named::Escape)) {
                 self.modal = None;
                 self.modal_drag = None;
+                self.settings.confirming_delete = false;
             }
             return Task::none();
         }
@@ -1714,6 +1838,7 @@ impl App {
             Modal::Settings => (self.settings_view(), modal.size()),
             Modal::AddTorrent => (self.add_torrent_view(), modal.size()),
             Modal::Remove => (self.remove_view(), modal.size()),
+            Modal::SetLabel => (self.set_label_view(), modal.size()),
         };
         let overlay = self.modal_overlay(panel, size);
         iced::widget::stack![base, overlay].into()
@@ -1723,6 +1848,299 @@ impl App {
         self.modal = Some(modal);
         self.modal_offset = (0.0, 0.0);
         self.modal_drag = None;
+    }
+
+    fn open_settings(&mut self) -> Task<Message> {
+        self.open_modal(Modal::Settings);
+        self.load_settings()
+    }
+
+    /// Fetches the configuration document and the label list.
+    fn load_settings(&mut self) -> Task<Message> {
+        self.settings.loading = true;
+        self.settings.error = None;
+        self.settings.message.clear();
+        self.settings_request = self.settings_request.wrapping_add(1);
+        let request = self.settings_request;
+        let Some(client) = self.client.clone() else {
+            self.settings.loading = false;
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                let config = connection::config(&client).await;
+                let labels = connection::labels(&client)
+                    .await
+                    .map(|entries| entries.into_iter().map(settings::LabelRow::from).collect());
+                (request, config, labels)
+            },
+            |(request, config, labels)| Message::SettingsLoaded {
+                request,
+                config,
+                labels,
+            },
+        )
+    }
+
+    fn settings_loaded(
+        &mut self,
+        request: u64,
+        config: Result<connection::ConfigSnapshot, String>,
+        labels: Result<Vec<settings::LabelRow>, String>,
+    ) -> Task<Message> {
+        if request != self.settings_request {
+            return Task::none();
+        }
+        self.settings.loading = false;
+        match config {
+            Ok(snapshot) => {
+                match self.settings.apply_snapshot(
+                    &snapshot.toml,
+                    snapshot.revision,
+                    snapshot.env_locked,
+                ) {
+                    Ok(()) => {
+                        self.settings.message = format!("Loaded revision {}", snapshot.revision);
+                    }
+                    Err(error) => self.settings.error = Some(error),
+                }
+            }
+            Err(error) => self.settings.error = Some(error),
+        }
+        match labels {
+            Ok(rows) => self.settings.set_rows(rows),
+            Err(error) => {
+                if self.settings.error.is_none() {
+                    self.settings.error = Some(format!("labels: {error}"));
+                }
+            }
+        }
+        Task::none()
+    }
+
+    fn save_settings(&mut self) -> Task<Message> {
+        if self.settings.loading {
+            return Task::none();
+        }
+        let Some(client) = self.client.clone() else {
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        let toml = match self.settings.form.render(&self.settings.raw) {
+            Ok(toml) => toml,
+            Err(error) => {
+                self.settings.error = Some(error);
+                return Task::none();
+            }
+        };
+        self.settings.loading = true;
+        self.settings.error = None;
+        let revision = self.settings.revision;
+        let request = self.settings_request;
+        Task::perform(
+            async move {
+                let sent = toml.clone();
+                (
+                    request,
+                    sent,
+                    connection::set_config(&client, &toml, revision).await,
+                )
+            },
+            |(request, toml, result)| Message::SettingsSaved {
+                request,
+                toml,
+                result,
+            },
+        )
+    }
+
+    fn settings_saved(
+        &mut self,
+        request: u64,
+        toml: String,
+        result: Result<u64, String>,
+    ) -> Task<Message> {
+        if request != self.settings_request {
+            return Task::none();
+        }
+        self.settings.loading = false;
+        match result {
+            Ok(revision) => {
+                self.settings.revision = revision;
+                self.settings.raw = toml;
+                self.settings.baseline = self.settings.form.clone();
+                self.settings.error = None;
+                self.settings.message = format!("Saved revision {revision}");
+                Task::batch([self.refresh_page(), self.load_labels()])
+            }
+            Err(error) => {
+                self.settings.error = Some(error);
+                self.settings.message = "Save failed; Reload re-reads the live document".to_owned();
+                Task::none()
+            }
+        }
+    }
+
+    fn load_labels(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                connection::labels(&client).await.map(|entries| {
+                    entries
+                        .into_iter()
+                        .map(settings::LabelRow::from)
+                        .collect::<Vec<_>>()
+                })
+            },
+            Message::LabelsLoaded,
+        )
+    }
+
+    fn labels_loaded(&mut self, result: Result<Vec<settings::LabelRow>, String>) -> Task<Message> {
+        match result {
+            Ok(rows) => self.settings.set_rows(rows),
+            Err(error) => {
+                self.status = format!("Cannot load labels: {error}");
+            }
+        }
+        Task::none()
+    }
+
+    fn save_label(&mut self) -> Task<Message> {
+        if self.settings.loading {
+            return Task::none();
+        }
+        let label = match self.settings.label_form.to_label() {
+            Ok(label) => label,
+            Err(error) => {
+                self.settings.error = Some(error);
+                return Task::none();
+            }
+        };
+        let create = self.settings.label_new || self.settings.label_selected.is_none();
+        if create
+            && self
+                .settings
+                .labels
+                .iter()
+                .any(|row| row.label.name == label.name)
+        {
+            self.settings.error = Some(format!("A label named {:?} already exists", label.name));
+            return Task::none();
+        }
+        let Some(client) = self.client.clone() else {
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        let count = self
+            .settings
+            .current_label()
+            .map_or(0, |row| row.torrent_count);
+        self.settings.loading = true;
+        self.settings.error = None;
+        Task::perform(
+            async move { connection::save_label(&client, label, create).await },
+            move |result| Message::LabelSaved { count, result },
+        )
+    }
+
+    fn label_saved(&mut self, count: u32, result: Result<ProtoLabel, String>) -> Task<Message> {
+        self.settings.loading = false;
+        match result {
+            Ok(label) => {
+                self.settings.message = format!("Saved label {}", label.name);
+                self.settings.upsert_row(label, count);
+                Task::batch([self.load_labels(), self.refresh_page()])
+            }
+            Err(error) => {
+                self.settings.error = Some(error);
+                Task::none()
+            }
+        }
+    }
+
+    fn delete_label(&mut self) -> Task<Message> {
+        if self.settings.loading {
+            return Task::none();
+        }
+        let Some(name) = self.settings.label_selected.clone() else {
+            return Task::none();
+        };
+        let Some(client) = self.client.clone() else {
+            self.settings.error = Some("Not connected".to_owned());
+            return Task::none();
+        };
+        self.settings.loading = true;
+        self.settings.error = None;
+        let sent = name.clone();
+        Task::perform(
+            async move { connection::delete_label(&client, &name).await },
+            move |result| Message::LabelDeleted {
+                name: sent.clone(),
+                result,
+            },
+        )
+    }
+
+    fn label_deleted(&mut self, name: String, result: Result<u32, String>) -> Task<Message> {
+        self.settings.loading = false;
+        match result {
+            Ok(cleared) => {
+                self.settings.remove_row(&name);
+                if self.label_filter == name {
+                    self.label_filter.clear();
+                }
+                self.settings.message =
+                    format!("Deleted label {name}; cleared {cleared} assignment(s)");
+                Task::batch([self.load_labels(), self.refresh_page()])
+            }
+            Err(error) => {
+                self.settings.error = Some(error);
+                Task::none()
+            }
+        }
+    }
+
+    fn assign_label(&mut self, choice: Option<String>) -> Task<Message> {
+        self.modal = None;
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let ids: Vec<u64> = self.selected.iter().copied().collect();
+        if ids.is_empty() {
+            return Task::none();
+        }
+        let label = choice.unwrap_or_default();
+        self.status = format!("Assigning label to {} torrent(s)...", ids.len());
+        Task::perform(
+            async move {
+                let mut applied = 0;
+                let mut errors = Vec::new();
+                for id in ids {
+                    match connection::assign_label(&client, id, &label).await {
+                        Ok(_) => applied += 1,
+                        Err(error) => errors.push(error),
+                    }
+                }
+                if errors.is_empty() {
+                    Ok(applied)
+                } else {
+                    Err(errors.join("; "))
+                }
+            },
+            Message::LabelsAssigned,
+        )
+    }
+
+    fn labels_assigned(&mut self, result: Result<usize, String>) -> Task<Message> {
+        match result {
+            Ok(count) => self.status = format!("Label applied to {count} torrent(s)"),
+            Err(error) => self.status = format!("Label update failed: {error}"),
+        }
+        Task::batch([self.refresh_page(), self.load_labels()])
     }
 
     fn clamp_modal_offset(&mut self) {
@@ -1764,21 +2182,395 @@ impl App {
     }
 
     fn settings_view(&self) -> Element<'_, Message> {
-        let active = self.config.active.clone().unwrap_or_else(|| "—".to_owned());
-        let body = column![
-            text("Connection").size(12).font(theme::semibold()),
-            detail_row("Profile", active, theme::TEXT_MUTED),
+        let settings = &self.settings;
+        let rail = container(
+            column![
+                text("SETTINGS")
+                    .size(10)
+                    .color(theme::TEXT_MUTED)
+                    .font(theme::semibold()),
+                WidgetColumn::with_children(
+                    Tab::ALL
+                        .into_iter()
+                        .map(|tab| settings_tab(tab, settings.tab == tab))
+                        .collect::<Vec<Element<Message>>>(),
+                )
+                .spacing(2),
+                vertical_space(),
+                if settings.loading {
+                    Element::from(text("loading…").size(11).color(theme::TEXT_MUTED))
+                } else {
+                    Element::from(text("").size(1))
+                },
+            ]
+            .spacing(8),
+        )
+        .width(Length::Fixed(176.0))
+        .height(Length::Fill);
+
+        let body: Element<Message> = match settings.tab {
+            Tab::Connection => self.settings_connection_view(),
+            Tab::Session => self.settings_session_view(),
+            Tab::Labels => self.settings_labels_view(),
+        };
+        let dirty = match settings.tab {
+            Tab::Labels => settings.label_dirty(),
+            Tab::Connection | Tab::Session => settings.dirty(),
+        };
+
+        let mut summary = text("")
+            .size(11)
+            .color(theme::TEXT_MUTED)
+            .width(Length::Fill);
+        if let Some(error) = &settings.error {
+            summary = text(error.clone())
+                .size(11)
+                .color(theme::ERROR)
+                .width(Length::Fill);
+        } else if !settings.message.is_empty() {
+            summary = text(settings.message.clone())
+                .size(11)
+                .color(theme::TEXT_SECONDARY)
+                .width(Length::Fill);
+        } else if dirty {
+            summary = text("Unsaved changes; Reload discards them")
+                .size(11)
+                .color(theme::QUEUED)
+                .width(Length::Fill);
+        }
+
+        let save = match settings.tab {
+            Tab::Labels => Message::LabelSave,
+            Tab::Connection | Tab::Session => Message::SettingsSave,
+        };
+        let can_save = !settings.loading
+            && match settings.tab {
+                Tab::Labels => settings.label_new || settings.label_selected.is_some(),
+                Tab::Connection | Tab::Session => true,
+            };
+        let footer = row![
+            summary,
+            action_button("Reload", Message::SettingsReload, !settings.loading),
+            action_button("Save", save, can_save),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        let content = column![
+            text(settings.tab.label()).size(16).font(theme::semibold()),
+            text(settings.tab.hint()).size(11).color(theme::TEXT_MUTED),
+            container(body).height(Length::Fill).padding([6, 0]),
+            footer,
+        ]
+        .spacing(6)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let body = row![
+            rail,
+            container(content)
+                .padding([0, 14])
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .height(Length::Fill);
+
+        modal_panel(Modal::Settings, body.into())
+    }
+
+    fn settings_connection_view(&self) -> Element<'_, Message> {
+        let form = &self.settings.form;
+        let field = |field| {
+            settings_field(
+                &self.settings,
+                form,
+                field,
+                if field == ConfigField::Bind {
+                    "127.0.0.1:50051 (default)"
+                } else {
+                    "daemon default"
+                },
+            )
+        };
+        column![
+            field(ConfigField::DataDir),
+            field(ConfigField::DownloadDir),
+            field(ConfigField::Bind),
+            field(ConfigField::TokenFile),
             detail_row(
-                "Config",
-                self.config_path.display().to_string(),
-                theme::TEXT_MUTED,
+                "Profile",
+                self.config.active.clone().unwrap_or_else(|| "—".to_owned()),
+                theme::TEXT_MUTED
             ),
-            text("More options land here as we build them out.")
-                .size(12)
-                .color(theme::TEXT_MUTED),
+            detail_row(
+                "Client config",
+                self.config_path.display().to_string(),
+                theme::TEXT_MUTED
+            ),
+        ]
+        .spacing(10)
+        .max_width(520.0)
+        .into()
+    }
+
+    fn settings_session_view(&self) -> Element<'_, Message> {
+        let form = &self.settings.form;
+        let field = |field| settings_field(&self.settings, form, field, "0 = unlimited");
+        column![
+            field(ConfigField::DownloadRateLimit),
+            field(ConfigField::UploadRateLimit),
+            row![
+                field(ConfigField::ActiveDownloads),
+                field(ConfigField::ActiveSeeds),
+                field(ConfigField::ActiveLimit),
+            ]
+            .spacing(10),
+            checkbox(
+                "Treat newly added torrents as complete (seed mode)",
+                form.seed_mode
+            )
+            .on_toggle(Message::SettingsSeedMode)
+            .size(14)
+            .text_size(12),
+            checkbox(
+                "Apply the configured active limits (queue)",
+                form.queue_enabled
+            )
+            .on_toggle(Message::SettingsQueueEnabled)
+            .size(14)
+            .text_size(12),
+        ]
+        .spacing(10)
+        .max_width(560.0)
+        .into()
+    }
+
+    fn settings_labels_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let rows: Vec<Element<Message>> = settings
+            .labels
+            .iter()
+            .map(|row| {
+                let selected = settings.label_selected.as_deref() == Some(row.label.name.as_str());
+                let dot = container(text("").size(1))
+                    .width(Length::Fixed(8.0))
+                    .height(Length::Fixed(8.0))
+                    .style(move |_theme: &iced::Theme| container::Style {
+                        background: Some(
+                            settings::color_from_hex(&row.label.color)
+                                .unwrap_or(theme::TEXT_MUTED)
+                                .into(),
+                        ),
+                        border: iced::Border {
+                            color: theme::BORDER,
+                            width: 0.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    });
+                button(
+                    row![
+                        dot,
+                        text(row.label.name.clone()).size(12),
+                        horizontal_space(),
+                        text(row.torrent_count.to_string())
+                            .size(11)
+                            .color(theme::TEXT_MUTED),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(Message::LabelSelected(row.label.name.clone()))
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::SURFACE
+                        } else {
+                            theme::BG_SECONDARY
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_SECONDARY
+                    },
+                    border: iced::Border {
+                        color: if selected {
+                            theme::PRIMARY
+                        } else {
+                            theme::BG_SECONDARY
+                        },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = column![
+            row![
+                text("Labels").size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button("New", Message::LabelNew, !settings.loading),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(6)
+        .width(Length::Fixed(272.0))
+        .height(Length::Fill);
+
+        let editor: Element<Message> = if settings.label_new || settings.label_selected.is_some() {
+            self.label_editor_view()
+        } else {
+            column![
+                text("Select a label to edit, or create a new one.")
+                    .size(12)
+                    .color(theme::TEXT_MUTED),
+            ]
+            .spacing(6)
+            .into()
+        };
+
+        row![list, container(editor).padding([0, 12]).width(Length::Fill)]
+            .spacing(4)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn label_editor_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let form = &settings.label_form;
+        let name: Element<Message> = if settings.label_new {
+            label_field_view(form, LabelField::Name, "movies", false)
+        } else {
+            column![
+                row![
+                    text(LabelField::Name.label())
+                        .size(11)
+                        .color(theme::TEXT_MUTED),
+                    text("fixed").size(10).color(theme::TEXT_MUTED),
+                ]
+                .spacing(6),
+                container(text(form.name.clone()).size(13))
+                    .padding([6, 8])
+                    .width(Length::Fill)
+                    .style(|_theme: &iced::Theme| container::Style {
+                        background: Some(theme::BG_SECONDARY.into()),
+                        border: iced::Border {
+                            color: theme::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+            ]
+            .spacing(3)
+            .into()
+        };
+        let editor = column![
+            row![
+                name,
+                label_field_view(form, LabelField::Color, "#RRGGBB", false),
+            ]
+            .spacing(8),
+            label_field_view(form, LabelField::MovePath, "/mnt/media/movies", false),
+            row![
+                label_field_view(form, LabelField::DownloadRateLimit, "0", false),
+                label_field_view(form, LabelField::UploadRateLimit, "0", false),
+            ]
+            .spacing(8),
+            row![
+                label_field_view(form, LabelField::ConnectionsLimit, "0", false),
+                label_field_view(form, LabelField::UploadSlotsLimit, "0", false),
+            ]
+            .spacing(8),
+            label_field_view(
+                form,
+                LabelField::MatchTrackers,
+                "tracker.example, other.example",
+                false
+            ),
+            label_field_view(form, LabelField::MatchName, ".*\\.mkv", false),
         ]
         .spacing(8);
-        modal_panel(Modal::Settings, body.into())
+
+        let delete: Element<Message> = if settings.label_new {
+            Element::from(text(""))
+        } else if settings.confirming_delete {
+            let count = settings.current_label().map_or(0, |row| row.torrent_count);
+            row![
+                text(format!("Delete and clear {count} assignment(s)?"))
+                    .size(11)
+                    .color(theme::QUEUED)
+                    .width(Length::Fill),
+                action_button("Cancel", Message::LabelDeleteCancelled, true),
+                action_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            row![
+                horizontal_space(),
+                action_button("Delete", Message::LabelDeleteRequested, !settings.loading),
+            ]
+            .into()
+        };
+
+        column![scrollable(column![editor, delete].spacing(12)).height(Length::Fill),]
+            .spacing(10)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn set_label_view(&self) -> Element<'_, Message> {
+        let current = self
+            .selected_torrents
+            .values()
+            .next()
+            .map(|torrent| torrent.label.clone())
+            .unwrap_or_default();
+        let mut rows: Vec<Element<Message>> = vec![label_choice(
+            "None".to_owned(),
+            current.is_empty(),
+            Message::ChooseLabel(None),
+        )];
+        rows.extend(self.settings.labels.iter().map(|row| {
+            label_choice(
+                row.label.name.clone(),
+                current == row.label.name,
+                Message::ChooseLabel(Some(row.label.name.clone())),
+            )
+        }));
+        let body = column![
+            text(format!("{} torrent(s) selected", self.selected.len()))
+                .size(12)
+                .color(theme::TEXT_SECONDARY),
+            if self.settings.labels.is_empty() {
+                Element::from(text("No labels yet; create them under Settings → Labels.").size(12))
+            } else {
+                Element::from(
+                    scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill),
+                )
+            },
+            row![
+                horizontal_space(),
+                action_button("Cancel", Message::CloseModal, true),
+            ],
+        ]
+        .spacing(10)
+        .height(Length::Fill);
+        modal_panel(Modal::SetLabel, body.into())
     }
 
     fn add_torrent_view(&self) -> Element<'_, Message> {
@@ -2124,7 +2916,13 @@ impl App {
 
     fn sidebar_view(&self) -> Element<'_, Message> {
         let status = self.server_status.clone().unwrap_or_default();
-        let active = self.state_filter;
+        // A label filter replaces the state category; no state row stays
+        // selected, including "All torrents".
+        let active = if self.label_filter.is_empty() {
+            self.state_filter
+        } else {
+            Some(i32::MIN)
+        };
         let expanded = !self.sidebar_collapsed;
 
         let mark = container(text("").size(1.0))
@@ -2275,6 +3073,38 @@ impl App {
                 Some(error),
                 active,
             ),
+            if expanded && !self.settings.labels.is_empty() {
+                Element::from(
+                    column![
+                        container(
+                            text("LABELS")
+                                .size(10)
+                                .color(theme::TEXT_MUTED)
+                                .font(theme::semibold())
+                        )
+                        .padding([8, 12]),
+                        container(
+                            scrollable(
+                                WidgetColumn::with_children(
+                                    self.settings
+                                        .labels
+                                        .iter()
+                                        .map(|row| {
+                                            label_nav(row, self.label_filter == row.label.name)
+                                        })
+                                        .collect::<Vec<Element<Message>>>(),
+                                )
+                                .spacing(1),
+                            )
+                            .height(Length::Fill),
+                        )
+                        .height(Length::Fixed(168.0)),
+                    ]
+                    .spacing(0),
+                )
+            } else {
+                Element::from(text("").size(1))
+            },
             horizontal_space(),
             container(bottom).padding([10, 8]),
         ]
@@ -2510,16 +3340,25 @@ impl App {
                     detail_row("Peers", torrent.peers.to_string(), dim),
                     detail_row("Torrent ID", torrent.id.to_string(), dim),
                     detail_row(
-                        "Save",
-                        if torrent.save_path.is_empty() {
-                            "-".to_owned()
+                        "Label",
+                        if torrent.label.is_empty() {
+                            "—".to_owned()
                         } else {
-                            torrent.save_path.clone()
+                            torrent.label.clone()
                         },
                         dim,
                     ),
                 ]
                 .spacing(24),
+                row![detail_row(
+                    "Save",
+                    if torrent.save_path.is_empty() {
+                        "-".to_owned()
+                    } else {
+                        torrent.save_path.clone()
+                    },
+                    dim,
+                )],
                 if torrent.pause_reasons == 0 {
                     Element::<Message>::from(text(""))
                 } else {
@@ -2743,6 +3582,132 @@ impl App {
     }
 }
 
+fn settings_tab(tab: Tab, active: bool) -> Element<'static, Message> {
+    button(text(tab.label()).size(12).font(theme::medium()))
+        .on_press(Message::SettingsTab(tab))
+        .width(Length::Fill)
+        .padding([6, 10])
+        .style(move |_theme: &iced::Theme, _status| button::Style {
+            background: Some(
+                if active {
+                    theme::SURFACE
+                } else {
+                    theme::BG_SECONDARY
+                }
+                .into(),
+            ),
+            text_color: if active {
+                theme::BRIGHT
+            } else {
+                theme::TEXT_SECONDARY
+            },
+            border: iced::Border {
+                color: if active {
+                    theme::PRIMARY
+                } else {
+                    theme::BG_SECONDARY
+                },
+                width: 0.0,
+                radius: 4.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
+}
+
+fn settings_field<'a>(
+    settings: &'a Settings,
+    form: &'a settings::ConfigForm,
+    field: ConfigField,
+    placeholder: &'static str,
+) -> Element<'a, Message> {
+    let locked = settings.locked(field);
+    let hint: Element<Message> = if locked {
+        text("env-locked").size(10).color(theme::QUEUED).into()
+    } else {
+        text("").size(1).into()
+    };
+    column![
+        row![text(field.label()).size(11).color(theme::TEXT_MUTED), hint,].spacing(6),
+        text_input(placeholder, form.text(field))
+            .style(muted_input_style)
+            .on_input(move |value| Message::SettingsField(field, value))
+            .width(Length::Fill),
+    ]
+    .spacing(3)
+    .into()
+}
+
+fn muted_input_style(theme_: &iced::Theme, status: text_input::Status) -> text_input::Style {
+    let mut style = text_input::default(theme_, status);
+    style.placeholder = theme::TEXT_MUTED;
+    style
+}
+
+fn label_field_view<'a>(
+    form: &'a settings::LabelForm,
+    field: LabelField,
+    placeholder: &'a str,
+    readonly: bool,
+) -> Element<'a, Message> {
+    let input = text_input(placeholder, form.text(field))
+        .style(muted_input_style)
+        .width(Length::Fill);
+    let input = if readonly {
+        input
+    } else {
+        input.on_input(move |value| Message::LabelField(field, value))
+    };
+    column![text(field.label()).size(11).color(theme::TEXT_MUTED), input,]
+        .spacing(3)
+        .into()
+}
+
+fn label_choice(name: String, selected: bool, message: Message) -> Element<'static, Message> {
+    button(
+        row![
+            text(if selected { glyph::CHECK } else { ' ' })
+                .font(icons::solid())
+                .size(10.0)
+                .color(theme::PRIMARY)
+                .width(Length::Fixed(14.0)),
+            text(name).size(12),
+            horizontal_space(),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(message)
+    .width(Length::Fill)
+    .padding([5, 8])
+    .style(move |_theme: &iced::Theme, _status| button::Style {
+        background: Some(
+            if selected {
+                theme::SURFACE
+            } else {
+                theme::BG_SECONDARY
+            }
+            .into(),
+        ),
+        text_color: if selected {
+            theme::TEXT
+        } else {
+            theme::TEXT_SECONDARY
+        },
+        border: iced::Border {
+            color: if selected {
+                theme::PRIMARY
+            } else {
+                theme::BG_SECONDARY
+            },
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    })
+    .into()
+}
+
 fn modal_panel<'a>(modal: Modal, body: Element<'a, Message>) -> Element<'a, Message> {
     let (width, height) = modal.size();
     let close = button(
@@ -2830,6 +3795,55 @@ fn small_action(icon: char, label: &'static str, message: Message) -> Element<'s
             color: theme::BORDER,
             width: 1.0,
             radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    })
+    .into()
+}
+
+fn label_nav(row: &settings::LabelRow, selected: bool) -> Element<'static, Message> {
+    let color = settings::color_from_hex(&row.label.color).unwrap_or(theme::TEXT_MUTED);
+    let name = row.label.name.clone();
+    button(
+        row![
+            text(glyph::TAG)
+                .font(icons::solid())
+                .size(11.0)
+                .color(color),
+            text(name.clone()).size(12),
+            horizontal_space(),
+            text(row.torrent_count.to_string())
+                .size(11)
+                .color(theme::TEXT_MUTED),
+        ]
+        .spacing(9)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(Message::SelectLabelFilter(name))
+    .width(Length::Fill)
+    .padding([6, 12])
+    .style(move |_theme: &iced::Theme, _status| button::Style {
+        background: Some(
+            if selected {
+                theme::SURFACE
+            } else {
+                theme::BG_SECONDARY
+            }
+            .into(),
+        ),
+        text_color: if selected {
+            theme::TEXT
+        } else {
+            theme::TEXT_SECONDARY
+        },
+        border: iced::Border {
+            color: if selected {
+                theme::PRIMARY
+            } else {
+                theme::BG_SECONDARY
+            },
+            width: 0.0,
+            radius: 3.0.into(),
         },
         ..button::Style::default()
     })

@@ -58,6 +58,7 @@ async fn adds_pages_and_mutates_torrents() {
         &ListQuery {
             filter: "hello".to_owned(),
             state: None,
+            label: String::new(),
             sort: SortField::Id,
             descending: false,
             offset: 1,

@@ -390,13 +390,13 @@
 
 **Acceptance**
 
-- [ ] a Settings modal fülekkel nyílik, Esc/Close, 1440×900-on elfér.
-- [ ] egy Save az összes tabot menti; Reload eldobja; dirty jelzés; hiba a sor mellett.
-- [ ] Label tábla: név, szín, move path, limitek, auto-match; egy Save.
-- [ ] táblában label oszlop, sidebar label szűrő, hozzárendelés context menüből.
-- [ ] screenshot + Xvfb smoke + `cargo test -p ferrent-gui`.
+- [x] a Settings modal fülekkel nyílik, Esc/Close, 1440×900-on elfér.
+- [x] egy Save az összes tabot menti; Reload eldobja; dirty jelzés; hiba a sor mellett.
+- [x] Label tábla: név, szín, move path, limitek, auto-match; egy Save.
+- [x] táblában label oszlop, sidebar label szűrő, hozzárendelés context menüből (`Set label…` → modal).
+- [x] screenshot + X11 smoke + `cargo test -p ferrent-gui`.
 
-**Files:** `crates/gui/src/settings.rs`, `crates/gui/src/labels.rs`, `crates/gui/src/table.rs`, `crates/gui/src/main.rs`, `crates/gui/tests/`
+**Files:** `crates/gui/src/settings.rs`, `crates/gui/src/connection.rs`, `crates/gui/src/table.rs`, `crates/gui/src/main.rs`, `crates/gui/src/icons.rs`, `crates/gui/tests/settings.rs`
 
 ---
 
@@ -814,3 +814,5 @@
 ## Első lépés
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
+
+**Állapot (2026-11-20):** M4-T1–T5 kész; a következő szelet **M5-T1 AutoAdd**.

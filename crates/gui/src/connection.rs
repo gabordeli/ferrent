@@ -6,9 +6,10 @@ use std::path::PathBuf;
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
-    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
-    GetTorrentTrackersRequest, ListTorrentsRequest, SortField, Torrent, TorrentFile,
-    TorrentPeer, TorrentTracker,
+    CreateLabelRequest, DeleteLabelRequest, GetConfigRequest, GetStatusRequest,
+    GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry,
+    ListLabelsRequest, ListTorrentsRequest, SetConfigRequest, SetTorrentLabelRequest, SortField,
+    Torrent, TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -38,6 +39,7 @@ impl From<&ServerProfile> for ServerConfig {
 pub struct ListQuery {
     pub filter: String,
     pub state: Option<i32>,
+    pub label: String,
     pub sort: SortField,
     pub descending: bool,
     pub offset: u32,
@@ -49,6 +51,7 @@ impl Default for ListQuery {
         Self {
             filter: String::new(),
             state: None,
+            label: String::new(),
             sort: SortField::Id,
             descending: false,
             offset: 0,
@@ -109,7 +112,7 @@ pub async fn list(client: &AuthClient, query: &ListQuery) -> Result<Page, String
             offset: query.offset,
             limit: query.limit,
             state_filter: query.state.unwrap_or(0),
-            label_filter: String::new(),
+            label_filter: query.label.clone(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
@@ -181,4 +184,98 @@ pub async fn trackers(client: &AuthClient, id: u64) -> Result<Vec<TorrentTracker
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.trackers)
+}
+
+/// The daemon configuration document and its revision.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigSnapshot {
+    pub toml: String,
+    pub revision: u64,
+    pub env_locked: Vec<String>,
+}
+
+/// Fetches the configuration document.
+pub async fn config(client: &AuthClient) -> Result<ConfigSnapshot, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_config(GetConfigRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(ConfigSnapshot {
+        toml: response.toml,
+        revision: response.revision,
+        env_locked: response.env_locked,
+    })
+}
+
+/// Replaces the configuration document; a stale revision is rejected.
+pub async fn set_config(client: &AuthClient, toml: &str, revision: u64) -> Result<u64, String> {
+    let mut client = client.clone();
+    let response = client
+        .set_config(SetConfigRequest {
+            toml: toml.to_owned(),
+            revision,
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.revision)
+}
+
+/// Lists the label definitions with their assignment counts.
+pub async fn labels(client: &AuthClient) -> Result<Vec<LabelEntry>, String> {
+    let mut client = client.clone();
+    let response = client
+        .list_labels(ListLabelsRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.labels)
+}
+
+/// Creates or updates one label definition.
+pub async fn save_label(client: &AuthClient, label: Label, create: bool) -> Result<Label, String> {
+    let mut client = client.clone();
+    let response = if create {
+        client
+            .create_label(CreateLabelRequest { label: Some(label) })
+            .await
+    } else {
+        client
+            .update_label(UpdateLabelRequest { label: Some(label) })
+            .await
+    };
+    Ok(response
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner()
+        .label
+        .unwrap_or_default())
+}
+
+/// Deletes a label and its assignments; returns the cleared assignment count.
+pub async fn delete_label(client: &AuthClient, name: &str) -> Result<u32, String> {
+    let mut client = client.clone();
+    let response = client
+        .delete_label(DeleteLabelRequest {
+            name: name.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.cleared_assignments)
+}
+
+/// Assigns a label to one torrent; an empty name clears it.
+pub async fn assign_label(client: &AuthClient, id: u64, label: &str) -> Result<String, String> {
+    let mut client = client.clone();
+    let response = client
+        .set_torrent_label(SetTorrentLabelRequest {
+            id,
+            label: label.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.label)
 }

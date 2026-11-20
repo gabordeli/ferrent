@@ -20,7 +20,10 @@ pub const VISIBLE_ROWS: usize = 64;
 const MENU_WIDTH: f32 = 160.0;
 const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
-const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 2.0;
+const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 3.0;
+
+/// Horizontal space reserved for the label column, between name and size.
+const LABEL_WIDTH: f32 = 92.0;
 
 const BG_HEADER: Color = crate::theme::BG_SECONDARY;
 const BG_ROW: Color = crate::theme::BG;
@@ -45,6 +48,8 @@ pub struct Columns {
     pub id_right: f32,
     pub name_x: f32,
     pub name_end: f32,
+    pub label_x: f32,
+    pub label_end: f32,
     pub size_right: f32,
     pub dot_x: f32,
     pub state_x: f32,
@@ -63,7 +68,9 @@ impl Columns {
         Self {
             id_right: 44.0,
             name_x: 56.0,
-            name_end: width - 620.0,
+            name_end: width - 620.0 - LABEL_WIDTH,
+            label_x: width - 608.0 - LABEL_WIDTH,
+            label_end: width - 620.0,
             size_right: width - 566.0,
             dot_x: width - 552.0,
             state_x: width - 540.0,
@@ -99,6 +106,7 @@ pub fn state_color(state: i32) -> Color {
 pub enum Column {
     Id,
     Name,
+    Label,
     State,
     Progress,
     Download,
@@ -111,6 +119,7 @@ impl Column {
         match self {
             Self::Id => Some(SortField::Id),
             Self::Name => Some(SortField::Name),
+            Self::Label => Some(SortField::Label),
             Self::Progress => Some(SortField::Progress),
             Self::Download => Some(SortField::DownloadRate),
             Self::Upload => Some(SortField::UploadRate),
@@ -127,6 +136,8 @@ pub fn column_at(x: f32, width: f32) -> Option<Column> {
         Some(Column::Id)
     } else if x < columns.name_end {
         Some(Column::Name)
+    } else if x < columns.label_end {
+        Some(Column::Label)
     } else if x < columns.bar_x {
         Some(Column::State)
     } else if x < columns.down_right - 70.0 {
@@ -184,6 +195,7 @@ pub fn clamp_menu(x: f32, y: f32) -> (f32, f32) {
 pub enum MenuAction {
     Pause,
     Resume,
+    Label,
     Remove,
 }
 
@@ -212,7 +224,8 @@ pub fn menu_action_at(menu: &ContextMenu, point: Point) -> Option<MenuAction> {
     match index {
         0 if menu.paused => Some(MenuAction::Resume),
         0 => Some(MenuAction::Pause),
-        1 => Some(MenuAction::Remove),
+        1 => Some(MenuAction::Label),
+        2 => Some(MenuAction::Remove),
         _ => None,
     }
 }
@@ -381,6 +394,11 @@ impl Table<'_> {
                 alignment::Horizontal::Left,
             ),
             (
+                format!("LABEL{}", marker(SortField::Label)),
+                c.label_x,
+                alignment::Horizontal::Left,
+            ),
+            (
                 "SIZE".to_owned(),
                 c.size_right,
                 alignment::Horizontal::Right,
@@ -470,9 +488,9 @@ impl Table<'_> {
                 .with_width(1.0),
         );
         let labels = if menu.paused {
-            ["Resume", "Remove"]
+            ["Resume", "Set label…", "Remove"]
         } else {
-            ["Pause", "Remove"]
+            ["Pause", "Set label…", "Remove"]
         };
         for (index, label) in labels.iter().enumerate() {
             frame.fill_text(Text {
@@ -512,7 +530,7 @@ fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32, width: f32) {
     );
     cell(
         frame,
-        short_name(&torrent.name),
+        short_name(&torrent.name, 32),
         c.name_x,
         text_y,
         TEXT,
@@ -520,6 +538,29 @@ fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32, width: f32) {
         alignment::Horizontal::Left,
         regular,
     );
+    if torrent.label.is_empty() {
+        cell(
+            frame,
+            "—".to_owned(),
+            c.label_x,
+            text_y,
+            TEXT_DIM,
+            11.0,
+            alignment::Horizontal::Left,
+            regular,
+        );
+    } else {
+        cell(
+            frame,
+            short_name(&torrent.label, 12),
+            c.label_x,
+            text_y,
+            TEXT_DIM,
+            11.0,
+            alignment::Horizontal::Left,
+            regular,
+        );
+    }
     cell(
         frame,
         format_size(torrent.total_bytes),
@@ -670,11 +711,11 @@ fn cell(
     });
 }
 
-fn short_name(name: &str) -> String {
-    if name.chars().count() <= 32 {
+fn short_name(name: &str, max: usize) -> String {
+    if name.chars().count() <= max {
         name.to_owned()
     } else {
-        let mut short: String = name.chars().take(31).collect();
+        let mut short: String = name.chars().take(max.saturating_sub(1)).collect();
         short.push('…');
         short
     }
@@ -731,12 +772,17 @@ mod tests {
             Some(3)
         );
         assert_eq!(row_at(Point::new(20.0, 2.0), 0.0, 10), None);
-        assert_eq!(column_at(12.0, 746.0), Some(Column::Id));
-        assert_eq!(column_at(100.0, 746.0), Some(Column::Name));
-        assert_eq!(column_at(520.0, 746.0), Some(Column::Upload));
+        assert_eq!(column_at(12.0, 1224.0), Some(Column::Id));
+        assert_eq!(column_at(100.0, 1224.0), Some(Column::Name));
+        assert_eq!(column_at(560.0, 1224.0), Some(Column::Label));
+        assert_eq!(column_at(1010.0, 1224.0), Some(Column::Upload));
         assert_eq!(
-            column_at(80.0, 746.0).and_then(Column::sort_field),
+            column_at(80.0, 1224.0).and_then(Column::sort_field),
             Some(SortField::Name)
+        );
+        assert_eq!(
+            column_at(560.0, 1224.0).and_then(Column::sort_field),
+            Some(SortField::Label)
         );
     }
 
@@ -754,6 +800,10 @@ mod tests {
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 134.0)),
+            Some(MenuAction::Label)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 160.0)),
             Some(MenuAction::Remove)
         );
         assert_eq!(menu_action_at(&menu, Point::new(10.0, 10.0)), None);
