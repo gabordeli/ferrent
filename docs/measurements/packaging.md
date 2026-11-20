@@ -117,3 +117,51 @@ Ugyanezt futtatja a `.github/workflows/release-deb.yml` minden `v*` tagon
 (build amd64+arm64, verify a három suite-on, arm64 qemu smoke). Publikálás
 (APT repo, GHCR) még nincs a workflow-ban — az M3-T3/T4.
 
+## M6 – APT repó (M3-T3)
+
+`packaging/apt/build-repo.sh` a `target/debian-dist` .deb-jeiből épít
+`dists/stable` + `pool` fát, `apt-ftparchive`-ral számolt checksumokkal
+(MD5/SHA1/SHA256/SHA512), és aláírja (`InRelease`, `Release.gpg`). A szkript a
+végén `gpgv`-vel ellenőrzi a saját aláírását a repóban tárolt publikus kulccsal.
+
+| Metrika | Érték |
+|---|---:|
+| Repó építése (3 .deb, 2 arch) | **1,95 s** |
+| `dists/stable/Release` / `InRelease` | 2,4 KB / 3,3 KB |
+| `Packages` / `Packages.gz` (amd64) | 674 B / 467 B |
+| Publikált fa mérete (3 .deb-fel) | 9,5 MB |
+
+Aláíró kulcs: RSA 4096, `DB161AB5A22473586AC52CEDD727691B9D3B58AA`, érvényes
+2031-11-19-ig; a privát kulcs a repón kívül (`~/.config/ferrent/apt/`, 0600).
+
+### Telepítési teszt (`packaging/apt/repo-test.sh`)
+
+Debian 12 konténer, `file:/repo` forrás, DEB822 `Signed-By`:
+
+| Ellenőrzés | Eredmény |
+|---|---|
+| `apt update` figyelmeztetés nélkül | PASS |
+| Mindkét verzió listázva (`0.0.9-1`, `0.1.0-1`) | PASS |
+| Candidate a legújabb | PASS |
+| Korábbi verzió telepítése (`--allow-downgrades`) | PASS |
+| Frissítés a legújabbra | PASS |
+| Kulcs nélkül az `apt update` elbukik | PASS |
+
+A „korábbi verzió" egy `dpkg-deb -R/-b` átcsomagolt `0.0.9-1`, tehát a
+pool-megőrzés valóban tesztelt, nem csak deklarált. **6/6 PASS.**
+
+Két hiba az első futásból, mindkettő javítva: a `dpkg-scanpackages` abszolút
+`Filename:` mezőt írt (a repó gyökeréből relatív útvonallal kell futtatni), és
+a negatív kulcs-teszt hamis PASS-t adott, mert az apt a cache-elt listákat
+ellenőrzés nélkül elfogadta (`rm -rf /var/lib/apt/lists/*` kell előtte).
+
+### Publikálás
+
+`.github/workflows/release-apt.yml`: tagonként build (amd64+arm64) → `gh-pages`
+worktree (vagy üres orphan branch) → repó építés + aláírás a
+`GPG_PRIVATE_KEY`/`GPG_KEY_ID` secretből → commit+push. A régi verziók a
+`gh-pages` history-ban maradnak. Hiányzó secret → explicit `::error::` és
+bukó job. A Pages beállítás (branch: `gh-pages`) és a kliens útmutató
+(`docs/apt-install.md`) dokumentálva.
+
+

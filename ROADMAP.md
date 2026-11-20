@@ -711,10 +711,10 @@
 
 **Acceptance**
 
-- [ ] Tag push után `apt update && apt install ferrentd` működik tiszta Debianon.
-- [ ] A kulcs dokumentált; `Signed-By=/etc/apt/keyrings/ferrent.gpg`; nincs `apt-key`.
-- [ ] Az index checksumokat tartalmaz; legalább az előző verzió elérhető marad.
-- [ ] Hiányzó secret esetén a pipeline egyértelműen elbukik.
+- [~] Tag push után `apt update && apt install ferrentd` működik tiszta Debianon — lokálisan igazolva (`repo-test.sh`, 6/6 PASS, DEB822 + `Signed-By`, `file:` forrás); a tag→`gh-pages` út a workflow-ban kész, valódi GitHub repó + Pages beállítás kell hozzá.
+- [x] A kulcs dokumentált (`packaging/apt/README.md`, `docs/apt-install.md`); `Signed-By=/etc/apt/keyrings/ferrent.gpg`; nincs `apt-key`.
+- [x] Az index checksumokat tartalmaz (MD5/SHA1/SHA256/SHA512) és a saját aláírását `gpgv` ellenőrzi; az előző verzió a poolban marad (a `repo-test.sh` 0.0.9-1-ről 0.1.0-1-re frissít).
+- [x] Hiányzó `GPG_PRIVATE_KEY` → explicit `::error::` és bukó job a publish lépésben.
 
 **Files:** `.github/workflows/release-apt.yml`, `packaging/apt/`
 

@@ -1,0 +1,97 @@
+name: release-apt
+
+# Builds the .deb files for a tag, adds them to the signed APT repository on the
+# gh-pages branch and lets GitHub Pages serve that branch. Old versions stay in
+# the pool, so they remain installable. Publishing only happens on a tag.
+#
+# Repository settings -> Pages -> Source: "Deploy from a branch", branch
+# gh-pages, folder "/". Secrets: GPG_PRIVATE_KEY (base64 of the armored secret
+# key) and GPG_KEY_ID (the fingerprint); see packaging/apt/README.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apt-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build debs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build amd64
+        run: packaging/debian/build.sh debian:12 amd64
+
+      - name: Build arm64
+        run: packaging/debian/build.sh debian:12 arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs
+          path: target/debian-dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: sign and publish the repository
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs
+          path: dist
+
+      - name: Import the signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -e
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::the GPG_PRIVATE_KEY secret is missing; the repository cannot be signed"
+            exit 1
+          fi
+          printf '%s' "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}'
+
+      - name: Check out gh-pages (or start it empty)
+        run: |
+          set -e
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth 1 origin gh-pages
+            git worktree add site origin/gh-pages
+          else
+            git worktree add --detach site
+            git -C site checkout --orphan gh-pages
+          fi
+
+      - name: Add the packages and sign the repository
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -e
+          packaging/apt/build-repo.sh site dist
+          install -m 0644 packaging/apt/keyring/ferrent.gpg site/ferrent.gpg
+          printf '%s\n' \
+            '<!doctype html>' '<meta charset="utf-8">' \
+            '<title>Ferrent APT repository</title>' \
+            '<h1>Ferrent APT repository</h1>' \
+            '<p>Install instructions: docs/apt-install.md in the ferrent repository.</p>' \
+            > site/index.html
+          git -C site add -A
+          if git -C site diff --cached --quiet; then
+            echo "::notice::the repository tree did not change"
+          else
+            git -C site -c user.name="ferrent-bot" \
+              -c user.email="ferrent-bot@users.noreply.github.com" \
+              commit -m "apt: publish ${GITHUB_REF_NAME:-manual}"
+            git -C site push origin gh-pages
+          fi
