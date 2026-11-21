@@ -8,9 +8,9 @@ use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
     CreateLabelRequest, CreateTorrentRequest, DeleteLabelRequest, GetAutoAddStatusRequest,
     GetConfigRequest, GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest,
-    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest,
-    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
+    GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
+    ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
     SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
     UpdateLabelRequest,
 };
@@ -203,6 +203,17 @@ pub async fn set_file_priorities(
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.files)
+}
+
+/// Per-feed state of the RSS watcher.
+pub async fn rss_status(client: &AuthClient) -> Result<Vec<ferrent_protocol::v1::RssFeed>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_rss_status(GetRssStatusRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.feeds)
 }
 
 /// Builds a .torrent for a path on the daemon host.

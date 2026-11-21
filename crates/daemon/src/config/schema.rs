@@ -53,6 +53,8 @@ pub struct FileConfig {
     pub metrics: MetricsConfig,
     /// Client-API emulations (M8-T2).
     pub compat: CompatConfig,
+    /// RSS feeds that add torrents on their own (M10-T4).
+    pub rss: RssConfig,
 }
 
 /// Interface binding (M8-T4).
@@ -500,6 +502,62 @@ pub struct SessionConfig {
     pub default_trackers: Vec<String>,
 }
 
+/// One RSS/Atom feed. Items whose link is a `.torrent` are added.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RssFeedConfig {
+    pub url: String,
+    /// Label assigned to the added torrent; empty means none.
+    pub label: String,
+    /// Save path override; empty means the label staging folder or the
+    /// daemon's download directory.
+    pub save_path: String,
+    /// Regex matched against the item title; empty accepts everything.
+    pub filter: String,
+    pub enabled: bool,
+}
+
+impl Default for RssFeedConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            label: String::new(),
+            save_path: String::new(),
+            filter: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+/// RSS watcher. Off by default.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RssConfig {
+    pub enabled: bool,
+    /// Poll interval; the daemon clamps it to at least 60 seconds.
+    pub poll_secs: u64,
+    pub feed: Vec<RssFeedConfig>,
+}
+
+impl RssConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && self.feed.is_empty() {
+            return Err("rss.enabled needs at least one [[rss.feed]]".to_owned());
+        }
+        for feed in &self.feed {
+            let url = feed.url.trim();
+            if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(format!("rss feed url must be http(s): {url:?}"));
+            }
+            if !feed.filter.trim().is_empty() {
+                regex::Regex::new(feed.filter.trim())
+                    .map_err(|error| format!("rss filter for {url}: {error}"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Queueing behaviour. The queue order itself lives in the daemon, not in
 /// libtorrent (see `persist::load_queue_order`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -609,6 +667,7 @@ impl FileConfig {
             network: self.network.clone(),
             metrics: self.metrics.clone(),
             compat: self.compat.clone(),
+            rss: self.rss.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -634,6 +693,7 @@ pub struct ResolvedConfig {
     pub network: NetworkConfig,
     pub metrics: MetricsConfig,
     pub compat: CompatConfig,
+    pub rss: RssConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -661,6 +721,7 @@ impl ResolvedConfig {
             .qbittorrent
             .validate()
             .map_err(ConfigError::invalid)?;
+        self.rss.validate().map_err(ConfigError::invalid)?;
         Ok(())
     }
 }

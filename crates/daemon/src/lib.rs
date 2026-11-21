@@ -14,6 +14,8 @@ pub mod netbind;
 pub mod notify;
 pub mod persist;
 pub mod rpc;
+pub mod rss;
+pub mod rss_service;
 pub mod scheduler;
 pub mod state;
 pub mod store;

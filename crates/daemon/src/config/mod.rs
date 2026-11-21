@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 pub use apply::ConfigStore;
 pub use schema::{
-    DiskGuardConfig, FileConfig, LowAction, NotifyConfig, QueueConfig, ResolvedConfig,
-    SessionConfig, read_token_file,
+    DiskGuardConfig, FileConfig, LowAction, NotifyConfig, QueueConfig, ResolvedConfig, RssConfig,
+    RssFeedConfig, SessionConfig, read_token_file,
 };
 
 /// A configuration read, parse, validation or revision error.

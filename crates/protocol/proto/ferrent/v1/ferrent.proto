@@ -27,6 +27,9 @@ service Ferrent {
 
   // Builds a .torrent for a file or directory on the daemon host.
   rpc CreateTorrent(CreateTorrentRequest) returns (CreateTorrentResponse);
+
+  // Per-feed state of the RSS watcher.
+  rpc GetRssStatus(GetRssStatusRequest) returns (GetRssStatusResponse);
   // Returns the connected peers of one torrent.
   rpc GetTorrentPeers(GetTorrentPeersRequest) returns (GetTorrentPeersResponse);
   // Returns the trackers of one torrent.
@@ -614,6 +617,26 @@ message CreateTorrentResponse {
   bytes metainfo = 1;
   // v1 info hash, lowercase hex.
   string infohash = 2;
+}
+
+message GetRssStatusRequest {}
+
+// One configured RSS feed and what it has done so far.
+message RssFeed {
+  string url = 1;
+  string label = 2;
+  // Unix seconds of the last poll; 0 means "not polled yet".
+  uint64 last_poll = 3;
+  // Last error, empty on success.
+  string error = 4;
+  // Torrents added by this feed since the daemon started tracking.
+  uint64 added = 5;
+  // Item keys remembered for dedupe.
+  uint64 seen = 6;
+}
+
+message GetRssStatusResponse {
+  repeated RssFeed feeds = 1;
 }
 
 // One connected peer.

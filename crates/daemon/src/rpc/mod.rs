@@ -19,19 +19,20 @@ use ferrent_protocol::v1::{
     Disk as ProtoDisk, DiskZone as ProtoDiskZone, GetAutoAddStatusRequest,
     GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse, GetDisksRequest,
     GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse, GetNotificationStatusRequest,
-    GetNotificationStatusResponse, GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest,
-    GetTorrentFilesResponse, GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest,
-    GetTorrentResponse, GetTorrentTrackersRequest, GetTorrentTrackersResponse,
-    HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest,
-    ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest,
-    MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
-    QueueDirection as ProtoQueueDirection, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
-    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
-    SendTestNotificationRequest, SendTestNotificationResponse, SetConfigRequest, SetConfigResponse,
-    SetFilePrioritiesRequest, SetFilePrioritiesResponse, SetTorrentLabelRequest,
-    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField,
-    StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
-    UpdateLabelRequest, WatchRequest, WatchResponse,
+    GetNotificationStatusResponse, GetRssStatusRequest, GetRssStatusResponse, GetStatusRequest,
+    GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
+    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
+    GetTorrentTrackersResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry,
+    LabelResponse, ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest,
+    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
+    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
+    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse,
+    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
+    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
+    SetFilePrioritiesResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
+    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
+    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
+    WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -1077,6 +1078,20 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn get_rss_status(
+        &self,
+        request: Request<GetRssStatusRequest>,
+    ) -> Result<Response<GetRssStatusResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let feeds = self
+            .state
+            .rss_status()
+            .into_iter()
+            .map(|feed| feed.to_proto())
+            .collect();
+        Ok(Response::new(GetRssStatusResponse { feeds }))
+    }
+
     async fn get_torrent_peers(
         &self,
         request: Request<GetTorrentPeersRequest>,
@@ -1351,6 +1366,7 @@ pub async fn serve(
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
     crate::automation::ratio::spawn_ratio(Arc::clone(&state));
     crate::netbind::spawn_netbind(Arc::clone(&state));
+    crate::rss_service::spawn_rss(Arc::clone(&state));
     tokio::spawn(crate::compat::qbittorrent::serve(Arc::clone(&state)));
     if let Ok(config) = state.config.resolved() {
         if config.metrics.enabled {

@@ -174,6 +174,7 @@ enum Message {
     OpenSettings,
     OpenStorage,
     SettingsTab(Tab),
+    RssLoaded(Result<Vec<ferrent_protocol::v1::RssFeed>, String>),
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
     SettingsNetworkFlag(settings::NetworkFlag, bool),
@@ -808,6 +809,19 @@ impl App {
                 }
                 if tab == Tab::Storage {
                     return self.load_disks();
+                }
+                if tab == Tab::Rss {
+                    return self.load_rss();
+                }
+                Task::none()
+            }
+            Message::RssLoaded(result) => {
+                match result {
+                    Ok(feeds) => {
+                        self.settings.rss_feeds = feeds;
+                        self.settings.error = None;
+                    }
+                    Err(error) => self.settings.error = Some(format!("rss: {error}")),
                 }
                 Task::none()
             }
@@ -2527,6 +2541,16 @@ impl App {
         )
     }
 
+    fn load_rss(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { connection::rss_status(&client).await },
+            Message::RssLoaded,
+        )
+    }
+
     fn load_notify_status(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
@@ -2889,6 +2913,7 @@ impl App {
             Tab::Notifications => self.settings_notifications_view(),
             Tab::Storage => self.settings_storage_view(),
             Tab::Labels => self.settings_labels_view(),
+            Tab::Rss => self.settings_rss_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
 
@@ -2922,6 +2947,7 @@ impl App {
             | Tab::Scheduler
             | Tab::Notifications
             | Tab::Storage => Message::SettingsSave,
+            Tab::Rss => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
@@ -2933,6 +2959,7 @@ impl App {
                 | Tab::Scheduler
                 | Tab::Notifications
                 | Tab::Storage => true,
+                Tab::Rss => false,
             };
         let footer = row![
             summary,
@@ -3842,6 +3869,74 @@ impl App {
         ]
         .height(Length::Fill)
         .into()
+    }
+
+    fn settings_rss_view(&self) -> Element<'_, Message> {
+        let dim = theme::TEXT_MUTED;
+        if self.settings.rss_feeds.is_empty() {
+            return column![
+                text("No RSS feeds configured (or the watcher is off).")
+                    .size(12)
+                    .color(dim),
+                text("Add [[rss.feed]] entries in the configuration document.")
+                    .size(10)
+                    .color(dim),
+            ]
+            .spacing(6)
+            .into();
+        }
+        let mut children: Vec<Element<Message>> = Vec::new();
+        children.push(
+            row![
+                text("FEED").size(10).color(dim).width(Length::Fill),
+                text("ADDED").size(10).color(dim).width(Length::Fixed(56.0)),
+                text("SEEN").size(10).color(dim).width(Length::Fixed(56.0)),
+                text("LAST POLL")
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(110.0)),
+                text("ERROR")
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(220.0)),
+            ]
+            .spacing(10)
+            .into(),
+        );
+        for feed in &self.settings.rss_feeds {
+            children.push(
+                row![
+                    text(&feed.url).size(11).width(Length::Fill),
+                    text(feed.added.to_string())
+                        .size(11)
+                        .width(Length::Fixed(56.0)),
+                    text(feed.seen.to_string())
+                        .size(11)
+                        .width(Length::Fixed(56.0)),
+                    text(if feed.last_poll == 0 {
+                        "never".to_owned()
+                    } else {
+                        feed.last_poll.to_string()
+                    })
+                    .size(11)
+                    .color(dim)
+                    .width(Length::Fixed(110.0)),
+                    text(&feed.error)
+                        .size(11)
+                        .color(if feed.error.is_empty() {
+                            dim
+                        } else {
+                            theme::ERROR
+                        })
+                        .width(Length::Fixed(220.0)),
+                ]
+                .spacing(10)
+                .into(),
+            );
+        }
+        scrollable(WidgetColumn::with_children(children).spacing(4))
+            .height(Length::Fill)
+            .into()
     }
 
     fn settings_storage_view(&self) -> Element<'_, Message> {

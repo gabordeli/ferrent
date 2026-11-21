@@ -22,10 +22,11 @@ pub enum Tab {
     Notifications,
     Storage,
     Labels,
+    Rss,
 }
 
 impl Tab {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
@@ -34,6 +35,7 @@ impl Tab {
         Self::Notifications,
         Self::Storage,
         Self::Labels,
+        Self::Rss,
     ];
 
     #[must_use]
@@ -47,6 +49,7 @@ impl Tab {
             Self::Notifications => "Notifications",
             Self::Storage => "Storage",
             Self::Labels => "Labels",
+            Self::Rss => "RSS",
         }
     }
 
@@ -69,6 +72,7 @@ impl Tab {
                 "Filesystem zones: each label's library folder and the staging folder per disk."
             }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
+            Self::Rss => "Feeds the daemon polls; configure them in the config document.",
         }
     }
 }
@@ -2348,6 +2352,8 @@ pub struct Settings {
     pub label_form: LabelForm,
     pub label_baseline: LabelForm,
     pub confirming_delete: bool,
+    /// RSS feeds as reported by the daemon (read-only here).
+    pub rss_feeds: Vec<ferrent_protocol::v1::RssFeed>,
 }
 
 impl Default for Settings {
@@ -2388,6 +2394,7 @@ impl Default for Settings {
             label_form: LabelForm::default(),
             label_baseline: LabelForm::default(),
             confirming_delete: false,
+            rss_feeds: Vec::new(),
         }
     }
 }
@@ -2445,6 +2452,7 @@ impl Settings {
             Tab::Storage => self.storage != self.storage_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
+            Tab::Rss => false,
         }
     }
 

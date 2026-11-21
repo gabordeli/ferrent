@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
-    GetNotificationStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
+    GetNotificationStatusRequest, GetRssStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
     GetTorrentTrackersRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
     PauseTorrentRequest, QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest,
     SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SortField,
@@ -129,6 +129,8 @@ enum Command {
         #[arg(long = "output")]
         out: Option<PathBuf>,
     },
+    /// Show the RSS watcher status.
+    Rss,
     /// List the trackers of one torrent.
     Trackers {
         /// Torrent id.
@@ -539,6 +541,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     response.metainfo.len(),
                     response.infohash
                 );
+            }
+        }
+        Command::Rss => {
+            let feeds = client
+                .get_rss_status(GetRssStatusRequest {})
+                .await?
+                .into_inner()
+                .feeds;
+            if json {
+                output::print_json(&output::rss_json(&feeds));
+            } else {
+                output::print_rss(&feeds);
             }
         }
         Command::Trackers { id } => {

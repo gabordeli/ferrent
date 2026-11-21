@@ -58,6 +58,43 @@ pub fn files_json(files: &[TorrentFile]) -> Value {
     )
 }
 
+pub fn rss_json(feeds: &[ferrent_protocol::v1::RssFeed]) -> Value {
+    json!(
+        feeds
+            .iter()
+            .map(|feed| json!({
+                "url": feed.url,
+                "label": feed.label,
+                "last_poll": feed.last_poll,
+                "error": feed.error,
+                "added": feed.added,
+                "seen": feed.seen,
+            }))
+            .collect::<Vec<_>>()
+    )
+}
+
+pub fn print_rss(feeds: &[ferrent_protocol::v1::RssFeed]) {
+    if feeds.is_empty() {
+        outln!("no RSS feeds configured (or the watcher is off)");
+        return;
+    }
+    for feed in feeds {
+        outln!(
+            "{:<48}  added={:<3} seen={:<3}  last={}  {}",
+            feed.url,
+            feed.added,
+            feed.seen,
+            if feed.last_poll == 0 {
+                "-".to_owned()
+            } else {
+                feed.last_poll.to_string()
+            },
+            feed.error
+        );
+    }
+}
+
 pub fn trackers_json(trackers: &[TorrentTracker]) -> Value {
     json!(
         trackers

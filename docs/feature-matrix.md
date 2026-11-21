@@ -33,7 +33,7 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Global és per-torrent sebességlimit | ✅ | globális config + torrentenkénti RPC + label override |
 | Configurable bandwidth scheduler | ✅ | `[scheduler]` (idősáv, pause-seeding, limitek) |
 | Password protection | ✅ | token + TLS (erősebb, mint a Deluge jelszava) |
-| RSS (via Plugin) | ❌ | nincs feed-watcher |
+| RSS (via Plugin) | ✅ | `[rss]` feed-watcher beépítve, regex szűrő + dedupe (M10-T4) |
 | Egyéb libtorrent feature-ök | 🟡 | a libtorrenté, nem exponált |
 
 ## 2. Deluge bundled pluginok
@@ -70,7 +70,7 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Streaming | ❌ | nincs HTTP stream a letöltés közben |
 | Default Trackers | ✅ | `[session] default_trackers` (M10-T3); a metainfót nem írja át |
 | Randomize / autoport | ❌ | nincs port-randomizálás/teszt |
-| Updatorr, FlexGet/FlexRSS, YaRSS2 | ❌ | feed-alapú automatizálás; a *arr a qBittorrent API-n át megy |
+| Updatorr, FlexGet/FlexRSS, YaRSS2 | 🟡 | a beépített `[rss]` watcher kiváltja a YaRSS2-t; FlexGet továbbra is külső |
 | uTorrentImport | ❌ | csak Deluge-import van (`M8-T1`) |
 | Smart Move, Browse Button, CopyMagnetURI, IPstatusbar | ❌ | GUI-kényelem |
 
@@ -104,8 +104,9 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 2. ~~**Proxy támogatás** (HTTP/SOCKS5 + peer-proxy)~~ – **kész (M10-T1)**:
    `[network]` proxy + encryption + UPnP/NAT-PMP, SOCKS5-tel mérve
    (`docs/measurements/m10-network-settings.md`).
-3. **RSS-watcher** – a Deluge-ban is csak plugin (YaRSS2, a TRaSH szerint
-   halott); beépítve ez valódi differenciáló.
+3. ~~**RSS-watcher**~~ – **kész (M10-T4)**: `[rss]` feedek, regex szűrő,
+   tartós dedupe, `ferrent-cli rss` + Settings → RSS fül
+   (`docs/measurements/m10-rss-watcher.md`).
 4. **IP blocklist** – privát trackereknél/anti-leechhez; közepes.
 5. ~~**Torrent készítés + default trackerek**~~ – **kész (M10-T3)**:
    `CreateTorrent` RPC + `ferrent-cli create` + GUI gomb; a default trackert a
