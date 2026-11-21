@@ -161,4 +161,23 @@ mod tests {
         }
         assert!(checked > 40, "{checked} entries");
     }
+
+    #[test]
+    fn catalogue_parses_and_is_not_empty() {
+        // A duplicate key makes the whole document unparsable; the runtime
+        // falls back to English, which hides the mistake. This test is the
+        // guard: it happened once with a repeated "Scheduler" entry.
+        let raw = include_str!("../locales/hu.toml");
+        let table: HashMap<String, String> =
+            toml::from_str(raw).expect("hu.toml must stay valid TOML");
+        assert!(
+            table.len() > 150,
+            "catalogue looks truncated: {}",
+            table.len()
+        );
+        assert_eq!(
+            table.get("Settings").map(String::as_str),
+            Some("Beállítások")
+        );
+    }
 }

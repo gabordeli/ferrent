@@ -16,8 +16,8 @@ use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus}
 use ferrent_gui::i18n;
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
-    self, ConfigField, DigestField, DiskRow, HookEvent, HookField, LabelField, SchedulerLevel,
-    Settings, StorageField, SuccessAction, Tab, WatchField, WebhookField,
+    self, ConfigField, DigestField, DiskRow, HookEvent, HookField, LabelField, RssField,
+    SchedulerLevel, Settings, StorageField, SuccessAction, Tab, WatchField, WebhookField,
 };
 use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
@@ -242,6 +242,13 @@ enum Message {
     AutoAddScanNow,
     AutoAddStatusLoaded(Result<Vec<settings::AutoAddStatusRow>, String>),
     AutoAddScanned(Result<connection::ScanTotals, String>),
+    RssSelected(usize),
+    RssAdd,
+    RssRemove,
+    RssField(RssField, String),
+    RssFeedEnabled(bool),
+    RssPoll(String),
+    RssWatcherEnabled(bool),
     HooksSelected(usize),
     HooksAdd,
     HooksRemove,
@@ -357,10 +364,10 @@ enum Modal {
 impl Modal {
     fn title(self) -> &'static str {
         match self {
-            Self::Servers => "Servers",
-            Self::Settings => "Settings",
-            Self::AddTorrent => "Add torrent",
-            Self::Remove => "Remove torrents",
+            Self::Servers => i18n::t("Servers"),
+            Self::Settings => i18n::t("Settings"),
+            Self::AddTorrent => i18n::t("Add torrent"),
+            Self::Remove => i18n::t("Remove torrents"),
             Self::SetLabel => i18n::t("Set label"),
             Self::Rename => i18n::t("Rename file"),
         }
@@ -1269,6 +1276,40 @@ impl App {
                 if let Some(row) = self.settings.selected_watch_mut() {
                     row.on_success = action;
                 }
+                Task::none()
+            }
+            Message::RssSelected(index) => {
+                if index < self.settings.rss.rows.len() {
+                    self.settings.rss_selected = Some(index);
+                }
+                Task::none()
+            }
+            Message::RssAdd => {
+                self.settings.add_rss();
+                Task::none()
+            }
+            Message::RssRemove => {
+                self.settings.remove_rss();
+                Task::none()
+            }
+            Message::RssField(field, value) => {
+                if let Some(row) = self.settings.selected_rss_mut() {
+                    row.set(field, value);
+                }
+                Task::none()
+            }
+            Message::RssFeedEnabled(value) => {
+                if let Some(row) = self.settings.selected_rss_mut() {
+                    row.enabled = value;
+                }
+                Task::none()
+            }
+            Message::RssWatcherEnabled(value) => {
+                self.settings.rss.enabled = value;
+                Task::none()
+            }
+            Message::RssPoll(value) => {
+                self.settings.rss.poll_secs = value;
                 Task::none()
             }
             Message::HooksSelected(index) => {
@@ -3336,6 +3377,16 @@ impl App {
             Tab::Rss => self.settings_rss_view(),
             Tab::Appearance => self.settings_appearance_view(),
         };
+        // These tabs are plain forms; without a scroll they overflow the
+        // modal body and their labels fall outside the clipped viewport.
+        let body: Element<Message> = if matches!(
+            settings.tab,
+            Tab::Connection | Tab::Session | Tab::Scheduler | Tab::Appearance
+        ) {
+            scrollable(body).height(Length::Fill).into()
+        } else {
+            body
+        };
         let dirty = settings.dirty_tab(settings.tab);
 
         let mut summary = text("")
@@ -3381,7 +3432,7 @@ impl App {
                 | Tab::Scheduler
                 | Tab::Notifications
                 | Tab::Storage => true,
-                Tab::Rss => false,
+                Tab::Rss => true,
                 Tab::Appearance => false,
             };
         let footer = row![
@@ -3424,9 +3475,9 @@ impl App {
                 form,
                 field,
                 if field == ConfigField::Bind {
-                    "127.0.0.1:50051 (default)"
+                    i18n::t("127.0.0.1:50051 (default)")
                 } else {
-                    "daemon default"
+                    i18n::t("daemon default")
                 },
             )
         };
@@ -3435,7 +3486,7 @@ impl App {
             field(ConfigField::DownloadDir),
             field(ConfigField::Bind),
             field(ConfigField::TokenFile),
-            text("Network").size(12).color(theme::text()),
+            text(i18n::t("Network")).size(12).color(theme::text()),
             field(ConfigField::ProxyType),
             row![field(ConfigField::ProxyHost), field(ConfigField::ProxyPort),].spacing(10),
             row![
@@ -3479,17 +3530,21 @@ impl App {
                 ))
                 .size(11)
                 .color(theme::text_secondary()),
-                action_button("Refresh blocklist", Message::SettingsRefreshBlocklist, true),
+                action_button(
+                    i18n::t("Refresh blocklist"),
+                    Message::SettingsRefreshBlocklist,
+                    true,
+                ),
             ]
             .spacing(10)
             .align_y(iced::Alignment::Center),
             detail_row(
-                "Profile",
+                i18n::t("Profile"),
                 self.config.active.clone().unwrap_or_else(|| "—".to_owned()),
                 theme::text_muted()
             ),
             detail_row(
-                "Client config",
+                i18n::t("Client config"),
                 self.config_path.display().to_string(),
                 theme::text_muted()
             ),
@@ -3512,14 +3567,14 @@ impl App {
             ]
             .spacing(10),
             checkbox(
-                "Treat newly added torrents as complete (seed mode)",
+                i18n::t("Treat newly added torrents as complete (seed mode)"),
                 form.seed_mode
             )
             .on_toggle(Message::SettingsSeedMode)
             .size(14)
             .text_size(12),
             checkbox(
-                "Apply the configured active limits (queue)",
+                i18n::t("Apply the configured active limits (queue)"),
                 form.queue_enabled
             )
             .on_toggle(Message::SettingsQueueEnabled)
@@ -3632,9 +3687,9 @@ impl App {
                     .size(12)
                     .font(theme::semibold()),
                 horizontal_space(),
-                action_button("Add", Message::AutoAddAdd, !settings.loading),
+                action_button(i18n::t("Add"), Message::AutoAddAdd, !settings.loading),
                 action_button(
-                    "Remove",
+                    i18n::t("Remove"),
                     Message::AutoAddRemove,
                     settings.autoadd_selected.is_some() && !settings.loading,
                 ),
@@ -3681,8 +3736,14 @@ impl App {
             .iter()
             .map(|status| status.deferred)
             .sum();
-        let totals = text(format!(
-            "{added} added · {pending} pending · {invalid} invalid · {deferred} deferred"
+        let totals = text(i18n::t_fmt(
+            "{} added · {} pending · {} invalid · {} deferred",
+            &[
+                &added.to_string(),
+                &pending.to_string(),
+                &invalid.to_string(),
+                &deferred.to_string(),
+            ],
         ))
         .size(11)
         .color(theme::text_muted());
@@ -3696,7 +3757,7 @@ impl App {
                     row![
                         horizontal_space(),
                         container(action_button(
-                            "Scan now",
+                            i18n::t("Scan now"),
                             Message::AutoAddScanNow,
                             !settings.loading,
                         ))
@@ -3727,11 +3788,11 @@ impl App {
             ]
             .spacing(8),
             row![
-                checkbox("Enabled", row.enabled)
+                checkbox(i18n::t("Enabled"), row.enabled)
                     .on_toggle(Message::AutoAddEnabled)
                     .size(14)
                     .text_size(12),
-                checkbox("Add paused", row.add_paused)
+                checkbox(i18n::t("Add paused"), row.add_paused)
                     .on_toggle(Message::AutoAddPaused)
                     .size(14)
                     .text_size(12),
@@ -3837,9 +3898,9 @@ impl App {
             row![
                 text(i18n::t("Hooks")).size(12).font(theme::semibold()),
                 horizontal_space(),
-                action_button("Add", Message::HooksAdd, !settings.loading),
+                action_button(i18n::t("Add"), Message::HooksAdd, !settings.loading),
                 action_button(
-                    "Remove",
+                    i18n::t("Remove"),
                     Message::HooksRemove,
                     settings.hooks_selected.is_some() && !settings.loading,
                 ),
@@ -3952,11 +4013,11 @@ impl App {
                 column![
                     text(i18n::t("Options")).size(11).color(theme::text_muted()),
                     row![
-                        checkbox("Run through shell", row.shell)
+                        checkbox(i18n::t("Run through shell"), row.shell)
                             .on_toggle(Message::HooksShell)
                             .size(14)
                             .text_size(12),
-                        checkbox("Enabled", row.enabled)
+                        checkbox(i18n::t("Enabled"), row.enabled)
                             .on_toggle(Message::HooksEnabled)
                             .size(14)
                             .text_size(12),
@@ -3967,7 +4028,7 @@ impl App {
                 .width(Length::Fill),
             ]
             .spacing(8),
-            text("Hooks are at-least-once: a crash replays the event, so make the command idempotent. The event is acknowledged after every matching hook finished.")
+            text(i18n::t("Hooks are at-least-once: a crash replays the event, so make the command idempotent. The event is acknowledged after every matching hook finished."))
                 .size(10)
                 .color(theme::text_muted()),
         ]
@@ -3978,7 +4039,15 @@ impl App {
 
     fn settings_scheduler_view(&self) -> Element<'_, Message> {
         let form = &self.settings.scheduler;
-        let days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        let days = [
+            i18n::t("Mon"),
+            i18n::t("Tue"),
+            i18n::t("Wed"),
+            i18n::t("Thu"),
+            i18n::t("Fri"),
+            i18n::t("Sat"),
+            i18n::t("Sun"),
+        ];
         let mut rows: Vec<Element<Message>> = Vec::with_capacity(7);
         for (day, label) in days.iter().enumerate() {
             let mut cells: Vec<Element<Message>> = Vec::with_capacity(24);
@@ -4037,11 +4106,11 @@ impl App {
 
         column![
             row![
-                checkbox("Enabled", form.enabled)
+                checkbox(i18n::t("Enabled"), form.enabled)
                     .on_toggle(Message::SchedulerEnabled)
                     .size(14)
                     .text_size(12),
-                checkbox("Red pauses seeding too", form.pause_seeding)
+                checkbox(i18n::t("Red pauses seeding too"), form.pause_seeding)
                     .on_toggle(Message::SchedulerPauseSeeding)
                     .size(14)
                     .text_size(12),
@@ -4053,14 +4122,16 @@ impl App {
                 field(SchedulerField::UploadLimit, "0"),
             ]
             .spacing(8),
-            text("Monday first. Click a cell to cycle green → yellow → red.")
-                .size(10)
-                .color(theme::text_muted()),
+            text(i18n::t(
+                "Monday first. Click a cell to cycle green → yellow → red."
+            ))
+            .size(10)
+            .color(theme::text_muted()),
             header,
             WidgetColumn::with_children(rows).spacing(1),
-            text(format!(
+            text(i18n::t_fmt(
                 "{} non-green hour(s) · green = session defaults, yellow = limits, red = scheduler pause",
-                form.marked_cells()
+                &[&form.marked_cells().to_string()],
             ))
             .size(10)
             .color(theme::text_muted()),
@@ -4143,7 +4214,7 @@ impl App {
             row![
                 text(i18n::t("Webhooks")).size(12).font(theme::semibold()),
                 horizontal_space(),
-                action_button("Add", Message::NotifyAdd, !settings.loading),
+                action_button(i18n::t("Add"), Message::NotifyAdd, !settings.loading),
                 action_button(
                     "Remove",
                     Message::NotifyRemove,
@@ -4160,7 +4231,11 @@ impl App {
             row![
                 text("Telegram").size(12).font(theme::semibold()),
                 horizontal_space(),
-                action_button("Add", Message::NotifyTelegramAdd, !settings.loading),
+                action_button(
+                    i18n::t("Add"),
+                    Message::NotifyTelegramAdd,
+                    !settings.loading
+                ),
                 action_button(
                     "Remove",
                     Message::NotifyTelegramRemove,
@@ -4201,7 +4276,7 @@ impl App {
                         field(WebhookField::Timeout, "5000"),
                     ]
                     .spacing(8),
-                    checkbox("Channel enabled", row.enabled)
+                    checkbox(i18n::t("Channel enabled"), row.enabled)
                         .on_toggle(Message::NotifyWebhookEnabled)
                         .size(14)
                         .text_size(12),
@@ -4238,7 +4313,7 @@ impl App {
                     ]
                     .spacing(8),
                     field(settings::TelegramField::ApiBase, TELEGRAM_API_BASE),
-                    checkbox("Channel enabled", row.enabled)
+                    checkbox(i18n::t("Channel enabled"), row.enabled)
                         .on_toggle(Message::NotifyTelegramEnabled)
                         .size(14)
                         .text_size(12),
@@ -4284,7 +4359,7 @@ impl App {
             list,
             container(
                 column![
-                    checkbox("Notifications enabled", notify.enabled)
+                    checkbox(i18n::t("Notifications enabled"), notify.enabled)
                         .on_toggle(Message::NotifyEnabled)
                         .size(14)
                         .text_size(12),
@@ -4321,82 +4396,194 @@ impl App {
     }
 
     fn settings_rss_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
         let dim = theme::text_muted();
-        if self.settings.rss_feeds.is_empty() {
-            return column![
-                text(i18n::t("No RSS feeds configured (or the watcher is off)."))
-                    .size(12)
-                    .color(dim),
-                text(i18n::t(
-                    "Add [[rss.feed]] entries in the configuration document."
-                ))
-                .size(10)
-                .color(dim),
-            ]
-            .spacing(6)
-            .into();
-        }
-        let mut children: Vec<Element<Message>> = Vec::new();
-        children.push(
-            row![
-                text(i18n::t("FEED"))
+
+        let rows: Vec<Element<Message>> = settings
+            .rss
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let selected = settings.rss_selected == Some(index);
+                let status = settings
+                    .rss_feeds
+                    .iter()
+                    .find(|feed| feed.url == row.url.trim());
+                let detail: Element<Message> = match status {
+                    Some(feed) if !feed.error.is_empty() => text(feed.error.clone())
+                        .size(10)
+                        .color(theme::error())
+                        .into(),
+                    Some(feed) => text(i18n::t_fmt(
+                        "{} added · {} seen · last poll {}",
+                        &[
+                            &feed.added.to_string(),
+                            &feed.seen.to_string(),
+                            &if feed.last_poll == 0 {
+                                i18n::t("never").to_owned()
+                            } else {
+                                feed.last_poll.to_string()
+                            },
+                        ],
+                    ))
                     .size(10)
                     .color(dim)
-                    .width(Length::Fill),
-                text(i18n::t("ADDED"))
-                    .size(10)
-                    .color(dim)
-                    .width(Length::Fixed(56.0)),
-                text(i18n::t("SEEN"))
-                    .size(10)
-                    .color(dim)
-                    .width(Length::Fixed(56.0)),
-                text("LAST POLL")
-                    .size(10)
-                    .color(dim)
-                    .width(Length::Fixed(110.0)),
-                text("ERROR")
-                    .size(10)
-                    .color(dim)
-                    .width(Length::Fixed(220.0)),
-            ]
-            .spacing(10)
-            .into(),
-        );
-        for feed in &self.settings.rss_feeds {
-            children.push(
-                row![
-                    text(&feed.url).size(11).width(Length::Fill),
-                    text(feed.added.to_string())
-                        .size(11)
-                        .width(Length::Fixed(56.0)),
-                    text(feed.seen.to_string())
-                        .size(11)
-                        .width(Length::Fixed(56.0)),
-                    text(if feed.last_poll == 0 {
-                        "never".to_owned()
-                    } else {
-                        feed.last_poll.to_string()
-                    })
-                    .size(11)
-                    .color(dim)
-                    .width(Length::Fixed(110.0)),
-                    text(&feed.error)
-                        .size(11)
-                        .color(if feed.error.is_empty() {
-                            dim
+                    .into(),
+                    None if row.enabled => {
+                        text(i18n::t("not polled yet")).size(10).color(dim).into()
+                    }
+                    None => text(i18n::t("disabled")).size(10).color(dim).into(),
+                };
+                let url = if row.url.trim().is_empty() {
+                    i18n::t("(no URL)").to_owned()
+                } else {
+                    row.url.trim().to_owned()
+                };
+                let label = if row.label.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("#{}", row.label.trim())
+                };
+                button(
+                    column![
+                        row![
+                            text(glyph::RSS).font(icons::solid()).size(11.0).color(
+                                if row.enabled {
+                                    theme::primary()
+                                } else {
+                                    theme::text_muted()
+                                }
+                            ),
+                            text(url).size(12),
+                            horizontal_space(),
+                            text(label).size(10).color(theme::text_muted()),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                        detail,
+                    ]
+                    .spacing(2),
+                )
+                .on_press(Message::RssSelected(index))
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::surface()
                         } else {
-                            theme::error()
-                        })
-                        .width(Length::Fixed(220.0)),
-                ]
-                .spacing(10)
-                .into(),
-            );
-        }
-        scrollable(WidgetColumn::with_children(children).spacing(4))
-            .height(Length::Fill)
+                            theme::bg_secondary()
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected {
+                        theme::text()
+                    } else {
+                        theme::text_secondary()
+                    },
+                    border: iced::Border {
+                        color: if selected {
+                            theme::primary()
+                        } else {
+                            theme::bg_secondary()
+                        },
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = column![
+            row![
+                text(i18n::t("RSS feeds")).size(12).font(theme::semibold()),
+                horizontal_space(),
+                action_button(i18n::t("Add"), Message::RssAdd, !settings.loading),
+                action_button(
+                    i18n::t("Remove"),
+                    Message::RssRemove,
+                    settings.rss_selected.is_some() && !settings.loading,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(
+                scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(6)
+        .width(Length::Fixed(330.0))
+        .height(Length::Fill);
+
+        let editor: Element<Message> = if settings.selected_rss().is_some() {
+            self.rss_editor_view()
+        } else {
+            column![
+                text(i18n::t("Select a feed, or add one."))
+                    .size(12)
+                    .color(dim)
+            ]
             .into()
+        };
+
+        let globals = column![
+            checkbox(i18n::t("Watcher enabled"), settings.rss.enabled)
+                .on_toggle(Message::RssWatcherEnabled)
+                .size(14)
+                .text_size(12),
+            column![
+                text(i18n::t("Poll interval (s)")).size(11).color(dim),
+                text_input(i18n::t("daemon default"), &settings.rss.poll_secs)
+                    .style(muted_input_style)
+                    .padding([4, 8])
+                    .size(12)
+                    .on_input(Message::RssPoll)
+                    .width(Length::Fixed(160.0)),
+            ]
+            .spacing(2),
+        ]
+        .spacing(10);
+
+        row![
+            list,
+            container(
+                column![globals, scrollable(editor).height(Length::Fill),]
+                    .spacing(10)
+                    .height(Length::Fill)
+            )
+            .padding([0, 12])
+            .width(Length::Fill)
+            .height(Length::Fill),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn rss_editor_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let Some(row) = settings.selected_rss() else {
+            return text("").size(1).into();
+        };
+        column![
+            rss_field_view(row, RssField::Url, "https://example.org/feed.xml"),
+            row![
+                rss_field_view(row, RssField::Label, "movies"),
+                rss_field_view(row, RssField::SavePath, "session default"),
+            ]
+            .spacing(8),
+            rss_field_view(row, RssField::Filter, "2160p"),
+            checkbox(i18n::t("Enabled"), row.enabled)
+                .on_toggle(Message::RssFeedEnabled)
+                .size(14)
+                .text_size(12),
+        ]
+        .spacing(10)
+        .max_width(560.0)
+        .into()
     }
 
     fn settings_appearance_view(&self) -> Element<'_, Message> {
@@ -4559,18 +4746,21 @@ impl App {
         }
 
         let flags = row![
-            checkbox("Guard enabled", storage.enabled)
+            checkbox(i18n::t("Guard enabled"), storage.enabled)
                 .on_toggle(Message::StorageEnabled)
                 .size(14)
                 .text_size(12),
-            checkbox("Allow low add", storage.on_low_notify)
+            checkbox(i18n::t("Allow low add"), storage.on_low_notify)
                 .on_toggle(Message::StorageOnLow)
                 .size(14)
                 .text_size(12),
-            checkbox("Require room for the payload", storage.require_space)
-                .on_toggle(Message::StorageRequireSpace)
-                .size(14)
-                .text_size(12),
+            checkbox(
+                i18n::t("Require room for the payload"),
+                storage.require_space
+            )
+            .on_toggle(Message::StorageRequireSpace)
+            .size(14)
+            .text_size(12),
         ]
         .spacing(14)
         .wrap();
@@ -4675,17 +4865,17 @@ impl App {
         let body = column![
             text(i18n::t("Filesystems")).size(12).font(theme::medium()),
             disks,
-            text("Guard").size(12).font(theme::medium()),
+            text(i18n::t("Guard")).size(12).font(theme::medium()),
             flags,
             numbers,
             row![
-                text("Minimum free and margin apply per filesystem; the guard pauses writers only, never seeds.")
+                text(i18n::t("Minimum free and margin apply per filesystem; the guard pauses writers only, never seeds."))
                     .size(10)
                     .color(theme::text_muted()),
             ],
             text(i18n::t("Zones")).size(12).font(theme::medium()),
             zones,
-            row![action_button("Add zone", Message::ZoneAdd, true)].spacing(8),
+            row![action_button(i18n::t("Add zone"), Message::ZoneAdd, true)].spacing(8),
         ]
         .spacing(10);
 
@@ -4763,7 +4953,7 @@ impl App {
             row![
                 text(i18n::t("Labels")).size(12).font(theme::semibold()),
                 horizontal_space(),
-                action_button("New", Message::LabelNew, !settings.loading),
+                action_button(i18n::t("New"), Message::LabelNew, !settings.loading),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -4805,7 +4995,7 @@ impl App {
                     text(LabelField::Name.label())
                         .size(11)
                         .color(theme::text_muted()),
-                    text("fixed").size(10).color(theme::text_muted()),
+                    text(i18n::t("fixed")).size(10).color(theme::text_muted()),
                 ]
                 .spacing(6),
                 container(text(form.name.clone()).size(13))
@@ -4882,7 +5072,11 @@ impl App {
                     .color(theme::queued())
                     .width(Length::Fill),
                 action_button(i18n::t("Cancel"), Message::LabelDeleteCancelled, true),
-                danger_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
+                danger_button(
+                    i18n::t("Delete"),
+                    Message::LabelDeleteConfirmed,
+                    !settings.loading
+                ),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
@@ -4890,7 +5084,11 @@ impl App {
         } else {
             row![
                 horizontal_space(),
-                danger_button("Delete", Message::LabelDeleteRequested, !settings.loading),
+                danger_button(
+                    i18n::t("Delete"),
+                    Message::LabelDeleteRequested,
+                    !settings.loading
+                ),
             ]
             .into()
         };
@@ -5548,12 +5746,13 @@ impl App {
         .spacing(2)
         .into();
 
-        column![
-            container(header).padding(if expanded {
-                iced::Padding::from([16, 14])
-            } else {
-                iced::Padding::from([16, 8])
-            }),
+        let header = container(header).padding(if expanded {
+            iced::Padding::from([16, 14])
+        } else {
+            iced::Padding::from([16, 8])
+        });
+
+        let middle = column![
             nav,
             nav_button(
                 expanded,
@@ -5648,8 +5847,14 @@ impl App {
             } else {
                 Element::from(text("").size(1))
             },
-            // Pushes Settings and Servers to the bottom of the bar.
-            vertical_space(),
+        ]
+        .spacing(2);
+
+        // The middle scrolls, so a short window never pushes the bottom
+        // navigation (Settings, Servers) out of the sidebar.
+        column![
+            header,
+            scrollable(middle).height(Length::Fill),
             container(bottom).padding([10, 8]),
         ]
         .spacing(2)
@@ -6494,6 +6699,24 @@ fn watch_field_view<'a>(
             .size(12)
             .width(Length::Fill)
             .on_input(move |value| Message::AutoAddField(field, value)),
+    ]
+    .spacing(3)
+    .into()
+}
+
+fn rss_field_view<'a>(
+    row: &'a settings::RssRow,
+    field: RssField,
+    placeholder: &'a str,
+) -> Element<'a, Message> {
+    column![
+        text(field.label()).size(11).color(theme::text_muted()),
+        text_input(placeholder, row.text(field))
+            .style(muted_input_style)
+            .padding([4, 8])
+            .size(12)
+            .width(Length::Fill)
+            .on_input(move |value| Message::RssField(field, value)),
     ]
     .spacing(3)
     .into()

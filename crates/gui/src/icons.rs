@@ -53,4 +53,5 @@ pub mod glyph {
     pub const FOLDER_OPEN: char = '\u{f07c}';
     pub const LIST_OL: char = '\u{f0cb}';
     pub const ROCKET: char = '\u{f135}';
+    pub const RSS: char = '\u{f09e}';
 }

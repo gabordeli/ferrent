@@ -59,24 +59,32 @@ impl Tab {
     #[must_use]
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Connection => "Daemon paths and bind address; changes apply on restart.",
-            Self::Session => "Engine limits; changes apply as soon as they are saved.",
-            Self::AutoAdd => {
-                "Watch directories; a 1 s scan picks up new .torrent and .magnet files."
+            Self::Connection => {
+                crate::i18n::t("Daemon paths and bind address; changes apply on restart.")
             }
-            Self::Hooks => "Programs run on added, finished, removed and error events.",
-            Self::Scheduler => {
-                "A 24×7 weekly grid: green = session defaults, yellow = limits, red = pause."
+            Self::Session => {
+                crate::i18n::t("Engine limits; changes apply as soon as they are saved.")
             }
-            Self::Notifications => {
-                "Webhook channels fed by the event journal, with retry and a dead-letter box."
+            Self::AutoAdd => crate::i18n::t(
+                "Watch directories; a 1 s scan picks up new .torrent and .magnet files.",
+            ),
+            Self::Hooks => {
+                crate::i18n::t("Programs run on added, finished, removed and error events.")
             }
-            Self::Storage => {
-                "Filesystem zones: each label's library folder and the staging folder per disk."
+            Self::Scheduler => crate::i18n::t(
+                "A 24×7 weekly grid: green = session defaults, yellow = limits, red = pause.",
+            ),
+            Self::Notifications => crate::i18n::t(
+                "Webhook channels fed by the event journal, with retry and a dead-letter box.",
+            ),
+            Self::Storage => crate::i18n::t(
+                "Filesystem zones: each label's library folder and the staging folder per disk.",
+            ),
+            Self::Labels => crate::i18n::t("Definitions, limits and auto-assignment rules."),
+            Self::Rss => crate::i18n::t("Feeds the daemon polls; add them like servers."),
+            Self::Appearance => {
+                crate::i18n::t("Dark or light, with an accent colour; saved to gui.toml.")
             }
-            Self::Labels => "Definitions, limits and auto-assignment rules.",
-            Self::Rss => "Feeds the daemon polls; configure them in the config document.",
-            Self::Appearance => "Dark or light, with an accent colour; saved to gui.toml.",
         }
     }
 }
@@ -105,21 +113,21 @@ impl ConfigField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::DataDir => "Data directory",
-            Self::DownloadDir => "Download directory",
-            Self::Bind => "Bind address",
-            Self::TokenFile => "Token file",
-            Self::DownloadRateLimit => "Download limit (B/s)",
-            Self::UploadRateLimit => "Upload limit (B/s)",
-            Self::ActiveDownloads => "Active downloads",
-            Self::ActiveSeeds => "Active seeds",
-            Self::ActiveLimit => "Active torrents",
-            Self::ProxyType => "Proxy type (none/http/socks5/…)",
-            Self::ProxyHost => "Proxy host",
-            Self::ProxyPort => "Proxy port",
-            Self::ProxyUsername => "Proxy user",
-            Self::ProxyPassword => "Proxy password",
-            Self::Encryption => "Encryption (enabled/forced/disabled)",
+            Self::DataDir => crate::i18n::t("Data directory"),
+            Self::DownloadDir => crate::i18n::t("Download directory"),
+            Self::Bind => crate::i18n::t("Bind address"),
+            Self::TokenFile => crate::i18n::t("Token file"),
+            Self::DownloadRateLimit => crate::i18n::t("Download limit (B/s)"),
+            Self::UploadRateLimit => crate::i18n::t("Upload limit (B/s)"),
+            Self::ActiveDownloads => crate::i18n::t("Active downloads"),
+            Self::ActiveSeeds => crate::i18n::t("Active seeds"),
+            Self::ActiveLimit => crate::i18n::t("Active torrents"),
+            Self::ProxyType => crate::i18n::t("Proxy type (none/http/socks5/…)"),
+            Self::ProxyHost => crate::i18n::t("Proxy host"),
+            Self::ProxyPort => crate::i18n::t("Proxy port"),
+            Self::ProxyUsername => crate::i18n::t("Proxy user"),
+            Self::ProxyPassword => crate::i18n::t("Proxy password"),
+            Self::Encryption => crate::i18n::t("Encryption (enabled/forced/disabled)"),
         }
     }
 
@@ -183,9 +191,9 @@ impl NetworkFlag {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::ProxyPeerConnections => "Proxy peer connections",
-            Self::Upnp => "UPnP port mapping",
-            Self::Natpmp => "NAT-PMP port mapping",
+            Self::ProxyPeerConnections => crate::i18n::t("Proxy peer connections"),
+            Self::Upnp => crate::i18n::t("UPnP port mapping"),
+            Self::Natpmp => crate::i18n::t("NAT-PMP port mapping"),
         }
     }
 }
@@ -537,9 +545,9 @@ impl SuccessAction {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Delete => "Delete",
-            Self::Keep => "Keep",
-            Self::Move => "Move",
+            Self::Delete => crate::i18n::t("Delete"),
+            Self::Keep => crate::i18n::t("Keep"),
+            Self::Move => crate::i18n::t("Move"),
         }
     }
 
@@ -623,11 +631,11 @@ impl WatchField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Path => "Watch path",
-            Self::Label => "Label",
-            Self::SavePath => "Save path",
-            Self::MoveTo => "Move to",
-            Self::MinFree => "Defer below free bytes (0 = off)",
+            Self::Path => crate::i18n::t("Watch path"),
+            Self::Label => crate::i18n::t("Label"),
+            Self::SavePath => crate::i18n::t("Save path"),
+            Self::MoveTo => crate::i18n::t("Move to"),
+            Self::MinFree => crate::i18n::t("Defer below free bytes (0 = off)"),
         }
     }
 }
@@ -767,6 +775,226 @@ impl AutoAddForm {
     /// Adds an empty row and returns its index.
     pub fn add(&mut self) -> usize {
         self.rows.push(WatchRow::new());
+        self.rows.len() - 1
+    }
+
+    /// Removes one row.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.rows.len() {
+            self.rows.remove(index);
+        }
+    }
+}
+
+/// One editable RSS feed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RssRow {
+    pub url: String,
+    pub label: String,
+    pub save_path: String,
+    pub filter: String,
+    pub enabled: bool,
+}
+
+impl RssRow {
+    /// A feed as configured (enabled) for a new entry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            ..Self::default()
+        }
+    }
+
+    /// Replaces one text field.
+    pub fn set(&mut self, field: RssField, text: String) {
+        match field {
+            RssField::Url => self.url = text,
+            RssField::Label => self.label = text,
+            RssField::SavePath => self.save_path = text,
+            RssField::Filter => self.filter = text,
+        }
+    }
+
+    /// Returns the text of one field.
+    #[must_use]
+    pub fn text(&self, field: RssField) -> &str {
+        match field {
+            RssField::Url => &self.url,
+            RssField::Label => &self.label,
+            RssField::SavePath => &self.save_path,
+            RssField::Filter => &self.filter,
+        }
+    }
+}
+
+/// One editable text of a feed row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RssField {
+    Url,
+    Label,
+    SavePath,
+    Filter,
+}
+
+impl RssField {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Url => crate::i18n::t("Feed URL"),
+            Self::Label => crate::i18n::t("Label"),
+            Self::SavePath => crate::i18n::t("Save path"),
+            Self::Filter => crate::i18n::t("Title regex (empty = all)"),
+        }
+    }
+}
+
+/// The `[rss]` table of the configuration document.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RssForm {
+    pub enabled: bool,
+    pub poll_secs: String,
+    pub rows: Vec<RssRow>,
+}
+
+impl RssForm {
+    /// Reads the `[rss]` table and its `[[rss.feed]]` array.
+    pub fn from_toml(raw: &str) -> Result<Self, String> {
+        let doc: DocumentMut = raw
+            .parse()
+            .map_err(|error| format!("invalid TOML: {error}"))?;
+        let Some(item) = doc.get("rss") else {
+            return Ok(Self::default());
+        };
+        let Item::Table(table) = item else {
+            return Err("rss must be a table".to_owned());
+        };
+        let mut rows = Vec::new();
+        if let Some(item) = table.get("feed") {
+            let Item::ArrayOfTables(array) = item else {
+                return Err("rss.feed must be an array of tables".to_owned());
+            };
+            for feed in array.iter() {
+                let text = |key: &str| {
+                    feed.get(key)
+                        .and_then(Item::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                };
+                rows.push(RssRow {
+                    url: text("url"),
+                    label: text("label"),
+                    save_path: text("save_path"),
+                    filter: text("filter"),
+                    enabled: feed.get("enabled").and_then(Item::as_bool).unwrap_or(true),
+                });
+            }
+        }
+        Ok(Self {
+            enabled: table
+                .get("enabled")
+                .and_then(Item::as_bool)
+                .unwrap_or(false),
+            poll_secs: table
+                .get("poll_secs")
+                .and_then(Item::as_integer)
+                .filter(|value| *value > 0)
+                .map_or_else(String::new, |value| value.to_string()),
+            rows,
+        })
+    }
+
+    /// Checks the rows before they are written to the document.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && self.rows.is_empty() {
+            return Err(
+                crate::i18n::t("RSS: add at least one feed or turn the watcher off").to_owned(),
+            );
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            let url = row.url.trim();
+            if url.is_empty() {
+                return Err(crate::i18n::t_fmt(
+                    "RSS row {}: feed URL must not be empty",
+                    &[&(index + 1).to_string()],
+                ));
+            }
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(crate::i18n::t_fmt(
+                    "RSS row {}: feed URL must start with http:// or https://",
+                    &[&(index + 1).to_string()],
+                ));
+            }
+            if !seen.insert(url.to_owned()) {
+                return Err(crate::i18n::t_fmt(
+                    "RSS row {}: duplicate feed URL",
+                    &[&(index + 1).to_string()],
+                ));
+            }
+        }
+        let poll = self.poll_secs.trim();
+        if !poll.is_empty() && poll.parse::<u64>().map_or(true, |secs| secs < 60) {
+            return Err(crate::i18n::t(
+                "RSS poll interval must be a whole number of seconds (at least 60)",
+            )
+            .to_owned());
+        }
+        Ok(())
+    }
+
+    /// Replaces the `[rss]` table in an already rendered document.
+    pub fn render_into(&self, doc: &mut DocumentMut) -> Result<(), String> {
+        self.validate()?;
+        if self.rows.is_empty() && !self.enabled && self.poll_secs.trim().is_empty() {
+            doc.remove("rss");
+            return Ok(());
+        }
+        let mut rss = Table::new();
+        rss["enabled"] = value(self.enabled);
+        if let Ok(secs) = self.poll_secs.trim().parse::<u64>() {
+            if secs > 0 {
+                rss["poll_secs"] = value(secs as i64);
+            }
+        }
+        if !self.rows.is_empty() {
+            let mut array = ArrayOfTables::new();
+            for row in &self.rows {
+                let mut table = Table::new();
+                table["url"] = value(row.url.trim());
+                if !row.label.trim().is_empty() {
+                    table["label"] = value(row.label.trim());
+                }
+                if !row.save_path.trim().is_empty() {
+                    table["save_path"] = value(row.save_path.trim());
+                }
+                if !row.filter.trim().is_empty() {
+                    table["filter"] = value(row.filter.trim());
+                }
+                table["enabled"] = value(row.enabled);
+                array.push(table);
+            }
+            rss["feed"] = Item::ArrayOfTables(array);
+        }
+        // Replace the keys in place so the decor (a comment above [rss])
+        // survives the rewrite.
+        if let Some(existing) = doc.get_mut("rss").and_then(Item::as_table_mut) {
+            let keys: Vec<String> = existing.iter().map(|(key, _)| key.to_owned()).collect();
+            for key in keys {
+                existing.remove(&key);
+            }
+            for (key, item) in rss.iter() {
+                existing[key] = item.clone();
+            }
+        } else {
+            doc["rss"] = Item::Table(rss);
+        }
+        Ok(())
+    }
+
+    /// Adds a feed row and returns its index.
+    pub fn add(&mut self) -> usize {
+        self.rows.push(RssRow::new());
         self.rows.len() - 1
     }
 
@@ -937,9 +1165,9 @@ impl HookField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Command => "Command",
-            Self::Args => "Arguments (whitespace separated)",
-            Self::Timeout => "Timeout (seconds)",
+            Self::Command => crate::i18n::t("Command"),
+            Self::Args => crate::i18n::t("Arguments (whitespace separated)"),
+            Self::Timeout => crate::i18n::t("Timeout (seconds)"),
         }
     }
 }
@@ -1376,10 +1604,10 @@ impl WebhookField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Url => "URL",
-            Self::Secret => "HMAC secret",
-            Self::Events => "Events (comma separated; empty = all)",
-            Self::Timeout => "Timeout (ms)",
+            Self::Url => crate::i18n::t("URL"),
+            Self::Secret => crate::i18n::t("HMAC secret"),
+            Self::Events => crate::i18n::t("Events (comma separated; empty = all)"),
+            Self::Timeout => crate::i18n::t("Timeout (ms)"),
         }
     }
 }
@@ -1822,13 +2050,13 @@ impl TelegramField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Token => "Bot token",
-            Self::ChatId => "Chat id",
-            Self::ThreadId => "Message thread id",
-            Self::Events => "Events (comma separated; empty = all)",
-            Self::Label => "Only this label (empty = all)",
-            Self::ApiBase => "API base",
-            Self::Timeout => "Timeout (ms)",
+            Self::Token => crate::i18n::t("Bot token"),
+            Self::ChatId => crate::i18n::t("Chat id"),
+            Self::ThreadId => crate::i18n::t("Message thread id"),
+            Self::Events => crate::i18n::t("Events (comma separated; empty = all)"),
+            Self::Label => crate::i18n::t("Only this label (empty = all)"),
+            Self::ApiBase => crate::i18n::t("API base"),
+            Self::Timeout => crate::i18n::t("Timeout (ms)"),
         }
     }
 }
@@ -1848,12 +2076,12 @@ impl DigestField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Events => "Digest events (0 = immediate)",
-            Self::Window => "Digest window (s)",
-            Self::QuietStart => "Quiet start (HH:MM)",
-            Self::QuietEnd => "Quiet end (HH:MM)",
-            Self::Timezone => "Timezone",
-            Self::LabelFilter => "Only this label (empty = all)",
+            Self::Events => crate::i18n::t("Digest events (0 = immediate)"),
+            Self::Window => crate::i18n::t("Digest window (s)"),
+            Self::QuietStart => crate::i18n::t("Quiet start (HH:MM)"),
+            Self::QuietEnd => crate::i18n::t("Quiet end (HH:MM)"),
+            Self::Timezone => crate::i18n::t("Timezone"),
+            Self::LabelFilter => crate::i18n::t("Only this label (empty = all)"),
         }
     }
 }
@@ -1892,15 +2120,15 @@ impl LabelField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Name => "Name",
-            Self::Color => "Colour",
-            Self::MovePath => "Move on complete",
-            Self::DownloadRateLimit => "Download limit (B/s)",
-            Self::UploadRateLimit => "Upload limit (B/s)",
-            Self::ConnectionsLimit => "Connections",
-            Self::UploadSlotsLimit => "Upload slots",
-            Self::MatchTrackers => "Match trackers",
-            Self::MatchName => "Match name regex",
+            Self::Name => crate::i18n::t("Name"),
+            Self::Color => crate::i18n::t("Colour"),
+            Self::MovePath => crate::i18n::t("Move on complete"),
+            Self::DownloadRateLimit => crate::i18n::t("Download limit (B/s)"),
+            Self::UploadRateLimit => crate::i18n::t("Upload limit (B/s)"),
+            Self::ConnectionsLimit => crate::i18n::t("Connections"),
+            Self::UploadSlotsLimit => crate::i18n::t("Upload slots"),
+            Self::MatchTrackers => crate::i18n::t("Match trackers"),
+            Self::MatchName => crate::i18n::t("Match name regex"),
         }
     }
 }
@@ -2040,9 +2268,9 @@ impl StorageField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::MinFree => "Minimum free (bytes)",
-            Self::Margin => "Recovery margin (bytes)",
-            Self::Poll => "Poll interval (s)",
+            Self::MinFree => crate::i18n::t("Minimum free (bytes)"),
+            Self::Margin => crate::i18n::t("Recovery margin (bytes)"),
+            Self::Poll => crate::i18n::t("Poll interval (s)"),
         }
     }
 }
@@ -2358,6 +2586,9 @@ pub struct Settings {
     pub confirming_delete: bool,
     /// RSS feeds as reported by the daemon (read-only here).
     pub rss_feeds: Vec<ferrent_protocol::v1::RssFeed>,
+    pub rss: RssForm,
+    pub rss_baseline: RssForm,
+    pub rss_selected: Option<usize>,
 }
 
 impl Default for Settings {
@@ -2399,6 +2630,9 @@ impl Default for Settings {
             label_baseline: LabelForm::default(),
             confirming_delete: false,
             rss_feeds: Vec::new(),
+            rss: RssForm::default(),
+            rss_baseline: RssForm::default(),
+            rss_selected: None,
         }
     }
 }
@@ -2417,6 +2651,7 @@ impl Settings {
         let scheduler = SchedulerForm::from_toml(toml)?;
         let notify = NotifyForm::from_toml(toml)?;
         let storage = StorageForm::from_toml(toml)?;
+        let rss = RssForm::from_toml(toml)?;
         self.raw = toml.to_owned();
         self.revision = revision;
         self.env_locked = env_locked;
@@ -2433,6 +2668,9 @@ impl Settings {
         self.notify = notify;
         self.storage_baseline = storage.clone();
         self.storage = storage;
+        self.rss_baseline = rss.clone();
+        self.rss = rss;
+        self.rss_selected = None;
         self.zone_selected = None;
         self.notify_selected = None;
         self.notify_telegram = None;
@@ -2456,7 +2694,7 @@ impl Settings {
             Tab::Storage => self.storage != self.storage_baseline,
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
-            Tab::Rss => false,
+            Tab::Rss => self.rss != self.rss_baseline,
             Tab::Appearance => false,
         }
     }
@@ -2474,7 +2712,39 @@ impl Settings {
         self.scheduler.render_into(&mut doc)?;
         self.notify.render_into(&mut doc)?;
         self.storage.render_into(&mut doc)?;
+        self.rss.render_into(&mut doc)?;
         Ok(doc.to_string())
+    }
+
+    /// The selected RSS feed row.
+    #[must_use]
+    pub fn selected_rss(&self) -> Option<&RssRow> {
+        let index = self.rss_selected?;
+        self.rss.rows.get(index)
+    }
+
+    /// The selected RSS feed row, mutably.
+    pub fn selected_rss_mut(&mut self) -> Option<&mut RssRow> {
+        let index = self.rss_selected?;
+        self.rss.rows.get_mut(index)
+    }
+
+    /// Adds an RSS feed row and selects it.
+    pub fn add_rss(&mut self) {
+        self.rss_selected = Some(self.rss.add());
+    }
+
+    /// Removes the selected RSS feed row.
+    pub fn remove_rss(&mut self) {
+        let Some(index) = self.rss_selected else {
+            return;
+        };
+        self.rss.remove(index);
+        self.rss_selected = if self.rss.rows.is_empty() {
+            None
+        } else {
+            Some(index.min(self.rss.rows.len() - 1))
+        };
     }
 
     /// The selected watch row.
@@ -2786,6 +3056,59 @@ mod tests {
             AutoAddForm::from_toml(&rendered).expect("reparse"),
             settings.autoadd
         );
+    }
+
+    #[test]
+    fn rss_rows_round_trip_through_the_document() {
+        let raw = "# keep this comment\n[rss]\nenabled = true\npoll_secs = 900\n\n[[rss.feed]]\nurl = \"https://example.org/a.xml\"\nlabel = \"movies\"\nfilter = \"2160p\"\n\n[[rss.feed]]\nurl = \"https://example.org/b.xml\"\nenabled = false\n";
+        let mut settings = Settings {
+            raw: raw.to_owned(),
+            ..Settings::default()
+        };
+        settings
+            .apply_snapshot(raw, 1, Vec::new())
+            .expect("snapshot");
+        assert_eq!(settings.rss.rows.len(), 2);
+        assert!(settings.rss.enabled);
+        assert_eq!(settings.rss.poll_secs, "900");
+        assert!(!settings.rss.rows[1].enabled);
+        assert_eq!(settings.rss.rows[0].filter, "2160p");
+
+        settings.rss.rows[0].label = "films".to_owned();
+        settings.rss.add();
+        settings.rss.rows[2].url = "https://example.org/c.xml".to_owned();
+        let rendered = settings.render().expect("render");
+        assert!(rendered.contains("# keep this comment"), "{rendered}");
+        assert!(rendered.contains("[[rss.feed]]"), "{rendered}");
+        assert!(
+            rendered.contains("url = \"https://example.org/c.xml\""),
+            "{rendered}"
+        );
+        assert_eq!(
+            RssForm::from_toml(&rendered).expect("reparse"),
+            settings.rss
+        );
+    }
+
+    #[test]
+    fn rss_enabled_needs_a_feed_and_valid_urls() {
+        let mut form = RssForm {
+            enabled: true,
+            ..RssForm::default()
+        };
+        assert!(form.validate().is_err());
+
+        form.add();
+        form.rows[0].url = "ftp://example.org/feed".to_owned();
+        assert!(form.validate().is_err());
+
+        form.rows[0].url = "https://example.org/feed.xml".to_owned();
+        assert!(form.validate().is_ok());
+
+        form.poll_secs = "5".to_owned();
+        assert!(form.validate().is_err());
+        form.poll_secs = "300".to_owned();
+        assert!(form.validate().is_ok());
     }
 
     #[test]
