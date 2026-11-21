@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ferrent
+Comment=Control a Ferrent daemon
+Exec=ferrent-gui
+Icon=ferrent
+Terminal=false
+Categories=Network;FileTransfer;

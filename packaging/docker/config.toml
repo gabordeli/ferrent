@@ -1,0 +1,15 @@
+# Container defaults. Everything is loopback-unfriendly on purpose: inside a
+# container the RPC port has to be reachable from the published port.
+data_dir = "/var/lib/ferrent"
+download_dir = "/var/lib/ferrent/downloads"
+bind = "0.0.0.0:50129"
+
+[diskguard]
+enabled = false
+
+[queue]
+enabled = true
+
+[scheduler]
+enabled = false
+timezone = "UTC"

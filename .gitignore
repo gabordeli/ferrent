@@ -35,3 +35,7 @@ tls-fingerprint.txt
 /webui/coverage/
 /webui/test-results/
 /webui/.vite/
+
+# AppImage build output
+dist/
+.tools/

@@ -187,3 +187,62 @@ GitLab release: `.gitlab-ci.yml` `release-deb` job `v*` tagon — verzió
 ellenőrzés, amd64+arm64 build, majd `packaging/apt/publish-gitlab.sh` a
 Debian Package Registrybe (`bookworm`/`trixie`/`noble` kódnevekre; a
 `Release`-t a GitLab írja alá a saját kulcsával).
+
+## M8 – Docker image (M3-T4)
+
+`packaging/docker/Dockerfile` — két lépcső: `rust:1-trixie` + libtorrent dev
+build, majd `debian:trixie-slim` + `libtorrent-rasterbar2.0`. A konténer
+`ferrentd`-t és `ferrent-cli`-t visz (nincs GUI/web), nem-rootként fut, a
+`/var/lib/ferrent` a volume.
+
+| Metrika | Érték |
+|---|---:|
+| Image mérete | **122 MB** |
+| Build idő (hideg, 12 szál) | **5 perc 7 s** |
+| Konténer user | `uid=1000(ferrent)` |
+| Bind | `0.0.0.0:50129` (a `.deb` loopbacket használ) |
+
+Ellenőrzés (mérve 2026-11-20):
+
+```bash
+docker build -f packaging/docker/Dockerfile -t ferrent .
+docker run -d --name ferrent-test -e FERRENT_TOKEN=test-secret \
+    -p 50139:50129 -v /tmp/ferrent-docker:/var/lib/ferrent ferrent
+docker inspect --format '{{.State.Health.Status}}' ferrent-test   # healthy
+ferrent-cli --server https://localhost:50139 \
+    --ca /tmp/ferrent-docker/tls-cert.pem --token test-secret list
+```
+
+- A healthcheck (`ferrent-cli list --limit 1`) **0/0** exit kóddal futott, a
+  státusz `healthy`; a volume-ban megjelenik a `tls-cert.pem`,
+  `tls-key.pem`, `tls-fingerprint.txt` és a `state.redb`.
+- A hostról a publikált porton a CLI **csatlakozik** (üres lista), tehát a
+  TLS + token lánc a konténerben is jó.
+- A healthcheck első változata `--json status`-t hívott — nincs ilyen
+  alparancs, ezért a `list --limit 1` a próba.
+
+## M9 – AppImage (M3-T4)
+
+`packaging/appimage/build.sh` — `linuxdeploy` + `linuxdeploy-plugin-gtk`
+
+- `appimagetool`, a GTK3 stack és a loaderek az AppDirbe kerülnek; a
+  `libfontconfig`, `libfribidi`, `libwayland-*`, `libxkbcommon*` explicit
+  `--library` (a linuxdeploy alapból kihagyja őket, egy minimalista
+  konténerben viszont hiányoznak).
+- Ikon: 256×256 (a `mark.svg`-ből), desktop fájl `packaging/appimage/`.
+
+| Metrika | Érték |
+|---|---:|
+| AppImage méret | **34,6 MB** |
+| Build (meleg cargo target) | ~1,5 perc |
+
+Fedora 42 konténer, Xvfb 1440×900, `ICED_BACKEND=tiny-skia`
+(a wgpu Vulkan nélkül elszáll; valódi asztalon nem kell):
+
+| Ellenőrzés | Eredmény |
+|---|---|
+| Elindul, ablakot nyit (`xwininfo`: `"Ferrent" 1440x900`) | PASS |
+| Csatlakozik a daemonhoz (`--connect`, status bar `connected`) | PASS |
+| 12 torrent listázva, logó a sidebaron | PASS (`docs/measurements/m3-appimage-fedora.png`) |
+
+A kép a Fedorán futó AppImage-et mutatja, a laptop daemonjához csatlakozva.
