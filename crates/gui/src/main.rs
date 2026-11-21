@@ -120,10 +120,7 @@ struct ServerRow {
 
 #[derive(Debug, Clone)]
 enum Message {
-    SelectProfile(usize),
     Field(Field, String),
-    SaveProfile,
-    Connect,
     TrustFingerprint,
     CancelFingerprint,
     Connected(u64, Result<ClientHandle, String>),
@@ -616,13 +613,6 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SelectProfile(index) => {
-                if let Some(profile) = self.config.profiles.get(index) {
-                    self.fields = Fields::from_profile(profile);
-                    self.status = format!("Loaded profile {}", profile.name);
-                }
-                Task::none()
-            }
             Message::Field(field, value) => {
                 match field {
                     Field::Name => self.fields.name = value,
@@ -632,11 +622,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::SaveProfile => {
-                self.save_current_profile();
-                Task::none()
-            }
-            Message::Connect => self.connect_clicked(),
             Message::TrustFingerprint => self.trust_fingerprint(),
             Message::CancelFingerprint => {
                 self.pending = None;
@@ -1606,42 +1591,6 @@ impl App {
             token: self.fields.token.clone(),
             fingerprint,
         }
-    }
-
-    fn save_current_profile(&mut self) {
-        let profile = self.current_profile();
-        if profile.server.is_empty() || profile.ca.as_os_str().is_empty() {
-            self.status = "Server URL and CA path are required".to_owned();
-            return;
-        }
-        self.config.upsert(profile.clone());
-        match self.config.save(&self.config_path) {
-            Ok(()) => {
-                self.status = format!("Saved profile {}", profile.name);
-                self.fields.name = profile.name;
-            }
-            Err(error) => self.status = format!("Cannot save config: {error}"),
-        }
-    }
-
-    fn connect_clicked(&mut self) -> Task<Message> {
-        if self.fields.token.trim().is_empty() {
-            self.status = "API token is required".to_owned();
-            return Task::none();
-        }
-        let profile = self.current_profile();
-        if profile.server.is_empty() || profile.ca.as_os_str().is_empty() {
-            self.status = "Server URL and CA path are required".to_owned();
-            return Task::none();
-        }
-
-        self.config.upsert(profile.clone());
-        if let Err(error) = self.config.save(&self.config_path) {
-            self.status = format!("Cannot save config: {error}");
-            return Task::none();
-        }
-
-        self.start_profile_connection(profile)
     }
 
     fn connect_server(&mut self, name: &str) -> Task<Message> {
@@ -2862,10 +2811,8 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let content = if self.pending.is_some() {
             self.fingerprint_view()
-        } else if self.client.is_some() {
-            self.main_view()
         } else {
-            self.connect_view()
+            self.main_view()
         };
         let base: Element<Message> = column![content, self.status_bar()].into();
         let Some(modal) = self.modal else {
@@ -2881,6 +2828,27 @@ impl App {
         };
         let overlay = self.modal_overlay(panel, size);
         iced::widget::stack![base, overlay].into()
+    }
+
+    /// Startup: the full UI is already on screen; connect the active profile
+    /// or ask for a server when there is none.
+    fn boot(&mut self) -> Task<Message> {
+        let Some(name) = self.config.active.clone() else {
+            self.open_modal(Modal::Servers);
+            return Task::none();
+        };
+        let Some(profile) = self
+            .config
+            .profiles
+            .iter()
+            .find(|profile| profile.name == name)
+            .cloned()
+        else {
+            self.open_modal(Modal::Servers);
+            return Task::none();
+        };
+        self.fields = Fields::from_profile(&profile);
+        self.start_profile_connection(profile)
     }
 
     fn open_modal(&mut self, modal: Modal) {
@@ -5318,67 +5286,6 @@ impl App {
         modal_panel(Modal::Servers, body.into())
     }
 
-    fn connect_view(&self) -> Element<'_, Message> {
-        let profiles: Element<Message> = if self.config.profiles.is_empty() {
-            text(i18n::t("No profiles yet")).into()
-        } else {
-            WidgetColumn::with_children(
-                self.config
-                    .profiles
-                    .iter()
-                    .enumerate()
-                    .map(|(index, profile)| {
-                        button(text(profile.name.clone()))
-                            .on_press(Message::SelectProfile(index))
-                            .width(Length::Fill)
-                            .into()
-                    })
-                    .collect::<Vec<Element<Message>>>(),
-            )
-            .spacing(6)
-            .into()
-        };
-
-        let fields = column![
-            text(i18n::t("Server profile")).size(18),
-            text_input("Name", &self.fields.name)
-                .on_input(|value| Message::Field(Field::Name, value))
-                .width(Length::Fill),
-            text(i18n::t("Server URL")).size(12),
-            text_input("https://host:50051", &self.fields.server)
-                .on_input(|value| Message::Field(Field::Server, value))
-                .width(Length::Fill),
-            text(i18n::t("CA certificate (PEM path)")).size(12),
-            text_input("/path/to/tls-cert.pem", &self.fields.ca)
-                .on_input(|value| Message::Field(Field::Ca, value))
-                .width(Length::Fill),
-            text(i18n::t("API token")).size(12),
-            text_input("token", &self.fields.token)
-                .secure(true)
-                .on_input(|value| Message::Field(Field::Token, value))
-                .width(Length::Fill),
-            row![
-                button("Save profile").on_press(Message::SaveProfile),
-                button("Connect").on_press(Message::Connect),
-            ]
-            .spacing(8),
-        ]
-        .spacing(8)
-        .width(Length::Fill);
-
-        let body = row![
-            container(profiles).width(Length::Fixed(220.0)).padding(10),
-            container(fields).width(Length::Fill).padding(10),
-        ]
-        .spacing(10);
-
-        container(body)
-            .padding(20)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    }
-
     fn fingerprint_view(&self) -> Element<'_, Message> {
         let Some(pending) = &self.pending else {
             return text("").into();
@@ -7494,12 +7401,11 @@ fn main() -> iced::Result {
             ..iced::window::Settings::default()
         });
 
-    let result =
-        if std::env::args().any(|argument| argument == "--connect" || argument == "--measure") {
-            app.run_with(|| (App::default(), Task::done(Message::Connect)))
-        } else {
-            app.run()
-        };
+    let result = app.run_with(|| {
+        let mut state = App::default();
+        let task = state.boot();
+        (state, task)
+    });
     if let Err(error) = &result {
         let error: &(dyn std::error::Error + 'static) = error;
         if !ferrent_telemetry::is_expected(error) {
