@@ -214,7 +214,15 @@ pub struct TorrentPeerInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TorrentTrackerInfo {
     pub url: String,
+    /// Machine-readable announce state: `working`, `updating`, `unverified` or
+    /// `error`.
     pub status: String,
     pub seeds: u32,
     pub leechers: u32,
+    /// The tracker's own message, or the announce error text.
+    pub message: String,
+    /// Seconds until the next announce (0 when unknown).
+    pub next_announce: u32,
+    /// Consecutive failed announce attempts.
+    pub fails: u32,
 }

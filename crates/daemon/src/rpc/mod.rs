@@ -1040,6 +1040,9 @@ impl Ferrent for FerrentService {
                     status: tracker.status,
                     seeds: tracker.seeds,
                     leechers: tracker.leechers,
+                    message: tracker.message,
+                    next_announce: tracker.next_announce,
+                    fails: tracker.fails,
                 })
                 .collect(),
         }))

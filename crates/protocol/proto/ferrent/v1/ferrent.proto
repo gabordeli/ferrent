@@ -603,9 +603,14 @@ message GetTorrentPeersResponse {
 // One tracker announce entry.
 message TorrentTracker {
   string url = 1;
+  // Machine-readable announce state: working, updating, unverified, error.
   string status = 2;
   uint32 seeds = 3;
   uint32 leechers = 4;
+  // The tracker's own message, or the announce error text.
+  string message = 5;
+  uint32 next_announce = 6;
+  uint32 fails = 7;
 }
 
 message GetTorrentTrackersRequest {

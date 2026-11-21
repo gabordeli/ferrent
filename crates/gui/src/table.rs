@@ -3,7 +3,7 @@
 //! Only the visible rows are shaped and painted; the rows themselves come
 //! from a server-side page around the viewport.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use ferrent_protocol::v1::{SortField, Torrent, TorrentState};
@@ -22,9 +22,6 @@ const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
 const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 3.0;
 
-/// Horizontal space reserved for the label column, between name and size.
-const LABEL_WIDTH: f32 = 92.0;
-
 const BG_HEADER: Color = crate::theme::BG_SECONDARY;
 const BG_ROW: Color = crate::theme::BG;
 const BG_ROW_ALT: Color = Color::from_rgb(0.055, 0.090, 0.153);
@@ -39,50 +36,269 @@ const THUMB: Color = crate::theme::BORDER;
 const MENU_BG: Color = crate::theme::SURFACE;
 const MENU_BORDER: Color = crate::theme::BORDER;
 
-const BAR_WIDTH: f32 = 72.0;
 const BAR_HEIGHT: f32 = 8.0;
 
-/// Column geometry, derived from the canvas width so the table fills the
-/// window at any size.
-pub struct Columns {
-    pub id_right: f32,
-    pub name_x: f32,
-    pub name_end: f32,
-    pub label_x: f32,
-    pub label_end: f32,
-    pub size_right: f32,
-    pub dot_x: f32,
-    pub state_x: f32,
-    pub bar_x: f32,
-    pub pct_x: f32,
-    pub down_right: f32,
-    pub up_right: f32,
-    pub seeds_right: f32,
-    pub peers_right: f32,
-    pub eta_right: f32,
+/// One table column. `State` is displayed but not server-sortable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Column {
+    Id,
+    Name,
+    Label,
+    Size,
+    SavePath,
+    State,
+    Progress,
+    Download,
+    Upload,
+    Seeds,
+    Peers,
+    Eta,
 }
 
-impl Columns {
+impl Column {
+    /// Every column, in display order.
+    pub const ALL: [Self; 12] = [
+        Self::Id,
+        Self::Name,
+        Self::Label,
+        Self::Size,
+        Self::SavePath,
+        Self::State,
+        Self::Progress,
+        Self::Download,
+        Self::Upload,
+        Self::Seeds,
+        Self::Peers,
+        Self::Eta,
+    ];
+
     #[must_use]
-    pub fn new(width: f32) -> Self {
-        Self {
-            id_right: 44.0,
-            name_x: 56.0,
-            name_end: width - 620.0 - LABEL_WIDTH,
-            label_x: width - 608.0 - LABEL_WIDTH,
-            label_end: width - 620.0,
-            size_right: width - 566.0,
-            dot_x: width - 552.0,
-            state_x: width - 540.0,
-            bar_x: width - 424.0,
-            pct_x: width - 340.0,
-            down_right: width - 250.0,
-            up_right: width - 180.0,
-            seeds_right: width - 108.0,
-            peers_right: width - 58.0,
-            eta_right: width - 8.0,
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Id => "ID",
+            Self::Name => "NAME",
+            Self::Label => "LABEL",
+            Self::Size => "SIZE",
+            Self::SavePath => "SAVE PATH",
+            Self::State => "STATUS",
+            Self::Progress => "PROGRESS",
+            Self::Download => "DOWN",
+            Self::Upload => "UP",
+            Self::Seeds => "SEEDS",
+            Self::Peers => "PEERS",
+            Self::Eta => "ETA",
         }
     }
+
+    #[must_use]
+    pub fn sort_field(self) -> Option<SortField> {
+        match self {
+            Self::Id => Some(SortField::Id),
+            Self::Name => Some(SortField::Name),
+            Self::Label => Some(SortField::Label),
+            Self::Progress => Some(SortField::Progress),
+            Self::Download => Some(SortField::DownloadRate),
+            Self::Upload => Some(SortField::UploadRate),
+            _ => None,
+        }
+    }
+
+    fn default_width(self) -> f32 {
+        match self {
+            Self::Id => 42.0,
+            Self::Name => 260.0,
+            Self::Label => 88.0,
+            Self::Size => 74.0,
+            Self::SavePath => 168.0,
+            Self::State => 96.0,
+            Self::Progress => 128.0,
+            Self::Download | Self::Upload => 86.0,
+            Self::Seeds | Self::Peers => 52.0,
+            Self::Eta => 52.0,
+        }
+    }
+
+    const fn min_width(self) -> f32 {
+        match self {
+            Self::Id => 28.0,
+            Self::Name => 120.0,
+            Self::Progress => 92.0,
+            Self::SavePath => 90.0,
+            _ => 44.0,
+        }
+    }
+
+    /// The name column soaks up the leftover width; everything else is a
+    /// fixed, user-resizable width.
+    #[must_use]
+    pub fn flexible(self) -> bool {
+        self == Self::Name
+    }
+
+    #[must_use]
+    pub fn right_aligned(self) -> bool {
+        matches!(
+            self,
+            Self::Id
+                | Self::Size
+                | Self::Download
+                | Self::Upload
+                | Self::Seeds
+                | Self::Peers
+                | Self::Eta
+        )
+    }
+}
+
+const GAP: f32 = 10.0;
+/// How close to a boundary counts as a resize grab.
+pub const RESIZE_GRAB: f32 = 4.0;
+
+/// Where a visible column starts and how wide it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Slot {
+    pub column: Column,
+    pub x: f32,
+    pub width: f32,
+}
+
+/// Which columns are visible and how wide they are. Held by the app so the
+/// layout survives a reconnect and the view stays a pure function of state.
+#[derive(Debug, Clone, Default)]
+pub struct ColumnLayout {
+    hidden: BTreeSet<Column>,
+    widths: BTreeMap<Column, f32>,
+}
+
+impl ColumnLayout {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn is_visible(&self, column: Column) -> bool {
+        !self.hidden.contains(&column)
+    }
+
+    #[must_use]
+    pub fn width_of(&self, column: Column) -> f32 {
+        self.widths
+            .get(&column)
+            .copied()
+            .unwrap_or_else(|| column.default_width())
+    }
+
+    /// The name column is never hidden: the table would lose its identity.
+    pub fn toggle(&mut self, column: Column) {
+        if column == Column::Name {
+            return;
+        }
+        if self.hidden.remove(&column) {
+            // shown again
+        } else {
+            self.hidden.insert(column);
+        }
+    }
+
+    pub fn set_width(&mut self, column: Column, width: f32) {
+        if column.flexible() {
+            return;
+        }
+        self.widths
+            .insert(column, width.clamp(column.min_width(), 480.0));
+    }
+
+    /// Visible columns in display order, at their positions for this width.
+    #[must_use]
+    pub fn slots(&self, width: f32) -> Vec<Slot> {
+        let visible: Vec<Column> = Column::ALL
+            .iter()
+            .copied()
+            .filter(|column| self.is_visible(*column))
+            .collect();
+        let fixed: f32 = visible
+            .iter()
+            .filter(|column| !column.flexible())
+            .map(|column| self.width_of(*column))
+            .sum();
+        let gaps = GAP * visible.len().saturating_sub(1) as f32;
+        let name_width = if visible.contains(&Column::Name) {
+            (width - fixed - gaps).max(Column::Name.min_width())
+        } else {
+            0.0
+        };
+        let mut x = 0.0;
+        let mut slots = Vec::with_capacity(visible.len());
+        for column in visible {
+            let slot_width = if column.flexible() {
+                name_width
+            } else {
+                self.width_of(column)
+            };
+            slots.push(Slot {
+                column,
+                x,
+                width: slot_width,
+            });
+            x += slot_width + GAP;
+        }
+        slots
+    }
+
+    /// The column under a header x coordinate.
+    #[must_use]
+    pub fn column_at(&self, x: f32, width: f32) -> Option<Column> {
+        self.slots(width)
+            .into_iter()
+            .find(|slot| x >= slot.x && x < slot.x + slot.width)
+            .map(|slot| slot.column)
+    }
+
+    /// The column whose right edge is within grabbing distance of `x`, so a
+    /// drag can start on a boundary even when the pointer sits in the gap.
+    #[must_use]
+    pub fn resize_handle(&self, x: f32, width: f32) -> Option<Column> {
+        self.slots(width)
+            .into_iter()
+            .filter(|slot| !slot.column.flexible())
+            .find(|slot| (x - (slot.x + slot.width)).abs() <= RESIZE_GRAB)
+            .map(|slot| slot.column)
+    }
+}
+
+/// Column menu geometry: a fixed-size panel anchored under the header.
+const COLUMN_MENU_WIDTH: f32 = 184.0;
+const COLUMN_MENU_ROW: f32 = 21.0;
+const COLUMN_MENU_PAD: f32 = 6.0;
+
+#[must_use]
+pub fn column_menu_rect(origin: Point, bounds_width: f32) -> Rectangle {
+    let count = Column::ALL.len() as f32;
+    let x = origin
+        .x
+        .min((bounds_width - COLUMN_MENU_WIDTH - 4.0).max(0.0));
+    Rectangle::new(
+        Point::new(x, origin.y),
+        Size::new(
+            COLUMN_MENU_WIDTH,
+            count * COLUMN_MENU_ROW + COLUMN_MENU_PAD * 2.0,
+        ),
+    )
+}
+
+/// Which column the pointer is over inside the open menu, if any.
+#[must_use]
+pub fn column_menu_item(origin: Point, bounds_width: f32, point: Point) -> Option<Column> {
+    let rect = column_menu_rect(origin, bounds_width);
+    if !rect.contains(point) {
+        return None;
+    }
+    let row = ((point.y - rect.y - COLUMN_MENU_PAD) / COLUMN_MENU_ROW).floor();
+    if row < 0.0 {
+        return None;
+    }
+    Column::ALL.get(row as usize).copied()
 }
 
 /// Accent colour per torrent state; used for the state marker and the bar.
@@ -98,56 +314,6 @@ pub fn state_color(state: i32) -> Color {
         TorrentState::Moving => theme::MOVING,
         TorrentState::Error => theme::ERROR,
         TorrentState::Unspecified => theme::TEXT_MUTED,
-    }
-}
-
-/// One table column. `State` is displayed but not server-sortable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Column {
-    Id,
-    Name,
-    Label,
-    State,
-    Progress,
-    Download,
-    Upload,
-}
-
-impl Column {
-    #[must_use]
-    pub fn sort_field(self) -> Option<SortField> {
-        match self {
-            Self::Id => Some(SortField::Id),
-            Self::Name => Some(SortField::Name),
-            Self::Label => Some(SortField::Label),
-            Self::Progress => Some(SortField::Progress),
-            Self::Download => Some(SortField::DownloadRate),
-            Self::Upload => Some(SortField::UploadRate),
-            Self::State => None,
-        }
-    }
-}
-
-/// Returns the column under a header x coordinate.
-#[must_use]
-pub fn column_at(x: f32, width: f32) -> Option<Column> {
-    let columns = Columns::new(width);
-    if x < 52.0 {
-        Some(Column::Id)
-    } else if x < columns.name_end {
-        Some(Column::Name)
-    } else if x < columns.label_end {
-        Some(Column::Label)
-    } else if x < columns.bar_x {
-        Some(Column::State)
-    } else if x < columns.down_right - 70.0 {
-        Some(Column::Progress)
-    } else if x < columns.up_right - 60.0 {
-        Some(Column::Download)
-    } else if x < columns.seeds_right - 60.0 {
-        Some(Column::Upload)
-    } else {
-        None
     }
 }
 
@@ -235,6 +401,14 @@ pub enum TableMessage {
     Scroll(f32),
     Pressed(Point),
     RightPressed(Point),
+    /// Show or hide a column (from the header's column chooser).
+    ToggleColumn(Column),
+    /// The column chooser was opened at this point, or closed with `None`.
+    ColumnMenu(Option<Point>),
+    /// Start dragging a column's right edge.
+    ResizeStart(Column, f32),
+    Resize(Column, f32),
+    ResizeEnd,
 }
 
 pub struct Table<'a> {
@@ -246,6 +420,13 @@ pub struct Table<'a> {
     pub sort: SortField,
     pub descending: bool,
     pub context: Option<ContextMenu>,
+    pub layout: &'a ColumnLayout,
+    /// Open column chooser, anchored at this point.
+    pub column_menu: Option<Point>,
+    /// Column currently being dragged wider/narrower.
+    pub resizing: Option<Column>,
+    /// label name → chip colour, built by the app for this frame.
+    pub label_colors: BTreeMap<String, Color>,
 }
 
 impl canvas::Program<TableMessage> for Table<'_> {
@@ -258,34 +439,70 @@ impl canvas::Program<TableMessage> for Table<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<TableMessage>) {
+        use canvas::event::Status;
         match event {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let dy = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => y * ROW_HEIGHT * 3.0,
                     mouse::ScrollDelta::Pixels { y, .. } => y,
                 };
-                (
-                    canvas::event::Status::Captured,
-                    Some(TableMessage::Scroll(dy)),
-                )
+                (Status::Captured, Some(TableMessage::Scroll(dy)))
             }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(button)) => {
                 let Some(point) = cursor.position_in(bounds) else {
-                    return (canvas::event::Status::Ignored, None);
+                    return (Status::Ignored, None);
                 };
                 match button {
-                    mouse::Button::Left => (
-                        canvas::event::Status::Captured,
-                        Some(TableMessage::Pressed(point)),
-                    ),
-                    mouse::Button::Right => (
-                        canvas::event::Status::Captured,
-                        Some(TableMessage::RightPressed(point)),
-                    ),
-                    _ => (canvas::event::Status::Ignored, None),
+                    mouse::Button::Left => {
+                        if let Some(origin) = self.column_menu {
+                            let action = column_menu_item(origin, bounds.width, point);
+                            return (
+                                Status::Captured,
+                                Some(match action {
+                                    Some(column) => TableMessage::ToggleColumn(column),
+                                    None => TableMessage::ColumnMenu(None),
+                                }),
+                            );
+                        }
+                        if point.y < HEADER_HEIGHT {
+                            if let Some(column) = self.layout.resize_handle(point.x, bounds.width) {
+                                return (
+                                    Status::Captured,
+                                    Some(TableMessage::ResizeStart(column, point.x)),
+                                );
+                            }
+                        }
+                        (Status::Captured, Some(TableMessage::Pressed(point)))
+                    }
+                    mouse::Button::Right => {
+                        if point.y < HEADER_HEIGHT {
+                            (
+                                Status::Captured,
+                                Some(TableMessage::ColumnMenu(Some(point))),
+                            )
+                        } else {
+                            (Status::Captured, Some(TableMessage::RightPressed(point)))
+                        }
+                    }
+                    _ => (Status::Ignored, None),
                 }
             }
-            _ => (canvas::event::Status::Ignored, None),
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let (Some(column), Some(point)) = (self.resizing, cursor.position_in(bounds)) {
+                    return (
+                        Status::Captured,
+                        Some(TableMessage::Resize(column, point.x)),
+                    );
+                }
+                (Status::Ignored, None)
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if self.resizing.is_some() {
+                    return (Status::Captured, Some(TableMessage::ResizeEnd));
+                }
+                (Status::Ignored, None)
+            }
+            _ => (Status::Ignored, None),
         }
     }
 
@@ -307,7 +524,10 @@ impl canvas::Program<TableMessage> for Table<'_> {
             Size::new(bounds.width, HEADER_HEIGHT),
             BG_HEADER,
         );
-        self.draw_header(&mut frame, bounds.width);
+        // Leave room for the scrollbar: with a column layout the last
+        // column would otherwise sit under it.
+        let content_width = bounds.width - if self.total > 0 { 14.0 } else { 0.0 };
+        self.draw_header(&mut frame, content_width);
 
         let range = visible_range(self.scroll, self.total);
         let page_end = self.page_offset + self.rows.len();
@@ -332,7 +552,14 @@ impl canvas::Program<TableMessage> for Table<'_> {
             );
 
             match torrent {
-                Some(torrent) => draw_row(&mut frame, torrent, y, bounds.width),
+                Some(torrent) => draw_row(
+                    &mut frame,
+                    self.layout,
+                    &self.label_colors,
+                    torrent,
+                    y,
+                    content_width,
+                ),
                 None => {
                     frame.fill_text(Text {
                         content: "loading…".to_owned(),
@@ -367,6 +594,9 @@ impl canvas::Program<TableMessage> for Table<'_> {
         if let Some(menu) = self.context {
             self.draw_menu(&mut frame, menu);
         }
+        if let Some(origin) = self.column_menu {
+            self.draw_column_menu(&mut frame, origin, bounds);
+        }
 
         vec![frame.into_geometry()]
     }
@@ -374,7 +604,6 @@ impl canvas::Program<TableMessage> for Table<'_> {
 
 impl Table<'_> {
     fn draw_header(&self, frame: &mut Frame, width: f32) {
-        let c = Columns::new(width);
         let marker = |field: SortField| {
             if self.sort == field {
                 if self.descending { " v" } else { " ^" }
@@ -382,56 +611,16 @@ impl Table<'_> {
                 ""
             }
         };
-        let cells = [
-            (
-                format!("ID{}", marker(SortField::Id)),
-                c.id_right,
-                alignment::Horizontal::Right,
-            ),
-            (
-                format!("NAME{}", marker(SortField::Name)),
-                c.name_x,
-                alignment::Horizontal::Left,
-            ),
-            (
-                format!("LABEL{}", marker(SortField::Label)),
-                c.label_x,
-                alignment::Horizontal::Left,
-            ),
-            (
-                "SIZE".to_owned(),
-                c.size_right,
-                alignment::Horizontal::Right,
-            ),
-            ("STATUS".to_owned(), c.state_x, alignment::Horizontal::Left),
-            (
-                format!("PROGRESS{}", marker(SortField::Progress)),
-                c.bar_x,
-                alignment::Horizontal::Left,
-            ),
-            (
-                format!("DOWN{}", marker(SortField::DownloadRate)),
-                c.down_right,
-                alignment::Horizontal::Right,
-            ),
-            (
-                format!("UP{}", marker(SortField::UploadRate)),
-                c.up_right,
-                alignment::Horizontal::Right,
-            ),
-            (
-                "SEEDS".to_owned(),
-                c.seeds_right,
-                alignment::Horizontal::Right,
-            ),
-            (
-                "PEERS".to_owned(),
-                c.peers_right,
-                alignment::Horizontal::Right,
-            ),
-            ("ETA".to_owned(), c.eta_right, alignment::Horizontal::Right),
-        ];
-        for (content, x, horizontal) in cells {
+        for slot in self.layout.slots(width) {
+            let content = match slot.column.sort_field() {
+                Some(field) => format!("{}{}", slot.column.title(), marker(field)),
+                None => slot.column.title().to_owned(),
+            };
+            let (x, horizontal) = if slot.column.right_aligned() {
+                (slot.x + slot.width, alignment::Horizontal::Right)
+            } else {
+                (slot.x, alignment::Horizontal::Left)
+            };
             frame.fill_text(Text {
                 content,
                 position: Point::new(x, 8.0),
@@ -440,6 +629,35 @@ impl Table<'_> {
                 line_height: LineHeight::default(),
                 font: crate::theme::semibold(),
                 horizontal_alignment: horizontal,
+                vertical_alignment: alignment::Vertical::Top,
+                shaping: Shaping::Basic,
+            });
+        }
+    }
+
+    fn draw_column_menu(&self, frame: &mut Frame, origin: Point, bounds: Rectangle) {
+        let rect = column_menu_rect(origin, bounds.width);
+        frame.fill_rectangle(rect.position(), rect.size(), MENU_BG);
+        frame.fill_rectangle(rect.position(), Size::new(1.0, rect.height), MENU_BORDER);
+        for (index, column) in Column::ALL.iter().enumerate() {
+            let y = rect.y + COLUMN_MENU_PAD + index as f32 * COLUMN_MENU_ROW;
+            let check = if self.layout.is_visible(*column) {
+                "x"
+            } else {
+                " "
+            };
+            frame.fill_text(Text {
+                content: format!("[{check}] {}", column.title()),
+                position: Point::new(rect.x + 10.0, y + 3.0),
+                color: if self.layout.is_visible(*column) {
+                    TEXT
+                } else {
+                    TEXT_HEADER
+                },
+                size: Pixels(11.0),
+                line_height: LineHeight::default(),
+                font: crate::theme::regular(),
+                horizontal_alignment: alignment::Horizontal::Left,
                 vertical_alignment: alignment::Vertical::Top,
                 shaping: Shaping::Basic,
             });
@@ -511,154 +729,105 @@ impl Table<'_> {
     }
 }
 
-fn draw_row(frame: &mut Frame, torrent: &Torrent, y: f32, width: f32) {
-    let c = Columns::new(width);
+fn draw_row(
+    frame: &mut Frame,
+    layout: &ColumnLayout,
+    label_colors: &BTreeMap<String, Color>,
+    torrent: &Torrent,
+    y: f32,
+    width: f32,
+) {
     let accent = state_color(torrent.state);
     let text_y = y + 5.0;
     let regular = crate::theme::regular();
     let mono = Font::MONOSPACE;
 
-    cell(
-        frame,
-        torrent.id.to_string(),
-        c.id_right,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
-    cell(
-        frame,
-        short_name(&torrent.name, 32),
-        c.name_x,
-        text_y,
-        TEXT,
-        12.0,
-        alignment::Horizontal::Left,
-        regular,
-    );
-    if torrent.label.is_empty() {
-        cell(
-            frame,
-            "—".to_owned(),
-            c.label_x,
-            text_y,
-            TEXT_DIM,
-            11.0,
-            alignment::Horizontal::Left,
-            regular,
-        );
-    } else {
-        cell(
-            frame,
-            short_name(&torrent.label, 12),
-            c.label_x,
-            text_y,
-            TEXT_DIM,
-            11.0,
-            alignment::Horizontal::Left,
-            regular,
-        );
+    for slot in layout.slots(width) {
+        let (content, color, size, font) = match slot.column {
+            Column::Id => (torrent.id.to_string(), TEXT_DIM, 11.0, mono),
+            Column::Name => (short_name(&torrent.name, 42), TEXT, 12.0, regular),
+            Column::Label => {
+                if torrent.label.is_empty() {
+                    ("—".to_owned(), TEXT_DIM, 11.0, regular)
+                } else {
+                    (
+                        short_name(&torrent.label, 14),
+                        label_colors
+                            .get(&torrent.label)
+                            .copied()
+                            .unwrap_or(TEXT_DIM),
+                        11.0,
+                        regular,
+                    )
+                }
+            }
+            Column::Size => (format_size(torrent.total_bytes), TEXT_DIM, 11.0, mono),
+            Column::SavePath => (
+                short_name(&folder_label(&torrent.save_path), 30),
+                TEXT_DIM,
+                11.0,
+                regular,
+            ),
+            Column::State => {
+                frame.fill_rectangle(Point::new(slot.x, y + 9.0), Size::new(6.0, 6.0), accent);
+                (state_label(torrent.state).to_owned(), accent, 11.0, regular)
+            }
+            Column::Progress => {
+                let bar = (slot.width - 44.0).clamp(24.0, 120.0);
+                let progress = torrent.progress.clamp(0.0, 1.0);
+                let bar_y = y + (ROW_HEIGHT - BAR_HEIGHT) / 2.0;
+                frame.fill_rectangle(
+                    Point::new(slot.x, bar_y),
+                    Size::new(bar, BAR_HEIGHT),
+                    BAR_TRACK,
+                );
+                let filled = (bar * progress).round();
+                if filled > 0.0 {
+                    frame.fill_rectangle(
+                        Point::new(slot.x, bar_y),
+                        Size::new(filled, BAR_HEIGHT),
+                        accent,
+                    );
+                }
+                cell(
+                    frame,
+                    format!("{}%", (progress * 100.0).round() as u32),
+                    slot.x + bar + 6.0,
+                    text_y,
+                    TEXT_DIM,
+                    11.0,
+                    alignment::Horizontal::Left,
+                    mono,
+                );
+                continue;
+            }
+            Column::Download => (format_rate(torrent.download_rate), TEXT, 11.0, mono),
+            Column::Upload => (format_rate(torrent.upload_rate), TEXT, 11.0, mono),
+            Column::Seeds => (torrent.seeds.to_string(), TEXT_DIM, 11.0, mono),
+            Column::Peers => (torrent.peers.to_string(), TEXT_DIM, 11.0, mono),
+            Column::Eta => (format_eta(torrent.eta_seconds), TEXT_DIM, 11.0, mono),
+        };
+        let (x, horizontal) = if slot.column.right_aligned() {
+            (slot.x + slot.width, alignment::Horizontal::Right)
+        } else if slot.column == Column::State {
+            (slot.x + 10.0, alignment::Horizontal::Left)
+        } else {
+            (slot.x, alignment::Horizontal::Left)
+        };
+        cell(frame, content, x, text_y, color, size, horizontal, font);
     }
-    cell(
-        frame,
-        format_size(torrent.total_bytes),
-        c.size_right,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
+}
 
-    frame.fill_rectangle(Point::new(c.dot_x, y + 9.0), Size::new(6.0, 6.0), accent);
-    cell(
-        frame,
-        state_label(torrent.state).to_owned(),
-        c.state_x,
-        text_y,
-        accent,
-        11.0,
-        alignment::Horizontal::Left,
-        regular,
-    );
-
-    let progress = torrent.progress.clamp(0.0, 1.0);
-    let bar_y = y + (ROW_HEIGHT - BAR_HEIGHT) / 2.0;
-    frame.fill_rectangle(
-        Point::new(c.bar_x, bar_y),
-        Size::new(BAR_WIDTH, BAR_HEIGHT),
-        BAR_TRACK,
-    );
-    let filled = (BAR_WIDTH * progress).round();
-    if filled > 0.0 {
-        frame.fill_rectangle(
-            Point::new(c.bar_x, bar_y),
-            Size::new(filled, BAR_HEIGHT),
-            accent,
-        );
+/// The tail of a save path: the torrent's own folder plus its parent, so a
+/// download directory and a library directory stay distinguishable.
+fn folder_label(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    let mut parts = trimmed.rsplit('/');
+    match (parts.next(), parts.next()) {
+        (Some(last), Some(parent)) if !parent.is_empty() => format!("{parent}/{last}"),
+        (Some(last), _) => last.to_owned(),
+        _ => trimmed.to_owned(),
     }
-    cell(
-        frame,
-        format!("{}%", (progress * 100.0).round() as u32),
-        c.pct_x,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Left,
-        mono,
-    );
-    cell(
-        frame,
-        format_rate(torrent.download_rate),
-        c.down_right,
-        text_y,
-        TEXT,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
-    cell(
-        frame,
-        format_rate(torrent.upload_rate),
-        c.up_right,
-        text_y,
-        TEXT,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
-    cell(
-        frame,
-        torrent.seeds.to_string(),
-        c.seeds_right,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
-    cell(
-        frame,
-        torrent.peers.to_string(),
-        c.peers_right,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
-    cell(
-        frame,
-        format_eta(torrent.eta_seconds),
-        c.eta_right,
-        text_y,
-        TEXT_DIM,
-        11.0,
-        alignment::Horizontal::Right,
-        mono,
-    );
 }
 
 fn format_eta(seconds: u32) -> String {
@@ -772,18 +941,72 @@ mod tests {
             Some(3)
         );
         assert_eq!(row_at(Point::new(20.0, 2.0), 0.0, 10), None);
-        assert_eq!(column_at(12.0, 1224.0), Some(Column::Id));
-        assert_eq!(column_at(100.0, 1224.0), Some(Column::Name));
-        assert_eq!(column_at(560.0, 1224.0), Some(Column::Label));
-        assert_eq!(column_at(1010.0, 1224.0), Some(Column::Upload));
+        let layout = ColumnLayout::new();
+        let width = 1224.0;
+        let name = layout
+            .slots(width)
+            .into_iter()
+            .find(|slot| slot.column == Column::Name)
+            .expect("name slot");
+        assert_eq!(layout.column_at(12.0, width), Some(Column::Id));
+        assert_eq!(layout.column_at(name.x + 2.0, width), Some(Column::Name));
         assert_eq!(
-            column_at(80.0, 1224.0).and_then(Column::sort_field),
+            layout
+                .column_at(name.x + 2.0, width)
+                .and_then(Column::sort_field),
             Some(SortField::Name)
         );
+        // The name column soaks up the leftover width, so hiding a fixed
+        // column moves the ones after it without ever hiding the name.
+        let mut narrow = layout.clone();
+        narrow.toggle(Column::SavePath);
+        let slots = narrow.slots(width);
+        assert!(slots.iter().all(|slot| slot.column != Column::SavePath));
+        assert!(slots.iter().any(|slot| slot.column == Column::Name));
+        assert!(slots.last().expect("slot").x + slots.last().unwrap().width <= width + 1.0);
+    }
+
+    #[test]
+    fn columns_resize_with_a_floor() {
+        let mut layout = ColumnLayout::new();
+        let before = layout.width_of(Column::Size);
+        layout.set_width(Column::Size, before + 30.0);
+        assert_eq!(layout.width_of(Column::Size), before + 30.0);
+        layout.set_width(Column::Size, 5.0);
+        assert_eq!(layout.width_of(Column::Size), Column::Size.min_width());
+        // The flexible column ignores explicit widths.
+        layout.set_width(Column::Name, 999.0);
+        assert_eq!(layout.width_of(Column::Name), Column::Name.default_width());
+    }
+
+    #[test]
+    fn a_column_is_grabbed_by_its_right_edge() {
+        let layout = ColumnLayout::new();
+        let width = 1224.0;
+        let size = layout
+            .slots(width)
+            .into_iter()
+            .find(|slot| slot.column == Column::Size)
+            .expect("size slot");
         assert_eq!(
-            column_at(560.0, 1224.0).and_then(Column::sort_field),
-            Some(SortField::Label)
+            layout.resize_handle(size.x + size.width - 1.0, width),
+            Some(Column::Size)
         );
+        assert_eq!(layout.resize_handle(size.x + 2.0, width), None);
+    }
+
+    #[test]
+    fn the_column_menu_marks_visible_columns() {
+        let origin = Point::new(120.0, HEADER_HEIGHT);
+        let layout = ColumnLayout::new();
+        let rect = column_menu_rect(origin, 1224.0);
+        assert!(rect.contains(Point::new(rect.x + 8.0, rect.y + 8.0)));
+        // Rows are hit-tested in display order, so the first row is ID.
+        assert_eq!(
+            column_menu_item(origin, 1224.0, Point::new(rect.x + 12.0, rect.y + 8.0)),
+            Some(Column::Id)
+        );
+        assert!(layout.is_visible(Column::Id));
     }
 
     #[test]

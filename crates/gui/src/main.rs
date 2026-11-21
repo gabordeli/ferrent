@@ -22,6 +22,7 @@ use ferrent_gui::table::{
     self, Column, ContextMenu, MenuAction, ROW_HEIGHT, Table, TableMessage, VISIBLE_ROWS,
 };
 use ferrent_gui::theme;
+use ferrent_gui::tracker;
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     Label as ProtoLabel, SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker,
@@ -361,6 +362,10 @@ struct App {
     selected_torrents: BTreeMap<u64, Torrent>,
     active: Option<u64>,
     context: Option<ContextMenu>,
+    columns: table::ColumnLayout,
+    column_menu: Option<Point>,
+    /// (column, grab x, width when the drag started)
+    column_resize: Option<(table::Column, f32, f32)>,
     pending_select: Option<usize>,
 
     add_path: String,
@@ -453,6 +458,9 @@ impl Default for App {
             selected_torrents: BTreeMap::new(),
             active: None,
             context: None,
+            columns: table::ColumnLayout::new(),
+            column_menu: None,
+            column_resize: None,
             pending_select: None,
             add_path: String::new(),
             add_save_path: String::new(),
@@ -642,6 +650,32 @@ impl App {
                 self.ensure_page()
             }
             Message::Table(TableMessage::Pressed(point)) => self.table_pressed(point),
+            Message::Table(TableMessage::ToggleColumn(column)) => {
+                self.columns.toggle(column);
+                self.column_menu = None;
+                Task::none()
+            }
+            Message::Table(TableMessage::ColumnMenu(origin)) => {
+                self.column_menu = origin;
+                self.context = None;
+                Task::none()
+            }
+            Message::Table(TableMessage::ResizeStart(column, x)) => {
+                self.column_resize = Some((column, x, self.columns.width_of(column)));
+                Task::none()
+            }
+            Message::Table(TableMessage::Resize(column, x)) => {
+                if let Some((dragging, start_x, start_width)) = self.column_resize {
+                    if dragging == column {
+                        self.columns.set_width(column, start_width + (x - start_x));
+                    }
+                }
+                Task::none()
+            }
+            Message::Table(TableMessage::ResizeEnd) => {
+                self.column_resize = None;
+                Task::none()
+            }
             Message::Table(TableMessage::RightPressed(point)) => self.table_right_pressed(point),
             Message::Refresh => self.refresh_page(),
             Message::Action(action) => self.start_action(action),
@@ -1571,7 +1605,10 @@ impl App {
             }
         }
         if point.y < table::HEADER_HEIGHT {
-            if let Some(column) = table::column_at(point.x, self.window_width - 232.0) {
+            if let Some(column) = self
+                .columns
+                .column_at(point.x, self.window_width - 232.0 - 14.0)
+            {
                 return self.sort_column(column);
             }
             self.context = None;
@@ -4503,6 +4540,17 @@ impl App {
     }
 
     fn table_view(&self) -> Element<'_, Message> {
+        // The label chip colour comes from the daemon's label definitions;
+        // an unknown label falls back to the dim text colour.
+        let label_colors: BTreeMap<String, iced::Color> = self
+            .settings
+            .labels
+            .iter()
+            .filter_map(|row| {
+                settings::color_from_hex(&row.label.color)
+                    .map(|color| (row.label.name.clone(), color))
+            })
+            .collect();
         let table: Element<TableMessage> = iced::widget::canvas::Canvas::new(Table {
             rows: &self.page.torrents,
             page_offset: self.page_offset.unwrap_or(0),
@@ -4512,6 +4560,10 @@ impl App {
             sort: self.sort,
             descending: self.descending,
             context: self.context,
+            layout: &self.columns,
+            column_menu: self.column_menu,
+            resizing: self.column_resize.map(|(column, _, _)| column),
+            label_colors,
         })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -5087,46 +5139,64 @@ impl App {
         match &self.details_payload {
             Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
                 let header = row![
-                    text("TRACKER").size(10).color(theme::TEXT_MUTED),
+                    text("TRACKER")
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .width(Length::Fill),
                     text("SEEDS / LEECHERS")
                         .size(10)
                         .color(theme::TEXT_MUTED)
-                        .width(Length::Fixed(110.0)),
+                        .width(Length::Fixed(100.0)),
                     text("STATUS")
                         .size(10)
                         .color(theme::TEXT_MUTED)
-                        .width(Length::Fixed(80.0)),
+                        .width(Length::Fixed(96.0)),
                 ]
                 .spacing(16);
                 let rows = trackers
                     .iter()
-                    .map(|tracker| {
+                    .map(|tracker: &TorrentTracker| {
                         let counts = if tracker.seeds == 0 && tracker.leechers == 0 {
                             "-".to_owned()
                         } else {
                             format!("{} / {}", tracker.seeds, tracker.leechers)
                         };
+                        let (label, detail) = tracker::status_text(
+                            &tracker.status,
+                            &tracker.message,
+                            tracker.next_announce,
+                            tracker.fails,
+                        );
                         let status_color = if tracker.status == "error" {
                             theme::ERROR
+                        } else if tracker.status == "working" {
+                            theme::SUCCESS
                         } else {
                             dim
                         };
-                        row![
-                            text(&tracker.url).size(11).width(Length::Fill),
-                            text(counts).size(11).color(dim).width(Length::Fixed(110.0)),
-                            text(&tracker.status)
-                                .size(11)
-                                .color(status_color)
-                                .width(Length::Fixed(80.0)),
-                        ]
-                        .spacing(16)
+                        // The reason sits on its own line so a long error text
+                        // reads without wrapping into the next tracker.
+                        WidgetColumn::with_children(vec![
+                            row![
+                                text(&tracker.url).size(11).width(Length::Fill),
+                                text(counts).size(11).color(dim).width(Length::Fixed(100.0)),
+                                text(label)
+                                    .size(11)
+                                    .color(status_color)
+                                    .width(Length::Fixed(96.0)),
+                            ]
+                            .spacing(16)
+                            .into(),
+                            text(detail).size(10).color(theme::TEXT_MUTED).into(),
+                        ])
+                        .spacing(2)
                         .into()
                     })
                     .collect::<Vec<Element<Message>>>();
                 let mut children: Vec<Element<Message>> = Vec::with_capacity(rows.len() + 1);
                 children.push(header.into());
                 children.extend(rows);
-                scrollable(WidgetColumn::with_children(children).spacing(2))
+                scrollable(WidgetColumn::with_children(children).spacing(8))
                     .height(Length::Fill)
                     .into()
             }

@@ -8,3 +8,4 @@ pub mod icons;
 pub mod settings;
 pub mod table;
 pub mod theme;
+pub mod tracker;

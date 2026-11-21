@@ -482,6 +482,9 @@ fn run_worker(
                         status: tracker.status.to_string(),
                         seeds: tracker.seeds,
                         leechers: tracker.leechers,
+                        message: tracker.message.to_string(),
+                        next_announce: tracker.next_announce,
+                        fails: tracker.fails,
                     })
                     .collect();
                 let _ = reply.send(Ok(trackers));

@@ -47,6 +47,9 @@ pub(crate) mod ffi {
         status: String,
         seeds: u32,
         leechers: u32,
+        message: String,
+        next_announce: u32,
+        fails: u32,
     }
 
     struct FfiEvent {

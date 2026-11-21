@@ -19,6 +19,7 @@ pub const CYAN: Color = Color::from_rgb(0.133, 0.827, 0.933);
 pub const DEEP: Color = Color::from_rgb(0.043, 0.227, 0.459);
 
 pub const DOWNLOADING: Color = Color::from_rgb(0.133, 0.773, 0.369);
+pub const SUCCESS: Color = DOWNLOADING;
 pub const SEEDING: Color = PRIMARY;
 pub const QUEUED: Color = Color::from_rgb(0.980, 0.800, 0.082);
 pub const PAUSED: Color = TEXT_SECONDARY;

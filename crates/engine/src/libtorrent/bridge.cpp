@@ -434,12 +434,28 @@ rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
         bool failed = false;
         int seeds = -1;
         int leechers = -1;
+        int next_announce = 0;
+        int fails = 0;
+        std::string message;
         for (auto const &endpoint : tracker.endpoints) {
             for (auto const &infohash : endpoint.info_hashes) {
                 updating = updating || infohash.updating;
                 failed = failed || static_cast<bool>(infohash.last_error);
                 seeds = std::max(seeds, infohash.scrape_complete);
                 leechers = std::max(leechers, infohash.scrape_incomplete);
+                fails = std::max(fails, static_cast<int>(infohash.fails));
+                if (static_cast<bool>(infohash.last_error)) {
+                    message = infohash.last_error.message();
+                } else if (!infohash.message.empty()) {
+                    message = infohash.message;
+                }
+                auto due = infohash.next_announce -
+                           libtorrent::time_point_cast<libtorrent::seconds32>(
+                               libtorrent::clock_type::now());
+                int seconds = static_cast<int>(due.count());
+                if (seconds > 0 && (next_announce == 0 || seconds < next_announce)) {
+                    next_announce = seconds;
+                }
             }
         }
         // Report the live announce state: a tracker that answered is "working"
@@ -455,6 +471,9 @@ rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
         }
         item.seeds = seeds > 0 ? static_cast<uint32_t>(seeds) : 0;
         item.leechers = leechers > 0 ? static_cast<uint32_t>(leechers) : 0;
+        item.message = rust::String(message);
+        item.next_announce = next_announce > 0 ? static_cast<uint32_t>(next_announce) : 0;
+        item.fails = fails > 0 ? static_cast<uint32_t>(fails) : 0;
         out.push_back(std::move(item));
     }
     return out;
