@@ -191,12 +191,19 @@ impl StateMirror {
                     download_rate,
                     upload_rate,
                     queue_position: _,
+                    seeds,
+                    peers,
                 } => {
                     let changed = if let Some(status) = data.torrents.get_mut(&id) {
                         let status = Arc::make_mut(status);
                         status.progress = progress.clamp(0.0, 1.0);
                         status.download_rate = download_rate;
                         status.upload_rate = upload_rate;
+                        // The mirror is the only source for the table's
+                        // seeds/peers columns, so the counts travel with the
+                        // progress event.
+                        status.seeds = seeds.max(0) as u32;
+                        status.peers = peers.max(0) as u32;
                         true
                     } else {
                         false
@@ -494,6 +501,8 @@ mod tests {
             download_rate: 100,
             upload_rate: 10,
             queue_position: 0,
+            seeds: 0,
+            peers: 0,
         });
         mirror.apply(EngineEvent::StateChanged {
             id: 1,
@@ -563,6 +572,8 @@ mod tests {
             download_rate: 1,
             upload_rate: 1,
             queue_position: 0,
+            seeds: 0,
+            peers: 0,
         });
         assert_eq!(mirror.take_dirty(), BTreeSet::from([2]));
 
@@ -583,6 +594,8 @@ mod tests {
                 download_rate: step,
                 upload_rate: 0,
                 queue_position: 0,
+                seeds: 0,
+                peers: 0,
             });
         }
         mirror.publish();

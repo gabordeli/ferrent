@@ -31,6 +31,8 @@ pub fn torrent_json(torrent: &Torrent) -> Value {
         "total_bytes": torrent.total_bytes,
         "download_rate": torrent.download_rate,
         "upload_rate": torrent.upload_rate,
+        "seeds": torrent.seeds,
+        "peers": torrent.peers,
         "error": torrent.error,
     })
 }

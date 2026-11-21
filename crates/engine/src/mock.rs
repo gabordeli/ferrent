@@ -93,6 +93,8 @@ impl MockEngine {
             download_rate,
             upload_rate,
             queue_position: 0,
+            seeds: 0,
+            peers: 0,
         });
         Ok(())
     }

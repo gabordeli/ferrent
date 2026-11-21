@@ -57,6 +57,8 @@ pub(crate) mod ffi {
         download_rate: u64,
         upload_rate: u64,
         queue_position: i32,
+        seeds: i32,
+        peers: i32,
     }
 
     unsafe extern "C++" {

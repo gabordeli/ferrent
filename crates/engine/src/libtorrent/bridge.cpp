@@ -1,5 +1,6 @@
 #include "bridge.h"
 
+
 #include "ferrent-engine/src/libtorrent/bridge.rs.h"
 
 #include <libtorrent/add_torrent_params.hpp>
@@ -162,8 +163,10 @@ struct Session::Impl {
         // policy keeps its history.
         out.uploaded_bytes = status.all_time_upload;
         out.downloaded_bytes = status.all_time_download;
-        out.seeds = status.num_seeds;
-        out.peers = status.num_peers;
+        // The table column means the swarm the trackers report (what Deluge
+        // shows too), not just the peers we happen to be connected to.
+        out.seeds = status.num_complete;
+        out.peers = status.num_incomplete;
         // libtorrent 2.0 no longer exposes eta; derive it from the wanted bytes.
         auto const remaining = status.total_wanted - status.total_wanted_done;
         out.eta_seconds = (remaining > 0 && status.download_payload_rate > 0)
@@ -487,14 +490,14 @@ rust::Vec<FfiEvent> Session::poll_events() {
         if (auto *state = lt::alert_cast<lt::state_changed_alert>(alert)) {
             if (auto id = impl_->id_for(state->handle)) {
                 events.push_back(FfiEvent{kEventStateChanged, *id,
-                                          map_state_t(state->state), 0.0f, 0, 0, -1});
+                                          map_state_t(state->state), 0.0f, 0, 0, -1, 0, 0});
             }
         } else if (auto *finished = lt::alert_cast<lt::torrent_finished_alert>(alert)) {
             if (auto id = impl_->id_for(finished->handle)) {
                 events.push_back(
-                    FfiEvent{kEventStateChanged, *id, kSeeding, 1.0f, 0, 0, -1});
+                    FfiEvent{kEventStateChanged, *id, kSeeding, 1.0f, 0, 0, -1, 0, 0});
                 events.push_back(
-                    FfiEvent{kEventFinished, *id, kSeeding, 1.0f, 0, 0, -1});
+                    FfiEvent{kEventFinished, *id, kSeeding, 1.0f, 0, 0, -1, 0, 0});
             }
         } else if (auto *moved = lt::alert_cast<lt::storage_moved_alert>(alert)) {
             if (auto id = impl_->id_for(moved->handle)) {
@@ -512,17 +515,17 @@ rust::Vec<FfiEvent> Session::poll_events() {
                 impl_->moving.erase(*id);
                 impl_->last_error = failed->error.message();
                 events.push_back(
-                    FfiEvent{kEventStateChanged, *id, kError, 0.0f, 0, 0, -1});
+                    FfiEvent{kEventStateChanged, *id, kError, 0.0f, 0, 0, -1, 0, 0});
             }
         } else if (auto *error = lt::alert_cast<lt::torrent_error_alert>(alert)) {
             if (auto id = impl_->id_for(error->handle)) {
                 events.push_back(
-                    FfiEvent{kEventStateChanged, *id, kError, 0.0f, 0, 0, -1});
+                    FfiEvent{kEventStateChanged, *id, kError, 0.0f, 0, 0, -1, 0, 0});
             }
         } else if (auto *removed = lt::alert_cast<lt::torrent_removed_alert>(alert)) {
             if (auto id = impl_->id_for(removed->handle)) {
                 events.push_back(
-                    FfiEvent{kEventRemoved, *id, kQueued, 0.0f, 0, 0, -1});
+                    FfiEvent{kEventRemoved, *id, kQueued, 0.0f, 0, 0, -1, 0, 0});
             }
         } else if (auto *updates = lt::alert_cast<lt::state_update_alert>(alert)) {
             for (auto const &status : updates->status) {
@@ -531,7 +534,8 @@ rust::Vec<FfiEvent> Session::poll_events() {
                         kEventProgress, *id, map_status(status), status.progress,
                         static_cast<uint64_t>(std::max(status.download_rate, 0)),
                         static_cast<uint64_t>(std::max(status.upload_rate, 0)),
-                        static_cast<int>(status.queue_position)});
+                        static_cast<int>(status.queue_position), status.num_complete,
+                        status.num_incomplete});
                 }
             }
         } else if (auto *resume = lt::alert_cast<lt::save_resume_data_alert>(alert)) {

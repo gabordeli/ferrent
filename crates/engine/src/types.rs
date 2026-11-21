@@ -147,6 +147,10 @@ pub enum EngineEvent {
         download_rate: u64,
         upload_rate: u64,
         queue_position: i32,
+        /// Connected seeds, as the engine sees them.
+        seeds: i32,
+        /// Connected peers (leechers), as the engine sees them.
+        peers: i32,
     },
     Removed {
         id: TorrentId,

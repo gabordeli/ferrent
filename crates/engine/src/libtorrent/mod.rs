@@ -584,6 +584,8 @@ fn convert_event(event: FfiEvent) -> Option<EngineEvent> {
             download_rate: event.download_rate,
             upload_rate: event.upload_rate,
             queue_position: event.queue_position,
+            seeds: event.seeds,
+            peers: event.peers,
         }),
         3 => Some(EngineEvent::Removed { id: event.id }),
         4 => Some(EngineEvent::Finished { id: event.id }),
