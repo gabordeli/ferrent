@@ -146,11 +146,11 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | Címkék/kategóriák | ✅ | ❌ | plugin | ✅ | label + auto-match |
 | **Force recheck** | ✅ | ✅ | ✅ | ✅ | sor-menü + `ferrent-cli recheck` (M11-T4) |
 | **Átnevezés** (torrent/fájl) | ✅ | ✅ | ✅ | 🟡 | fájlnév a torrenten belül (sor-menü + CLI); torrent-név még nincs |
-| **Temp / incomplete mappa** | ✅ | ✅ | ✅ | 🟡 | DiskGuard staging zóna + move-on-complete; nincs globális „incomplete" path |
+| **Temp / incomplete mappa** | ✅ | ✅ | ✅ | ✅ | `[session] temp_dir`: a payload oda megy, befejezéskor a zónába/download_dir-be mozdul (M12-T1) |
 | **Tracker szerkesztés** | ✅ | ✅ | ✅ | ❌ | tracker hozzáadás/törlés torrentenként |
 | **Web seed kezelés** | ✅ | rész | rész | 🟡 | libtorrent tudja, nincs felület |
-| **Sequential download** | ✅ | ❌ | ✅ | ❌ | „download in order" |
-| **Super-seeding** | ✅ | ❌ | ✅ | ❌ | seed-mód torrentenként |
+| **Sequential download** | ✅ | ❌ | ✅ | ✅ | sor-menü + `add --sequential` (M12-T1) |
+| **Super-seeding** | ✅ | ❌ | ✅ | ✅ | sor-menü, torrentenként (M12-T1) |
 | **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ❌ | blokklista + `ip_filter` |
 | **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
