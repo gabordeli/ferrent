@@ -136,6 +136,12 @@ enum Message {
     DetailsLoaded(Box<DetailsPayload>),
     DetailsFailed(String),
     CycleFilePriority(usize),
+    RenameFilesLoaded(Result<Vec<TorrentFile>, String>),
+    RenameFilePicked(usize),
+    RenameValueChanged(String),
+    RenameConfirmed,
+    RenameFinished(Result<Vec<TorrentFile>, String>),
+    RecheckFinished(Result<(), String>),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -324,6 +330,7 @@ enum Modal {
     AddTorrent,
     Remove,
     SetLabel,
+    Rename,
 }
 
 impl Modal {
@@ -334,6 +341,7 @@ impl Modal {
             Self::AddTorrent => "Add torrent",
             Self::Remove => "Remove torrents",
             Self::SetLabel => "Set label",
+            Self::Rename => "Rename file",
         }
     }
 
@@ -344,6 +352,7 @@ impl Modal {
             Self::AddTorrent => (620.0, 470.0),
             Self::Remove => (480.0, 260.0),
             Self::SetLabel => (420.0, 420.0),
+            Self::Rename => (560.0, 480.0),
         }
     }
 }
@@ -354,6 +363,9 @@ struct App {
     fields: Fields,
     client: Option<AuthClient>,
     status: String,
+    /// Transient action feedback shown in the status bar ahead of the page
+    /// counter, which every poll overwrites.
+    notice: Option<(String, Instant)>,
     state: ConnectionState,
     pending: Option<PendingPin>,
     generation: u64,
@@ -410,6 +422,12 @@ struct App {
     details_for: Option<u64>,
     details_payload: Option<DetailsPayload>,
     details_error: Option<String>,
+    rename_for: Option<u64>,
+    rename_files: Option<Vec<TorrentFile>>,
+    rename_index: Option<usize>,
+    rename_value: String,
+    rename_error: Option<String>,
+    rename_in_flight: bool,
     activity: ActivityLog,
 
     modifiers: Modifiers,
@@ -453,6 +471,7 @@ impl Default for App {
             fields,
             client: None,
             status,
+            notice: None,
             state: ConnectionState::Idle,
             pending: None,
             generation: 0,
@@ -505,6 +524,12 @@ impl Default for App {
             details_for: None,
             details_payload: None,
             details_error: None,
+            rename_for: None,
+            rename_files: None,
+            rename_index: None,
+            rename_value: String::new(),
+            rename_error: None,
+            rename_in_flight: false,
             activity: ActivityLog::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
@@ -653,6 +678,92 @@ impl App {
                         Err(error) => Message::DetailsFailed(error),
                     },
                 )
+            }
+            Message::RenameFilesLoaded(result) => {
+                match result {
+                    Ok(files) => {
+                        self.rename_error = None;
+                        self.rename_files = Some(files);
+                        if self
+                            .rename_files
+                            .as_ref()
+                            .is_some_and(|files| files.len() == 1)
+                        {
+                            self.pick_rename_file(0);
+                        }
+                    }
+                    Err(error) => {
+                        self.rename_error = Some(error);
+                        self.rename_files = Some(Vec::new());
+                    }
+                }
+                Task::none()
+            }
+            Message::RenameFilePicked(index) => {
+                self.pick_rename_file(index);
+                Task::none()
+            }
+            Message::RenameValueChanged(value) => {
+                self.rename_value = value;
+                Task::none()
+            }
+            Message::RenameConfirmed => {
+                if self.rename_in_flight {
+                    return Task::none();
+                }
+                let (Some(id), Some(index)) = (self.rename_for, self.rename_index) else {
+                    return Task::none();
+                };
+                let name = self.rename_value.trim().to_owned();
+                if name.is_empty() || name.contains('/') {
+                    self.rename_error =
+                        Some(i18n::t("The name must be non-empty and contain no '/'.").to_owned());
+                    return Task::none();
+                }
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                self.rename_in_flight = true;
+                self.rename_error = None;
+                Task::perform(
+                    async move {
+                        connection::rename_torrent_file(&client, id, index as u32, &name).await
+                    },
+                    Message::RenameFinished,
+                )
+            }
+            Message::RenameFinished(result) => {
+                self.rename_in_flight = false;
+                match result {
+                    Ok(files) => {
+                        if self.details_for == self.rename_for {
+                            self.details_payload = Some(DetailsPayload::Files(files));
+                        }
+                        self.rename_files = None;
+                        self.rename_index = None;
+                        self.rename_value.clear();
+                        self.rename_error = None;
+                        self.set_notice(i18n::t("File renamed"));
+                        self.modal = None;
+                        self.refresh_page()
+                    }
+                    Err(error) => {
+                        self.rename_error = Some(error);
+                        Task::none()
+                    }
+                }
+            }
+            Message::RecheckFinished(result) => {
+                match result {
+                    Ok(()) => {
+                        self.set_notice(i18n::t("Recheck requested"));
+                        return self.refresh_page();
+                    }
+                    Err(error) => {
+                        self.set_notice(format!("{}: {error}", i18n::t("Recheck failed")));
+                    }
+                }
+                Task::none()
             }
             Message::PageLoaded {
                 request,
@@ -1543,6 +1654,13 @@ impl App {
         if generation != self.generation {
             return Task::none();
         }
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(8))
+        {
+            self.notice = None;
+        }
         let refresh = if self.action_in_flight || self.add_in_flight || self.page_in_flight {
             Task::none()
         } else {
@@ -1741,6 +1859,8 @@ impl App {
                     MenuAction::Pause => TorrentAction::Pause,
                     MenuAction::Resume => TorrentAction::Resume,
                     MenuAction::Label => return self.open_set_label(),
+                    MenuAction::Recheck => return self.recheck_selected(),
+                    MenuAction::Rename => return self.open_rename(),
                     MenuAction::Remove => return self.open_remove_modal(),
                 };
                 return self.start_action(action);
@@ -2137,6 +2257,57 @@ impl App {
         Task::none()
     }
 
+    fn set_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some((message.into(), Instant::now()));
+    }
+
+    fn recheck_selected(&mut self) -> Task<Message> {
+        let Some(id) = self.selected.iter().next().copied() else {
+            return Task::none();
+        };
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        self.set_notice(i18n::t("Recheck requested"));
+        Task::perform(
+            async move { connection::recheck_torrent(&client, id).await },
+            Message::RecheckFinished,
+        )
+    }
+
+    fn open_rename(&mut self) -> Task<Message> {
+        let Some(id) = self.active.or_else(|| self.selected.iter().next().copied()) else {
+            return Task::none();
+        };
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        self.rename_for = Some(id);
+        self.rename_files = None;
+        self.rename_index = None;
+        self.rename_value.clear();
+        self.rename_error = None;
+        self.rename_in_flight = false;
+        self.open_modal(Modal::Rename);
+        Task::perform(
+            async move { connection::files(&client, id).await },
+            Message::RenameFilesLoaded,
+        )
+    }
+
+    fn pick_rename_file(&mut self, index: usize) {
+        let Some(name) = self
+            .rename_files
+            .as_ref()
+            .and_then(|files| files.get(index))
+        else {
+            return;
+        };
+        let name = name.path.rsplit('/').next().unwrap_or_default().to_owned();
+        self.rename_index = Some(index);
+        self.rename_value = name;
+    }
+
     fn confirm_remove(&mut self) -> Task<Message> {
         self.modal = None;
         self.start_action(TorrentAction::Remove {
@@ -2462,6 +2633,7 @@ impl App {
             Modal::AddTorrent => (self.add_torrent_view(), modal.size()),
             Modal::Remove => (self.remove_view(), modal.size()),
             Modal::SetLabel => (self.set_label_view(), modal.size()),
+            Modal::Rename => (self.rename_view(), modal.size()),
         };
         let overlay = self.modal_overlay(panel, size);
         iced::widget::stack![base, overlay].into()
@@ -4547,6 +4719,80 @@ impl App {
         modal_panel(Modal::SetLabel, body.into())
     }
 
+    fn rename_view(&self) -> Element<'_, Message> {
+        let dim = theme::text_secondary();
+        let mut rows: Vec<Element<Message>> = Vec::new();
+        match &self.rename_files {
+            None => rows.push(text(i18n::t("Loading files…")).size(12).color(dim).into()),
+            Some(files) if files.is_empty() => rows.push(
+                text(match &self.rename_error {
+                    Some(error) => error.clone(),
+                    None => i18n::t("No files reported.").to_owned(),
+                })
+                .size(12)
+                .color(dim)
+                .into(),
+            ),
+            Some(files) => {
+                for (index, file) in files.iter().enumerate() {
+                    let selected = self.rename_index == Some(index);
+                    let label = if selected {
+                        format!("▶ {}", file.path)
+                    } else {
+                        format!("   {}", file.path)
+                    };
+                    rows.push(
+                        mouse_area(
+                            text(label)
+                                .size(11)
+                                .color(if selected { theme::cyan() } else { dim })
+                                .width(Length::Fill),
+                        )
+                        .on_press(Message::RenameFilePicked(index))
+                        .into(),
+                    );
+                }
+            }
+        }
+        let error: Element<Message> = match &self.rename_error {
+            Some(error)
+                if self
+                    .rename_files
+                    .as_ref()
+                    .is_none_or(|files| !files.is_empty()) =>
+            {
+                text(error.clone()).size(10).color(theme::error()).into()
+            }
+            _ => text("").size(10).into(),
+        };
+        let body = column![
+            text(i18n::t("Pick a file, then enter its new name."))
+                .size(11)
+                .color(dim),
+            scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fixed(190.0)),
+            text(i18n::t("New name"))
+                .size(11)
+                .color(theme::text_muted()),
+            text_input("new-name.ext", &self.rename_value)
+                .on_input(Message::RenameValueChanged)
+                .width(Length::Fill),
+            error,
+            row![
+                horizontal_space(),
+                action_button("Cancel", Message::CloseModal, true),
+                action_button(
+                    "Rename",
+                    Message::RenameConfirmed,
+                    self.rename_index.is_some() && !self.rename_in_flight,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(8);
+        modal_panel(Modal::Rename, body.into())
+    }
+
     fn add_torrent_view(&self) -> Element<'_, Message> {
         let mut labels: Vec<Element<Message>> = vec![label_choice(
             "None".to_owned(),
@@ -5757,7 +6003,18 @@ impl App {
                 text("●").size(9).color(color),
                 text(label).size(11).color(color),
                 text(server).size(11).color(theme::text_secondary()),
-                horizontal_space(),
+                text(
+                    self.notice
+                        .as_ref()
+                        .map_or_else(|| self.status.clone(), |(message, _)| message.clone(),)
+                )
+                .size(11)
+                .color(if self.notice.is_some() {
+                    theme::text_secondary()
+                } else {
+                    theme::text_muted()
+                })
+                .width(Length::Fill),
                 text(format!("↓ {}", table::format_rate(down))).size(11),
                 text(format!("↑ {}", table::format_rate(up))).size(11),
                 text(i18n::t_fmt("{} active", &[&active.to_string()]))

@@ -10,7 +10,8 @@ use ferrent_protocol::v1::{
     GetConfigRequest, GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest,
     GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
     GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
-    ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    RecheckTorrentRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
     SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
     UpdateLabelRequest,
 };
@@ -162,6 +163,36 @@ pub async fn files(client: &AuthClient, id: u64) -> Result<Vec<TorrentFile>, Str
     let mut client = client.clone();
     let response = client
         .get_torrent_files(GetTorrentFilesRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.files)
+}
+
+/// Asks the daemon to re-check a torrent's data on disk.
+pub async fn recheck_torrent(client: &AuthClient, id: u64) -> Result<(), String> {
+    let mut client = client.clone();
+    client
+        .recheck_torrent(RecheckTorrentRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
+    Ok(())
+}
+
+/// Renames one file inside a torrent and returns the refreshed file list.
+pub async fn rename_torrent_file(
+    client: &AuthClient,
+    id: u64,
+    index: u32,
+    name: &str,
+) -> Result<Vec<TorrentFile>, String> {
+    let mut client = client.clone();
+    let response = client
+        .rename_torrent_file(RenameTorrentFileRequest {
+            id,
+            index,
+            name: name.to_owned(),
+        })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();

@@ -20,7 +20,7 @@ pub const VISIBLE_ROWS: usize = 64;
 const MENU_WIDTH: f32 = 160.0;
 const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
-const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 3.0;
+const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 5.0;
 
 fn bg_header() -> Color {
     crate::theme::bg_secondary()
@@ -389,6 +389,8 @@ pub enum MenuAction {
     Pause,
     Resume,
     Label,
+    Recheck,
+    Rename,
     Remove,
 }
 
@@ -418,7 +420,9 @@ pub fn menu_action_at(menu: &ContextMenu, point: Point) -> Option<MenuAction> {
         0 if menu.paused => Some(MenuAction::Resume),
         0 => Some(MenuAction::Pause),
         1 => Some(MenuAction::Label),
-        2 => Some(MenuAction::Remove),
+        2 => Some(MenuAction::Recheck),
+        3 => Some(MenuAction::Rename),
+        4 => Some(MenuAction::Remove),
         _ => None,
     }
 }
@@ -733,9 +737,21 @@ impl Table<'_> {
                 .with_width(1.0),
         );
         let labels = if menu.paused {
-            ["Resume", "Set label…", "Remove"]
+            [
+                crate::i18n::t("Resume"),
+                crate::i18n::t("Set label…"),
+                crate::i18n::t("Force recheck"),
+                crate::i18n::t("Rename file…"),
+                crate::i18n::t("Remove"),
+            ]
         } else {
-            ["Pause", "Set label…", "Remove"]
+            [
+                crate::i18n::t("Pause"),
+                crate::i18n::t("Set label…"),
+                crate::i18n::t("Force recheck"),
+                crate::i18n::t("Rename file…"),
+                crate::i18n::t("Remove"),
+            ]
         };
         for (index, label) in labels.iter().enumerate() {
             frame.fill_text(Text {
@@ -1054,6 +1070,14 @@ mod tests {
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 160.0)),
+            Some(MenuAction::Recheck)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 186.0)),
+            Some(MenuAction::Rename)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 212.0)),
             Some(MenuAction::Remove)
         );
         assert_eq!(menu_action_at(&menu, Point::new(10.0, 10.0)), None);
