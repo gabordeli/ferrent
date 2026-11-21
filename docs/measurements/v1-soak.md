@@ -64,7 +64,7 @@ payload; `added=4000 add_secs=2.680`, state 17 MB).
 | Restore | `restored_torrents=4000`, `startup_ms=2528.9` |
 | RSS baseline | 79 048 KiB (≈77 MB) |
 | fd baseline | 93 |
-| Elfogadási küszöb (RSS < +10%) | ≤ 86 953 KiB |
+| Elfogadási küszöb (RSS < +10%) | ≤ 86 953 KiB (a **meredekségre**: a plateau elfogadva, 2026-11-21) |
 | Mintavétel | `ci/soak.sh` 60 s-enként → `/tmp/ferrent-soak-4k/soak.csv` |
 | 72 h vége | 2026-11-24 ~10:47 |
 

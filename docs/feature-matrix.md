@@ -126,3 +126,54 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 
 Az IP blocklist, a sequential letöltés és a stats/pieces nézet egy következő
 kör (M11) jelöltje; a streaming és a prevent-suspend továbbra is opcionális.
+
+## 7. Más kliensek — mit érdemes átvenni
+
+Források (2026-11-21): Wikipedia *Comparison of BitTorrent clients*,
+`qbittorrent.org` feature lista, a Deluge-oldalak (fent), valamint a
+Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
+**kliens-szintű, felhasználói** funkciókat hasonlítja; a protokoll-dolgokat
+(DHT, PEX, LSD, µTP, titkosítás) mindegyik tudja.
+
+| Funkció | qBittorrent | Transmission | Deluge | Ferrent | Megjegyzés |
+|---|---|---|---|---|---|
+| Queue + prioritás | ✅ | ✅ | ✅ | ✅ | daemon-oldali sorrend |
+| Sávszélesség-ütemező | ✅ | ✅ | plugin | ✅ | `[scheduler]` |
+| RSS + regex szűrő | ✅ | ❌ | plugin | ✅ | M10-T4 |
+| Torrent készítés | ✅ | ✅ | ✅ | ✅ | M10-T3 |
+| Proxy (HTTP/SOCKS) | ✅ | ❌ | ✅ | ✅ | M10-T1 |
+| Web UI + távvezérlés | ✅ | ✅ | plugin | ✅ | `ferrent-web` + gRPC |
+| Címkék/kategóriák | ✅ | ❌ | plugin | ✅ | label + auto-match |
+| **Force recheck** | ✅ | ✅ | ✅ | ❌ | egy torrent újraellenőrzése |
+| **Átnevezés** (torrent/fájl) | ✅ | ✅ | ✅ | ❌ | torrent-név és fájlnév |
+| **Temp / incomplete mappa** | ✅ | ✅ | ✅ | 🟡 | DiskGuard staging zóna + move-on-complete; nincs globális „incomplete" path |
+| **Tracker szerkesztés** | ✅ | ✅ | ✅ | ❌ | tracker hozzáadás/törlés torrentenként |
+| **Web seed kezelés** | ✅ | rész | rész | 🟡 | libtorrent tudja, nincs felület |
+| **Sequential download** | ✅ | ❌ | ✅ | ❌ | „download in order" |
+| **Super-seeding** | ✅ | ❌ | ✅ | ❌ | seed-mód torrentenként |
+| **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ❌ | blokklista + `ip_filter` |
+| **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
+| **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
+| **Statisztika/grafikonok** | ✅ | ✅ | plugin | ❌ | session + torrent szint |
+| **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ❌ | a GUI ma fix sötét |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ❌ | ma csak magyar/angol kevert |
+| Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) |
+
+## 8. Következő kör jelöltjei (M11/M12)
+
+Haszon/ár szerint rendezve; a „kód” oszlop a becsült érintettséget jelzi.
+
+| # | Funkció | Miért | Kód | Javaslat |
+|---|---|---|---|---|
+| 1 | **Bugsink-hibák javítása** (FERRENT-4 redb lock, FERRENT-5 transport, FERRENT-11 `unwrap`) | a kiadási kapu része; valódi felhasználói hibák | kicsi–közepes | M11-T1 (hardening) |
+| 2 | **Téma: sötét/világos + akcentus** | a user kérése; a GUI minden színe egy `theme.rs`-ben van | kicsi | M11-T2 |
+| 3 | **Nyelvesítés (hu default, en)** | a user kérése; induláshoz elég a GUI+CLI szövegei | közepes | M11-T3 |
+| 4 | **Force recheck + átnevezés** | alap kliens-paritás; a set location **már van** (`MoveTorrent` → `move_storage`) | közepes | M11-T4 |
+| 5 | **Tracker szerkesztés + web seed** | privát trackereknél napi haszon | közepes | M11-T5 |
+| 6 | **Sequential + super-seeding + temp mappa** | watch-while-downloading; temp mappa a DiskGuardhoz illik | közepes | M12-T1 |
+| 7 | **IP filter (eMule/P2P formátum)** | anti-leech / privát tracker | kicsi–közepes | M12-T2 |
+| 8 | **Statisztika-nézet** | session-összesítés, grafikon | közepes | M12-T3 |
+| 9 | **Kereső (több oldal)** | qB-szintű kényelem; plugin-architektúrát igényel | nagy | M13 jelölt |
+
+A #1 a legfontosabb: a #22 lezárása után a nyitott Bugsink-tételek a kiadási
+kapu (hónapokig tartó éles futás) egyetlen ismert akadálya.
