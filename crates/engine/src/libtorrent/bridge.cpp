@@ -146,6 +146,10 @@ struct Session::Impl {
         out.progress = status.progress;
         out.download_rate = static_cast<uint64_t>(std::max(status.download_rate, 0));
         out.upload_rate = static_cast<uint64_t>(std::max(status.upload_rate, 0));
+        // all_time_* survives a restart through the resume data, so the ratio
+        // policy keeps its history.
+        out.uploaded_bytes = status.all_time_upload;
+        out.downloaded_bytes = status.all_time_download;
         out.seeds = status.num_seeds;
         out.peers = status.num_peers;
         // libtorrent 2.0 no longer exposes eta; derive it from the wanted bytes.
@@ -271,6 +275,9 @@ bool Session::pause(uint64_t id) {
     if (it == impl_->handles.end()) {
         return false;
     }
+    // An auto-managed torrent is resumed again by the session's queue on the
+    // next tick, so the pause only sticks once the flag is cleared.
+    it->second.unset_flags(lt::torrent_flags::auto_managed);
     it->second.pause();
     return true;
 }
@@ -280,6 +287,7 @@ bool Session::resume(uint64_t id) {
     if (it == impl_->handles.end()) {
         return false;
     }
+    it->second.set_flags(lt::torrent_flags::auto_managed);
     it->second.resume();
     return true;
 }

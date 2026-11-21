@@ -554,6 +554,8 @@ fn convert_status(status: FfiStatus) -> TorrentStatus {
         progress: status.progress,
         download_rate: status.download_rate,
         upload_rate: status.upload_rate,
+        uploaded_bytes: status.uploaded_bytes,
+        downloaded_bytes: status.downloaded_bytes,
         seeds: status.seeds.max(0).unsigned_abs(),
         peers: status.peers.max(0).unsigned_abs(),
         eta_seconds: u32::try_from(status.eta_seconds.max(0)).unwrap_or(u32::MAX),

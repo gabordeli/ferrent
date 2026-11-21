@@ -425,6 +425,8 @@ mod tests {
             progress: 0.5,
             download_rate: 0,
             upload_rate: 0,
+            uploaded_bytes: 0,
+            downloaded_bytes: 0,
             seeds: 0,
             peers: 0,
             eta_seconds: 0,

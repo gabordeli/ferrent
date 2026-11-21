@@ -11,6 +11,8 @@ pub(crate) mod ffi {
         progress: f32,
         download_rate: u64,
         upload_rate: u64,
+        uploaded_bytes: u64,
+        downloaded_bytes: u64,
         seeds: i32,
         peers: i32,
         eta_seconds: i64,

@@ -48,6 +48,10 @@ pub struct TorrentStatus {
     pub progress: f32,
     pub download_rate: u64,
     pub upload_rate: u64,
+    /// Payload bytes uploaded since the torrent was added (all-time).
+    pub uploaded_bytes: u64,
+    /// Payload bytes downloaded since the torrent was added (all-time).
+    pub downloaded_bytes: u64,
     /// Connected seeds reported by the engine.
     pub seeds: u32,
     /// Connected peers reported by the engine.
