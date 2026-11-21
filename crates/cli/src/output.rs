@@ -74,6 +74,55 @@ pub fn print_page_note(first: u32, last: u32, total: u32) {
     );
 }
 
+/// Dry-run listing for `import-deluge`: torrents first, then the plugin
+/// configs the import would carry over.
+pub fn print_import_table(report: &crate::import_deluge::Report) {
+    outln!("{:>9}  {:<44}  {:<10}  INFOHASH", "SIZE", "NAME", "LABEL");
+    for torrent in &report.torrents {
+        outln!(
+            "{:>9}  {:<44}  {:<10}  {}",
+            format_bytes(torrent.total_bytes),
+            short(&torrent.name, 44),
+            torrent.label.as_deref().unwrap_or("—"),
+            torrent.info_hash
+        );
+    }
+    let labelled = report
+        .torrents
+        .iter()
+        .filter(|torrent| torrent.label.is_some())
+        .count();
+    outln!("\n{} torrents, {labelled} labelled", report.torrents.len());
+
+    let plugins = &report.plugins;
+    outln!(
+        "plugins: label {} label / {} assignment, autoadd {} watch dir, execute {} command, scheduler {}/{} red",
+        plugins.labels.len(),
+        plugins.assignments.len(),
+        plugins.watch_dirs.len(),
+        plugins.commands.len(),
+        plugins.scheduler_red,
+        plugins.scheduler_cells
+    );
+    for dir in &plugins.watch_dirs {
+        outln!(
+            "  autoadd {}{} -> {}",
+            dir.path,
+            if dir.enabled { "" } else { " (disabled)" },
+            dir.download_location.as_deref().unwrap_or("(default)")
+        );
+    }
+    for command in &plugins.commands {
+        outln!("  execute {}: {}", command.event, command.command);
+    }
+    if !report.warnings.is_empty() {
+        outln!("\nwarnings:");
+        for warning in &report.warnings {
+            outln!("  {warning}");
+        }
+    }
+}
+
 pub fn print_torrent(torrent: &Torrent) {
     outln!("id:       {}", torrent.id);
     outln!("name:     {}", torrent.name);
@@ -161,6 +210,15 @@ pub fn state_label(state: i32) -> String {
         .strip_prefix("TORRENT_STATE_")
         .unwrap_or("UNSPECIFIED")
         .to_ascii_lowercase()
+}
+
+fn short(name: &str, max: usize) -> String {
+    if name.chars().count() <= max {
+        return name.to_owned();
+    }
+    let mut text: String = name.chars().take(max.saturating_sub(1)).collect();
+    text.push('…');
+    text
 }
 
 fn format_rate(bytes: u64) -> String {

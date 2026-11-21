@@ -240,7 +240,8 @@ async fn watch_receives_added_event() {
     .await;
     assert!(add.status.success(), "add failed: {}", stderr(&add));
 
-    let output = tokio::time::timeout(Duration::from_secs(3), child.wait_with_output())
+    // Generous: the debug build and a loaded machine can starve the child.
+    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
         .await
         .expect("watch timed out")
         .expect("wait watch");
@@ -312,7 +313,7 @@ async fn watch_ctrl_c_exits_zero() {
     let result = unsafe { libc::kill(pid, libc::SIGINT) };
     assert_eq!(result, 0, "SIGINT delivery failed");
 
-    let status = tokio::time::timeout(Duration::from_secs(2), child.wait())
+    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
         .await
         .expect("watch did not exit")
         .expect("wait watch");

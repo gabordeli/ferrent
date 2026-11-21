@@ -20,6 +20,7 @@ ferrent-protocol = { path = "../protocol" }
 ferrent-telemetry = { path = "../telemetry" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.10"
 tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 toml = "0.8"
 tonic = { version = "0.14", features = ["tls-ring"] }

@@ -1,7 +1,9 @@
 //! `ferrent-cli`: control a Ferrent daemon over TLS.
 
+mod bencode;
 mod config;
 mod error;
+mod import_deluge;
 mod output;
 
 use std::path::PathBuf;
@@ -9,10 +11,10 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest,
-    GetTorrentRequest, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
-    QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest,
-    SetConfigRequest, SortField, WatchRequest,
+    AddTorrentRequest, CreateLabelRequest, GetConfigRequest, GetDisksRequest,
+    GetNotificationStatusRequest, GetTorrentRequest, Label as ProtoLabel, ListTorrentsRequest,
+    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RemoveTorrentRequest,
+    ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -93,6 +95,19 @@ enum Command {
     },
     /// Show the storage payload: filesystems, zones and free space.
     Disks,
+    /// Import a Deluge state directory (torrents and plugin configs).
+    ImportDeluge {
+        /// Deluge state directory, the one holding the `.torrent` files.
+        #[arg(long)]
+        state_dir: PathBuf,
+        /// Directory with `label.conf`, `autoadd.conf`, `execute.conf` and
+        /// `scheduler.conf` (default: the parent of `--state-dir`).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        /// Only list what was found; do not add anything to the daemon.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show one torrent.
     Show {
         /// Torrent id.
@@ -229,7 +244,19 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         command,
     } = cli;
 
+    // A dry run only reads the Deluge state directory, so it must work without
+    // a daemon (or even a configured connection).
+    if let Command::ImportDeluge {
+        state_dir,
+        config_dir,
+        dry_run: true,
+    } = &command
+    {
+        return import_deluge_report(state_dir, config_dir.as_deref(), json);
+    }
+
     let resolved = config::resolve(server, ca, token, config_path)?;
+
     let ca_pem = std::fs::read_to_string(&resolved.ca).map_err(|error| {
         CliError::Config(format!(
             "cannot read CA certificate {}: {error}",
@@ -274,6 +301,85 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 println!("torrent {} is already present", response.id);
             } else {
                 println!("added torrent {}", response.id);
+            }
+        }
+        Command::ImportDeluge {
+            state_dir,
+            config_dir,
+            dry_run: true,
+        } => {
+            import_deluge_report(&state_dir, config_dir.as_deref(), json)?;
+        }
+        Command::ImportDeluge {
+            state_dir,
+            config_dir,
+            dry_run: false,
+        } => {
+            let options = import_deluge::Options {
+                config_dir: config_dir
+                    .unwrap_or_else(|| import_deluge::default_config_dir(&state_dir)),
+                state_dir,
+            };
+            let report = import_deluge::scan(&options).map_err(CliError::Config)?;
+            // A torrent can only be added under an existing label, so the
+            // declared ones are created first (AlreadyExists is fine).
+            for label in &report.plugins.labels {
+                let request = CreateLabelRequest {
+                    label: Some(ProtoLabel {
+                        name: label.name.clone(),
+                        color: label.color.clone(),
+                        ..ProtoLabel::default()
+                    }),
+                };
+                if let Err(error) = client.create_label(request).await {
+                    if error.code() != tonic::Code::AlreadyExists {
+                        eprintln!("label {}: {error}", label.name);
+                    }
+                }
+            }
+            let mut added = 0u32;
+            let mut skipped = 0u32;
+            let mut failed = 0u32;
+            for torrent in &report.torrents {
+                let metainfo = std::fs::read(&torrent.path)?;
+                let response = client
+                    .add_torrent(AddTorrentRequest {
+                        name: torrent.name.clone(),
+                        metainfo,
+                        save_path: String::new(),
+                        total_bytes: torrent.total_bytes,
+                        label: torrent.label.clone().unwrap_or_default(),
+                        magnet: String::new(),
+                    })
+                    .await;
+                match response {
+                    Ok(response) => {
+                        if response.into_inner().duplicate {
+                            skipped += 1;
+                        } else {
+                            added += 1;
+                        }
+                    }
+                    Err(error) => {
+                        failed += 1;
+                        eprintln!("{}: {error}", torrent.name);
+                    }
+                }
+            }
+            if json {
+                output::print_json(&json!({
+                    "found": report.torrents.len(),
+                    "added": added,
+                    "already_present": skipped,
+                    "failed": failed,
+                    "warnings": report.warnings,
+                }));
+            } else {
+                println!(
+                    "imported {added}, already present {skipped}, failed {failed} of {} torrents",
+                    report.torrents.len()
+                );
+                print_import_warnings(&report.warnings);
             }
         }
         Command::List {
@@ -529,4 +635,64 @@ async fn simple_action(
         println!("{} {id}", action.past());
     }
     Ok(())
+}
+
+/// `import-deluge --dry-run`: lists the torrents and the plugin configs the
+/// import would use, without needing a daemon.
+fn import_deluge_report(
+    state_dir: &std::path::Path,
+    config_dir: Option<&std::path::Path>,
+    json: bool,
+) -> Result<(), CliError> {
+    let options = import_deluge::Options {
+        config_dir: config_dir.map_or_else(
+            || import_deluge::default_config_dir(state_dir),
+            std::path::Path::to_path_buf,
+        ),
+        state_dir: state_dir.to_path_buf(),
+    };
+    let report = import_deluge::scan(&options).map_err(CliError::Config)?;
+
+    if json {
+        let torrents: Vec<_> = report
+            .torrents
+            .iter()
+            .map(|torrent| {
+                json!({
+                    "infohash": torrent.info_hash,
+                    "name": torrent.name,
+                    "total_bytes": torrent.total_bytes,
+                    "label": torrent.label,
+                    "path": torrent.path.display().to_string(),
+                })
+            })
+            .collect();
+        output::print_json(&json!({
+            "torrents": torrents,
+            "labels": report
+                .plugins
+                .labels
+                .iter()
+                .map(|label| json!({ "name": label.name, "color": label.color }))
+                .collect::<Vec<_>>(),
+            "assignments": report.plugins.assignments.len(),
+            "watch_dirs": report.plugins.watch_dirs.len(),
+            "commands": report.plugins.commands.len(),
+            "scheduler": {
+                "cells": report.plugins.scheduler_cells,
+                "red": report.plugins.scheduler_red,
+            },
+            "warnings": report.warnings,
+        }));
+        return Ok(());
+    }
+
+    output::print_import_table(&report);
+    Ok(())
+}
+
+fn print_import_warnings(warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
 }
