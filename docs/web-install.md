@@ -29,7 +29,7 @@ key  = "/var/lib/ferrent/web-key.pem"
 names = ["ferrent.local", "192.168.2.65"]   # amit a telefon megnyit
 
 [daemon]
-url  = "https://127.0.0.1:50129"
+url  = "https://localhost:50129"
 ca   = "/var/lib/ferrent/tls-cert.pem"
 token = "…"                    # a daemon tokenje (0640)
 ```
@@ -39,7 +39,12 @@ token = "…"                    # a daemon tokenje (0640)
   fingerprintet**; a telefonon a tanúsítvány-elfogadásnál ez ellenőrizhető.
 - A jelszó a configban él; a session cookie `HttpOnly; SameSite=Strict`, HTTPS
   alatt `Secure`.
-- A daemon **portja ne legyen publikus**: `url` marad `127.0.0.1`.
+- A daemon **portja ne legyen publikus**, és a `url` **`localhost`** legyen:
+  a daemon tanúsítványának SAN-je `localhost` + `ferrent.local`, IP-literal
+  (`https://127.0.0.1:…`) ellen a TLS-ellenőrzés elbukik, a gateway pedig
+  `daemon connect failed: transport error`-t ír.
+- `read_only = true` esetén a pause/add/label mind `403`; ez a „csak nézem”
+  telefonnak vagy egy falikijelzőnek való.
 
 ## 3. Indítás
 
@@ -78,3 +83,19 @@ ufw allow from 192.168.2.0/24 to any port 8443 proto tcp
 A `webui/dist` cseréje után elég a `ferrent-web` újraindítása; a daemon és a
 natív kliensek változatlanok. A cert/key megmarad, a böngésző sessionje is
 (ha a `session_ttl_secs` még él).
+
+## 7. Terhelés-ellenőrzés (M7-T4)
+
+A gateway a 10 000 torrentes katalógust és a három SSE klienst egy órán át
+bírja-e, a `ci/web-soak.sh` méri — maga indít egy demó daemont, három SSE
+klienst és 30 s-onként egy add/remove-ot, majd percenként mintát vesz
+(RSS, nyitott SSE socketek, kliensenkénti eseményszám):
+
+```bash
+cargo build --release -p ferrent-web -p ferrent-gui --example demo_server
+ci/web-soak.sh 3600 10000
+# → /tmp/ferrent-web-soak/gateway.csv
+```
+
+A kapu: RSS < 150 MB és nincs SSE-szivárgás (a socketek száma nem nő). A
+mért értékek a `docs/measurements/webui.md` M4 szakaszában vannak.

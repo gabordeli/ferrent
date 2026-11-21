@@ -42,11 +42,18 @@ Módszer: `demo_server --torrents 10000`, gateway HTTPS-en, 3 SSE kliens +
 
 | Idő | RSS | Megjegyzés |
 |---|---:|---|
-| indulás után ~1 perc | **15,8 MB** | üres gyorsítótár, 10k lista már kiszolgálva |
-| … | *(a futás hátralévő részét a CSV tartalmazza)* | `/tmp/ferrent-web-soak-tls.csv` |
+| indulás után ~1 perc | **8,4 MB** | üres gyorsítótár, 10k lista már kiszolgálva |
+| csúcs | **9,1 MB** | a 10k katalógus első kiszolgálása |
+| 60 perc után | **7,9 MB** | nincs növekedés |
 
-A kapu: **RSS < 150 MB** és nincs SSE-szivárgás (a kliensek száma nem nő).
-A mérés a debug buildre vonatkozik; release-ben az RSS jellemzően kisebb.
+Mérve 2026-11-20 22:13:55–23:14:04, `ci/web-soak.sh 3600 10000`, debug
+build, 61 minta. A 3 kliens **minden percben ugyanannyi** eseményt kapott
+(120), a socketek száma 3–4 (3 SSE + a mintavevő rövid kapcsolata), a
+katalógus 10 000–10 001 (a szándékos add/remove churn).
+
+A kapu: **RSS < 150 MB** és nincs SSE-szivárgás (a kliensek száma nem nő) —
+mindkettő teljesül, ~16× margóval. A mérés a debug buildre vonatkozik;
+release-ben az RSS jellemzően kisebb.
 
 ## Korlátok
 
