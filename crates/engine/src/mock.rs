@@ -121,6 +121,8 @@ fn status_from_spec(id: TorrentId, spec: AddTorrent, infohash: String) -> Torren
         peers: 0,
         eta_seconds: 0,
         queue_position: 0,
+        sequential: false,
+        super_seeding: false,
     }
 }
 

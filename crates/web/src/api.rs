@@ -274,6 +274,9 @@ pub struct AddBody {
     #[serde(default)]
     pub label: String,
     pub total_bytes: Option<u64>,
+    /// Download the pieces in order.
+    #[serde(default)]
+    pub sequential: Option<bool>,
     #[serde(default)]
     pub paused: bool,
 }
@@ -304,6 +307,7 @@ pub async fn add(
             total_bytes: body.total_bytes.unwrap_or(0),
             label: body.label,
             magnet: body.magnet,
+            sequential: body.sequential.unwrap_or(false),
         })
         .await
         .map_err(grpc)?

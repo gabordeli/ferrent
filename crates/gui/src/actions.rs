@@ -100,6 +100,7 @@ pub async fn add(
             total_bytes: 0,
             label: label.to_owned(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;

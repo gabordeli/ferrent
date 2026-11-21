@@ -30,7 +30,8 @@ use ferrent_protocol::v1::{
     RenameTorrentFileRequest, RenameTorrentFileResponse, ResumeTorrentRequest,
     ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
     SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
-    SetFilePrioritiesResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
+    SetFilePrioritiesResponse, SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest,
+    SetSuperSeedingResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
     SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
     TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
     WatchRequest, WatchResponse,
@@ -545,6 +546,13 @@ impl Ferrent for FerrentService {
             if let Err(error) = self.state.publish_event(event).await {
                 eprintln!("hook journal: {error}");
             }
+        }
+        // Sequential mode is a per-torrent flag libtorrent keeps across
+        // restarts through the resume data, so setting it once after the add
+        // is enough (a duplicate keeps whatever it had).
+        if request.sequential && !duplicate {
+            self.with_engine(move |engine| engine.set_sequential(id, true))
+                .await?;
         }
         Ok(Response::new(AddTorrentResponse { id, duplicate }))
     }
@@ -1090,6 +1098,30 @@ impl Ferrent for FerrentService {
         Ok(Response::new(RecheckTorrentResponse {}))
     }
 
+    async fn set_sequential(
+        &self,
+        request: Request<SetSequentialRequest>,
+    ) -> Result<Response<SetSequentialResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let (id, on) = (request.id, request.on);
+        self.with_engine(move |engine| engine.set_sequential(id, on))
+            .await?;
+        Ok(Response::new(SetSequentialResponse {}))
+    }
+
+    async fn set_super_seeding(
+        &self,
+        request: Request<SetSuperSeedingRequest>,
+    ) -> Result<Response<SetSuperSeedingResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let (id, on) = (request.id, request.on);
+        self.with_engine(move |engine| engine.set_super_seeding(id, on))
+            .await?;
+        Ok(Response::new(SetSuperSeedingResponse {}))
+    }
+
     async fn rename_torrent_file(
         &self,
         request: Request<RenameTorrentFileRequest>,
@@ -1563,6 +1595,8 @@ fn to_proto_torrent(status: TorrentStatus) -> Torrent {
         queue_position: status.queue_position,
         pause_reasons: 0,
         label: String::new(),
+        sequential: status.sequential,
+        super_seeding: status.super_seeding,
     }
 }
 
@@ -1975,6 +2009,7 @@ staging = true
                 total_bytes: 1,
                 label: "Filmek".to_owned(),
                 magnet: String::new(),
+                sequential: false,
             }))
             .await
             .expect("add")
@@ -2022,6 +2057,7 @@ staging = true
                 total_bytes: 1,
                 label: String::new(),
                 magnet: String::new(),
+                sequential: false,
             }))
             .await
             .expect_err("low disk");
@@ -2056,6 +2092,7 @@ staging = true
                 total_bytes: u64::MAX / 2,
                 label: String::new(),
                 magnet: String::new(),
+                sequential: false,
             }))
             .await
             .expect_err("payload does not fit");

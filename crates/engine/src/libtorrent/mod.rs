@@ -83,6 +83,16 @@ enum Command {
         id: TorrentId,
         reply: Sender<Result<(), EngineError>>,
     },
+    SetSequential {
+        id: TorrentId,
+        on: bool,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    SetSuperSeeding {
+        id: TorrentId,
+        on: bool,
+        reply: Sender<Result<(), EngineError>>,
+    },
     RenameFile {
         id: TorrentId,
         index: usize,
@@ -264,6 +274,18 @@ impl TorrentEngine for LibtorrentEngine {
     fn force_recheck(&mut self, id: TorrentId) -> Result<(), EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::ForceRecheck { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn set_sequential(&mut self, id: TorrentId, on: bool) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetSequential { id, on, reply })?;
+        Self::recv(response)
+    }
+
+    fn set_super_seeding(&mut self, id: TorrentId, on: bool) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetSuperSeeding { id, on, reply })?;
         Self::recv(response)
     }
 
@@ -540,6 +562,22 @@ fn run_worker(
                 };
                 let _ = reply.send(result);
             }
+            Ok(Command::SetSequential { id, on, reply }) => {
+                let result = if session.pin_mut().set_sequential(id, on) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
+            Ok(Command::SetSuperSeeding { id, on, reply }) => {
+                let result = if session.pin_mut().set_super_seeding(id, on) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
             Ok(Command::RenameFile {
                 id,
                 index,
@@ -711,6 +749,8 @@ fn convert_status(status: FfiStatus) -> TorrentStatus {
         peers: status.peers.max(0).unsigned_abs(),
         eta_seconds: u32::try_from(status.eta_seconds.max(0)).unwrap_or(u32::MAX),
         queue_position: status.queue_position,
+        sequential: status.sequential,
+        super_seeding: status.super_seeding,
     }
 }
 

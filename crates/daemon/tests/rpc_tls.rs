@@ -106,6 +106,7 @@ async fn tls_auth_and_crud() {
             total_bytes: 123,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("add")
@@ -120,6 +121,7 @@ async fn tls_auth_and_crud() {
             total_bytes: 123,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("duplicate add")
@@ -227,6 +229,7 @@ async fn label_crud_assignment_and_filter() {
             total_bytes: 1,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("add auto")
@@ -239,6 +242,7 @@ async fn label_crud_assignment_and_filter() {
             total_bytes: 1,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("add other")
@@ -380,6 +384,7 @@ async fn watch_streams_added_and_stays_idle() {
             total_bytes: 1,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("add");
@@ -512,6 +517,7 @@ async fn file_priorities_are_validated_against_the_file_count() {
             total_bytes: 10,
             label: String::new(),
             magnet: String::new(),
+            sequential: false,
         })
         .await
         .expect("add")

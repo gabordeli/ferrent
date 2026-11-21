@@ -33,6 +33,8 @@ service Ferrent {
 
   // Re-verifies the existing data against the piece hashes.
   rpc RecheckTorrent(RecheckTorrentRequest) returns (RecheckTorrentResponse);
+  rpc SetSequential(SetSequentialRequest) returns (SetSequentialResponse);
+  rpc SetSuperSeeding(SetSuperSeedingRequest) returns (SetSuperSeedingResponse);
 
   // Renames one file inside a torrent (index from GetTorrentFiles).
   rpc RenameTorrentFile(RenameTorrentFileRequest) returns (RenameTorrentFileResponse);
@@ -202,6 +204,8 @@ message AddTorrentRequest {
   string label = 5;
   // Magnet URI; used when `metainfo` is empty.
   string magnet = 6;
+  // Download the pieces in order (streaming-friendly).
+  bool sequential = 7;
 }
 
 // Response with the engine-assigned torrent id.
@@ -469,6 +473,10 @@ message Torrent {
   uint32 pause_reasons = 15;
   // Assigned label name; empty when unlabelled.
   string label = 16;
+  // Pieces are requested in order (streaming mode).
+  bool sequential = 17;
+  // The torrent seeds without advertising itself as a full seed.
+  bool super_seeding = 18;
 }
 
 // Sort key for the torrent list.
@@ -650,6 +658,24 @@ message RecheckTorrentRequest {
 }
 
 message RecheckTorrentResponse {}
+
+message SetSequentialRequest {
+  // Torrent id.
+  uint64 id = 1;
+  // Download the pieces in order.
+  bool on = 2;
+}
+
+message SetSequentialResponse {}
+
+message SetSuperSeedingRequest {
+  // Torrent id.
+  uint64 id = 1;
+  // Seed without advertising a full copy.
+  bool on = 2;
+}
+
+message SetSuperSeedingResponse {}
 
 message RenameTorrentFileRequest {
   uint64 id = 1;

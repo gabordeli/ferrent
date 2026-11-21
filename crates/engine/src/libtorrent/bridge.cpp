@@ -195,6 +195,8 @@ struct Session::Impl {
                               : -1;
         out.error = status.errc ? rust::String(status.errc.message()) : rust::String();
         out.queue_position = static_cast<int>(status.queue_position);
+        out.sequential = handle.is_sequential_download();
+        out.super_seeding = handle.super_seeding();
         return out;
     }
 };
@@ -554,6 +556,24 @@ bool Session::force_recheck(uint64_t id) {
         return false;
     }
     it->second.force_recheck();
+    return true;
+}
+
+bool Session::set_sequential(uint64_t id, bool on) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.set_sequential_download(on);
+    return true;
+}
+
+bool Session::set_super_seeding(uint64_t id, bool on) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.super_seeding(on);
     return true;
 }
 

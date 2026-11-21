@@ -51,6 +51,8 @@ class Session {
     FfiStatus status(uint64_t id) const;
     rust::Vec<FfiFile> files(uint64_t id) const;
     bool force_recheck(uint64_t id);
+    bool set_sequential(uint64_t id, bool on);
+    bool set_super_seeding(uint64_t id, bool on);
     bool rename_file(uint64_t id, int32_t index, rust::Str name);
     bool set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities);
     rust::Vec<FfiPeer> peers(uint64_t id) const;

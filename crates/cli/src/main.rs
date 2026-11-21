@@ -73,6 +73,9 @@ enum Command {
         /// Label of the torrent; its staging folder receives the download.
         #[arg(long, default_value = "")]
         label: String,
+        /// Download the pieces in order (streaming-friendly).
+        #[arg(long)]
+        sequential: bool,
     },
     /// List torrents.
     List {
@@ -410,6 +413,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             name,
             save_path,
             label,
+            sequential,
         } => {
             let metainfo = std::fs::read(&file)?;
             let name = name.unwrap_or_else(|| {
@@ -425,6 +429,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     total_bytes: 0,
                     label,
                     magnet: String::new(),
+                    sequential,
                 })
                 .await?
                 .into_inner();
@@ -486,6 +491,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                         total_bytes: torrent.total_bytes,
                         label: torrent.label.clone().unwrap_or_default(),
                         magnet: String::new(),
+                        sequential: false,
                     })
                     .await;
                 match response {

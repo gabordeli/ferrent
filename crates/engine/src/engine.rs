@@ -104,6 +104,18 @@ pub trait TorrentEngine: Send + 'static {
         Ok(())
     }
 
+    /// Downloads the pieces in order, which makes streaming possible.
+    fn set_sequential(&mut self, id: TorrentId, on: bool) -> Result<(), EngineError> {
+        let _ = (id, on);
+        Ok(())
+    }
+
+    /// Turns super-seeding on or off for one torrent.
+    fn set_super_seeding(&mut self, id: TorrentId, on: bool) -> Result<(), EngineError> {
+        let _ = (id, on);
+        Ok(())
+    }
+
     /// Builds a .torrent for a path on the engine host.
     fn create_torrent(
         &mut self,

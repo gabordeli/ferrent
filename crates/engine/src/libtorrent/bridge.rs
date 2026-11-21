@@ -18,6 +18,8 @@ pub(crate) mod ffi {
         eta_seconds: i64,
         error: String,
         queue_position: i32,
+        sequential: bool,
+        super_seeding: bool,
     }
 
     struct FfiAddResult {
@@ -135,6 +137,8 @@ pub(crate) mod ffi {
         fn list(self: &Session) -> Vec<FfiStatus>;
         fn files(self: &Session, id: u64) -> Vec<FfiFile>;
         fn force_recheck(self: Pin<&mut Session>, id: u64) -> bool;
+        fn set_sequential(self: Pin<&mut Session>, id: u64, on: bool) -> bool;
+        fn set_super_seeding(self: Pin<&mut Session>, id: u64, on: bool) -> bool;
         fn rename_file(self: Pin<&mut Session>, id: u64, index: i32, name: &str) -> bool;
         fn set_file_priorities(self: Pin<&mut Session>, id: u64, priorities: &[i32]) -> bool;
         fn peers(self: &Session, id: u64) -> Vec<FfiPeer>;

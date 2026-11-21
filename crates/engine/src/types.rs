@@ -60,6 +60,10 @@ pub struct TorrentStatus {
     pub eta_seconds: u32,
     /// Position in the download queue; negative when the engine has none.
     pub queue_position: i32,
+    /// Pieces are requested in order (streaming mode).
+    pub sequential: bool,
+    /// The torrent seeds without advertising itself as a full seed.
+    pub super_seeding: bool,
 }
 
 /// Direction of a queue move.

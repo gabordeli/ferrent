@@ -154,6 +154,8 @@ mod tests {
             peers,
             eta_seconds: 0,
             queue_position: -1,
+            sequential: false,
+            super_seeding: false,
         }
     }
 
