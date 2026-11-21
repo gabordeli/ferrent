@@ -1,12 +1,14 @@
 # Ferrent
 
-Deluge-utód Rustban: `ferrentd` daemon + natív `ferrent-gui` thin client,
-`libtorrent` motorral, 4 000 torrentes célra.
+Deluge-utód Rustban: `ferrentd` daemon + natív `ferrent-gui` thin client +
+`ferrent-web` gateway, `libtorrent` motorral, 4 000 torrentes célra.
 
 - Architektúra: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Roadmap: [ROADMAP.md](ROADMAP.md)
 - GUI használat: [docs/gui.md](docs/gui.md)
 - CLI: [docs/cli.md](docs/cli.md)
+- Web gateway (REST + SSE + SPA): [docs/web-api.md](docs/web-api.md)
+- Deluge ↔ Ferrent feature-mátrix: [docs/feature-matrix.md](docs/feature-matrix.md)
 - MVP mérés: [docs/measurements/mvp.md](docs/measurements/mvp.md)
 
 ## Gyors indítás (Debian 13)
@@ -53,6 +55,8 @@ A GUI profil mezői:
 - CA: `/tmp/ferrent-demo/tls-cert.pem`
 - API token: `secret`
 
+Ha még nincs mentett profil, induláskor a Servers modal nyílik, ahol a
+fenti mezők kitölthetők; mentett profil esetén a GUI azonnal csatlakozik.
 Első csatlakozáskor a fingerprint dialóguson kell jóváhagyni a daemont.
 Utána jön a virtualizált tábla; a szűrő, rendezés, Details panel és a
 jobb klikkes műveletek használhatók.
@@ -73,20 +77,28 @@ FERRENT_DATA_DIR=/tmp/ferrent-data FERRENT_TOKEN=secret \
 
 A GUI-hoz ilyenkor `https://localhost:50051` és
 `/tmp/ferrent-data/tls-cert.pem` kell. A `.deb`-et a
-`cargo deb -p ferrent-daemon --features libtorrent` állítja elő; a
-telepített változat configja `/etc/ferrent/config.toml`, a tokenje
-`/etc/ferrent/token`.
+`packaging/debian/build.sh` állítja elő (konténerben, statikusan linkelt
+libtorrenttel); a telepített változat configja `/etc/ferrent/config.toml`,
+a tokenje `/etc/ferrent/token`.
 
-## Jelenlegi állapot (MVP, v0.1.0 előkészületben)
+## Jelenlegi állapot (0.1.2)
 
 - 4 000 torrent betölthető; a state mirror és a gRPC API a 4 000 soros
-  terhelés alatt is a keretben marad.
-- A GUI virtualizált táblát, szerveroldali szűrést/rendezést, valamint
-  pause/resume/remove műveleteket ad.
+  terhelés alatt is a keretben marad
+  ([mérés](docs/measurements/mvp.md)).
+- A GUI virtualizált táblát, szerveroldali szűrést/rendezést, sor-menüt,
+  fájlprioritást, címkéket, trackereket/web seedeket és statisztikát ad;
+  pause/resume/remove, recheck és fájl-átnevezés is elérhető.
 - Fastresume restart: a daemon leállításkor a resume adatokat a redb-be
   menti; a következő indulás recheck nélkül áll vissza.
-- A 4 000 torrentes mérés és a 24 órás soak részletei:
-  [docs/measurements/mvp.md](docs/measurements/mvp.md).
+- Daemon-oldalon kész az ütemező, a DiskGuard (zónák + staging), az
+  RSS-figyelő, a webhook/Telegram értesítés, az IP-blokklista és a
+  qBittorrent-kompatibilis API (`*arr` kliensekhez).
+- `ferrent-web`: REST + SSE + SPA gateway
+  ([docs/web-api.md](docs/web-api.md)).
+- A GUI és a CLI magyar és angol nyelven fut.
+- A teljes Deluge-összevetés:
+  [docs/feature-matrix.md](docs/feature-matrix.md).
 
 ## Hibajelentés
 
@@ -102,16 +114,18 @@ A fejlesztés a saját GitLabon folyik; a `gabordeli/ferrent` GitHub repó
 portolása a maintainer dolga. A CI-k, a tükör jogosultságai és az APT
 repó (GitHub Pages) beállítása: [docs/ci.md](docs/ci.md).
 
-A repó a `v0.1.0` kiadásig **privát** marad: a kiadási kapu hónapokig tartó
-éles torrentes futás, közben a Bugsinkben látszó hibák javításával.
+A repó egyelőre **privát**; a nyilvános kiadás kapuja hónapokig tartó éles
+torrentes futás, közben a Bugsinkben látszó hibák javításával.
 
-## Ismert korlátok (MVP)
+## Ismert korlátok
 
-- Nincs `.deb`/APT/Docker csomagolás, Deluge-import és `*arr` API (v1.0).
+- Nincs kicsomagoló (extractor), beépített kereső, HTTP streaming és
+  uTorrent-import; a Deluge-import viszont kész
+  (`ferrent-cli import-deluge`).
 - A `.torrent` hozzáadás save pathja a **daemon hostján** értelmezett;
   a GUI nem ellenőrzi, hogy létezik-e.
 - A GUI `STATE` oszlopa nem rendezhető szerveroldalon; a támogatott
-  rendezési kulcsok: id, name, progress, download, upload.
+  rendezési kulcsok: id, name, label, progress, download, upload, queue.
 - A token plaintext a `0600` configban (keyring későbbi).
 - A TLS tanúsítvány SAN-je `localhost` és `ferrent.local`; távoli gépről
   a `ferrent.local` név (vagy egy megfelelő hosts bejegyzés) szükséges.
@@ -120,5 +134,5 @@ A repó a `v0.1.0` kiadásig **privát** marad: a kiadási kapu hónapokig tart�
 
 ## Licenc
 
-A repó `MIT OR Apache-2.0` döntés előtt áll; a `Cargo.toml` jelenleg a
-workspace licencmezőjét használja.
+A repó `MIT OR Apache-2.0` kettős licenc alatt áll; a részletek a
+[LICENSE](LICENSE) fájlban.
