@@ -14,9 +14,9 @@ use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
     GetNotificationStatusRequest, GetRssStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
     GetTorrentTrackersRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
-    PauseTorrentRequest, QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SortField,
-    WatchRequest,
+    PauseTorrentRequest, QueueDirection, RecheckTorrentRequest, RemoveTorrentRequest,
+    RenameTorrentFileRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
+    SetFilePrioritiesRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -131,6 +131,20 @@ enum Command {
     },
     /// Show the RSS watcher status.
     Rss,
+    /// Ask the daemon to verify the existing data against the hashes.
+    Recheck {
+        /// Torrent id.
+        id: u64,
+    },
+    /// Rename one file inside a torrent.
+    RenameFile {
+        /// Torrent id.
+        id: u64,
+        /// Zero-based file index (see `files`).
+        index: u32,
+        /// New base name; must not contain '/'.
+        name: String,
+    },
     /// List the trackers of one torrent.
     Trackers {
         /// Torrent id.
@@ -553,6 +567,24 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_json(&output::rss_json(&feeds));
             } else {
                 output::print_rss(&feeds);
+            }
+        }
+        Command::Recheck { id } => {
+            client.recheck_torrent(RecheckTorrentRequest { id }).await?;
+            if !json {
+                println!("recheck requested for torrent {id}");
+            }
+        }
+        Command::RenameFile { id, index, name } => {
+            let files = client
+                .rename_torrent_file(RenameTorrentFileRequest { id, index, name })
+                .await?
+                .into_inner()
+                .files;
+            if json {
+                output::print_json(&output::files_json(&files));
+            } else {
+                output::print_files(&files);
             }
         }
         Command::Trackers { id } => {

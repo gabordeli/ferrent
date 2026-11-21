@@ -25,9 +25,10 @@ use ferrent_protocol::v1::{
     GetTorrentTrackersResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry,
     LabelResponse, ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest,
     ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
-    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
-    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse,
-    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
+    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RecheckTorrentRequest,
+    RecheckTorrentResponse, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
+    RenameTorrentFileRequest, RenameTorrentFileResponse, ResumeTorrentRequest,
+    ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
     SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
     SetFilePrioritiesResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
     SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
@@ -1075,6 +1076,59 @@ impl Ferrent for FerrentService {
         Ok(Response::new(CreateTorrentResponse {
             metainfo: created.metainfo,
             infohash: created.infohash,
+        }))
+    }
+
+    async fn recheck_torrent(
+        &self,
+        request: Request<RecheckTorrentRequest>,
+    ) -> Result<Response<RecheckTorrentResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let id = request.into_inner().id;
+        self.with_engine(move |engine| engine.force_recheck(id))
+            .await?;
+        Ok(Response::new(RecheckTorrentResponse {}))
+    }
+
+    async fn rename_torrent_file(
+        &self,
+        request: Request<RenameTorrentFileRequest>,
+    ) -> Result<Response<RenameTorrentFileResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let name = request.name.trim().to_owned();
+        if name.is_empty() || name.contains('/') {
+            return Err(Status::invalid_argument(
+                "the new file name must be non-empty and contain no '/'",
+            ));
+        }
+        let id = request.id;
+        let index = request.index as usize;
+        let files = self
+            .with_engine(move |engine| {
+                let current = engine.files(id)?;
+                if index >= current.len() {
+                    return Err(EngineError::Rejected {
+                        reason: format!(
+                            "file index {index} is out of range (0..{})",
+                            current.len()
+                        ),
+                    });
+                }
+                engine.rename_file(id, index, &name)?;
+                engine.files(id)
+            })
+            .await?;
+        Ok(Response::new(RenameTorrentFileResponse {
+            files: files
+                .into_iter()
+                .map(|file| TorrentFile {
+                    path: file.path,
+                    size: file.size,
+                    progress: file.progress,
+                    priority: file.priority,
+                })
+                .collect(),
         }))
     }
 

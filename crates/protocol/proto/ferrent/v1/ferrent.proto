@@ -30,6 +30,12 @@ service Ferrent {
 
   // Per-feed state of the RSS watcher.
   rpc GetRssStatus(GetRssStatusRequest) returns (GetRssStatusResponse);
+
+  // Re-verifies the existing data against the piece hashes.
+  rpc RecheckTorrent(RecheckTorrentRequest) returns (RecheckTorrentResponse);
+
+  // Renames one file inside a torrent (index from GetTorrentFiles).
+  rpc RenameTorrentFile(RenameTorrentFileRequest) returns (RenameTorrentFileResponse);
   // Returns the connected peers of one torrent.
   rpc GetTorrentPeers(GetTorrentPeersRequest) returns (GetTorrentPeersResponse);
   // Returns the trackers of one torrent.
@@ -637,6 +643,24 @@ message RssFeed {
 
 message GetRssStatusResponse {
   repeated RssFeed feeds = 1;
+}
+
+message RecheckTorrentRequest {
+  uint64 id = 1;
+}
+
+message RecheckTorrentResponse {}
+
+message RenameTorrentFileRequest {
+  uint64 id = 1;
+  // Zero-based index, in the order of GetTorrentFiles.
+  uint32 index = 2;
+  // New path relative to the torrent root; no '/' allowed for now.
+  string name = 3;
+}
+
+message RenameTorrentFileResponse {
+  repeated TorrentFile files = 1;
 }
 
 // One connected peer.
