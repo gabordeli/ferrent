@@ -26,17 +26,18 @@ use ferrent_protocol::v1::{
     GetTorrentTrackersResponse, GetWebSeedsRequest, GetWebSeedsResponse, HookRun as ProtoHookRun,
     Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest, ListLabelsResponse,
     ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse,
-    PauseTorrentRequest, PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection,
-    RecheckTorrentRequest, RecheckTorrentResponse, RefreshBlocklistRequest,
-    RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse, RemoveTrackerRequest,
-    RemoveTrackerResponse, Removed, RenameTorrentFileRequest, RenameTorrentFileResponse,
-    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
-    SendTestNotificationRequest, SendTestNotificationResponse, SetConfigRequest, SetConfigResponse,
-    SetFilePrioritiesRequest, SetFilePrioritiesResponse, SetSequentialRequest,
-    SetSequentialResponse, SetSuperSeedingRequest, SetSuperSeedingResponse, SetTorrentLabelRequest,
-    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest,
-    SetWebSeedsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
-    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
+    PauseTorrentRequest, PauseTorrentResponse, PreviewRssFeedRequest, PreviewRssFeedResponse,
+    Progress, QueueDirection as ProtoQueueDirection, RecheckTorrentRequest, RecheckTorrentResponse,
+    RefreshBlocklistRequest, RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse,
+    RemoveTrackerRequest, RemoveTrackerResponse, Removed, RenameTorrentFileRequest,
+    RenameTorrentFileResponse, ResumeTorrentRequest, ResumeTorrentResponse, RssPreviewItem,
+    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
+    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
+    SetFilePrioritiesResponse, SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest,
+    SetSuperSeedingResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
+    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse,
+    SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState,
+    TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -1318,6 +1319,32 @@ impl Ferrent for FerrentService {
             .map(|feed| feed.to_proto())
             .collect();
         Ok(Response::new(GetRssStatusResponse { feeds }))
+    }
+
+    async fn preview_rss_feed(
+        &self,
+        request: Request<PreviewRssFeedRequest>,
+    ) -> Result<Response<PreviewRssFeedResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let report = self
+            .state
+            .rss_preview(&request.url, &request.filter)
+            .await
+            .map_err(Status::invalid_argument)?;
+        Ok(Response::new(PreviewRssFeedResponse {
+            total: report.total,
+            items: report
+                .items
+                .into_iter()
+                .map(|item| RssPreviewItem {
+                    title: item.title,
+                    torrent_url: item.torrent_url,
+                    matched: item.matched,
+                    reason: item.reason,
+                })
+                .collect(),
+        }))
     }
 
     async fn get_torrent_peers(

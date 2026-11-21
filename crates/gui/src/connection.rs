@@ -10,11 +10,12 @@ use ferrent_protocol::v1::{
     GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest, GetHookStatusRequest,
     GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest, GetStatusRequest,
     GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
-    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest,
-    RefreshBlocklistRequest, RemoveTrackerRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
-    SetSuperSeedingRequest, SetTorrentLabelRequest, SetWebSeedsRequest, SortField, Torrent,
-    TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
+    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, PreviewRssFeedRequest,
+    RecheckTorrentRequest, RefreshBlocklistRequest, RemoveTrackerRequest, RenameTorrentFileRequest,
+    RssPreviewItem, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
+    SetFilePrioritiesRequest, SetSequentialRequest, SetSuperSeedingRequest, SetTorrentLabelRequest,
+    SetWebSeedsRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
+    UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -372,6 +373,24 @@ pub async fn rss_status(client: &AuthClient) -> Result<Vec<ferrent_protocol::v1:
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.feeds)
+}
+
+/// What the daemon would add from one feed with the given title filter.
+pub async fn rss_preview(
+    client: &AuthClient,
+    url: &str,
+    filter: &str,
+) -> Result<(u32, Vec<RssPreviewItem>), String> {
+    let mut client = client.clone();
+    let response = client
+        .preview_rss_feed(PreviewRssFeedRequest {
+            url: url.to_owned(),
+            filter: filter.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok((response.total, response.items))
 }
 
 /// Builds a .torrent for a path on the daemon host.

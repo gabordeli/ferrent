@@ -2589,6 +2589,12 @@ pub struct Settings {
     pub rss: RssForm,
     pub rss_baseline: RssForm,
     pub rss_selected: Option<usize>,
+    /// Last preview: the feed's item count and the classified items.
+    pub rss_preview: Option<(u32, Vec<ferrent_protocol::v1::RssPreviewItem>)>,
+    /// The URL and filter that produced the preview above.
+    pub rss_preview_for: Option<(String, String)>,
+    pub rss_preview_error: Option<String>,
+    pub rss_preview_loading: bool,
 }
 
 impl Default for Settings {
@@ -2633,6 +2639,10 @@ impl Default for Settings {
             rss: RssForm::default(),
             rss_baseline: RssForm::default(),
             rss_selected: None,
+            rss_preview: None,
+            rss_preview_for: None,
+            rss_preview_error: None,
+            rss_preview_loading: false,
         }
     }
 }
@@ -2671,6 +2681,10 @@ impl Settings {
         self.rss_baseline = rss.clone();
         self.rss = rss;
         self.rss_selected = None;
+        self.rss_preview = None;
+        self.rss_preview_for = None;
+        self.rss_preview_error = None;
+        self.rss_preview_loading = false;
         self.zone_selected = None;
         self.notify_selected = None;
         self.notify_telegram = None;

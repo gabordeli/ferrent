@@ -31,6 +31,9 @@ service Ferrent {
   // Per-feed state of the RSS watcher.
   rpc GetRssStatus(GetRssStatusRequest) returns (GetRssStatusResponse);
 
+  // Fetches one feed and reports what the watcher would add from it.
+  rpc PreviewRssFeed(PreviewRssFeedRequest) returns (PreviewRssFeedResponse);
+
   // Re-verifies the existing data against the piece hashes.
   rpc RecheckTorrent(RecheckTorrentRequest) returns (RecheckTorrentResponse);
   rpc SetSequential(SetSequentialRequest) returns (SetSequentialResponse);
@@ -668,6 +671,29 @@ message RssFeed {
 
 message GetRssStatusResponse {
   repeated RssFeed feeds = 1;
+}
+
+message PreviewRssFeedRequest {
+  // Feed URL to fetch; the daemon applies the watcher's user agent and timeout.
+  string url = 1;
+  // Title regex; empty means every torrent item matches.
+  string filter = 2;
+}
+
+message RssPreviewItem {
+  string title = 1;
+  // The link the watcher would download; empty when the item carries none.
+  string torrent_url = 2;
+  // The item is a torrent and passes the filter.
+  bool matched = 3;
+  // Why it is skipped: "not a torrent" or "filter"; empty when matched.
+  string reason = 4;
+}
+
+message PreviewRssFeedResponse {
+  repeated RssPreviewItem items = 1;
+  // Items in the feed before filtering.
+  uint32 total = 2;
 }
 
 message RecheckTorrentRequest {

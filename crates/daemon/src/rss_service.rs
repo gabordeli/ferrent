@@ -56,6 +56,90 @@ fn meta_key(name: &str, feed: &str) -> String {
     format!("rss-{name}:{feed}")
 }
 
+/// One item of a previewed feed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreviewItem {
+    pub title: String,
+    /// The URL the watcher would download; empty when the item has none.
+    pub torrent_url: String,
+    /// The item is a torrent and passes the title filter.
+    pub matched: bool,
+    /// Empty when matched, otherwise `not a torrent` or `filter`.
+    pub reason: String,
+}
+
+/// A preview fetch: every item, and whether the watcher would add it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreviewReport {
+    pub total: u32,
+    pub items: Vec<PreviewItem>,
+}
+
+/// Classifies parsed items against the title filter.
+///
+/// Mirrors `poll_feed`: a candidate needs a torrent/magnet URL first, then the
+/// filter runs on the title. Pure, so it is testable without a network.
+#[must_use]
+pub fn classify(items: Vec<rss::Item>, filter: Option<&regex::Regex>) -> PreviewReport {
+    let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
+    let items = items
+        .into_iter()
+        .map(|item| {
+            let torrent_url = item.torrent_url().trim().to_owned();
+            if !rss::looks_like_torrent(&torrent_url) {
+                PreviewItem {
+                    title: item.title,
+                    torrent_url,
+                    matched: false,
+                    reason: "not a torrent".to_owned(),
+                }
+            } else if filter.is_some_and(|filter| !filter.is_match(&item.title)) {
+                PreviewItem {
+                    title: item.title,
+                    torrent_url,
+                    matched: false,
+                    reason: "filter".to_owned(),
+                }
+            } else {
+                PreviewItem {
+                    title: item.title,
+                    torrent_url,
+                    matched: true,
+                    reason: String::new(),
+                }
+            }
+        })
+        .collect();
+    PreviewReport { total, items }
+}
+
+impl AppState {
+    /// Fetches one feed and reports what the watcher would add from it.
+    pub async fn rss_preview(&self, url: &str, filter: &str) -> Result<PreviewReport, String> {
+        let url = url.trim().to_owned();
+        if url.is_empty() {
+            return Err("feed URL is empty".to_owned());
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("feed URL must start with http:// or https://".to_owned());
+        }
+        let regex = if filter.trim().is_empty() {
+            None
+        } else {
+            Some(regex::Regex::new(filter.trim()).map_err(|error| format!("filter: {error}"))?)
+        };
+        let target = url.clone();
+        let fetched = tokio::task::spawn_blocking(move || {
+            rss::fetch(&target, None, None, Duration::from_secs(20))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("fetch: {error}"))?;
+        let items = rss::parse(&fetched.body)?;
+        Ok(classify(items, regex.as_ref()))
+    }
+}
+
 impl AppState {
     /// Reads the stored status of every configured feed.
     pub fn rss_status(&self) -> Vec<FeedStatus> {
@@ -387,5 +471,32 @@ mod tests {
             }])
             .expect("write");
         assert_eq!(store.list("rss-seen:https://f:").expect("list").len(), 1);
+    }
+
+    #[test]
+    fn preview_classifies_torrents_and_the_filter() {
+        let item = |title: &str, link: &str, enclosure: &str| rss::Item {
+            title: title.to_owned(),
+            id: title.to_owned(),
+            link: link.to_owned(),
+            enclosure: enclosure.to_owned(),
+        };
+        let items = vec![
+            item("Movie.2024.1080p", "", "https://x/a.torrent"),
+            item("Movie.2024.720p", "", "https://x/b.torrent"),
+            item("An article", "https://x/page", ""),
+            item("Magnet.2024.1080p", "magnet:?xt=urn:btih:abc", ""),
+        ];
+        let filter = regex::Regex::new("1080p").expect("regex");
+        let report = classify(items, Some(&filter));
+        assert_eq!(report.total, 4);
+        assert!(report.items[0].matched);
+        assert_eq!(report.items[1].reason, "filter");
+        assert_eq!(report.items[2].reason, "not a torrent");
+        assert!(report.items[3].matched);
+
+        // An empty filter keeps every torrent.
+        let report = classify(vec![item("Anything", "", "https://x/c.torrent")], None);
+        assert!(report.items[0].matched);
     }
 }

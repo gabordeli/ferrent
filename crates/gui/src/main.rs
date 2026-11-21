@@ -249,6 +249,8 @@ enum Message {
     RssFeedEnabled(bool),
     RssPoll(String),
     RssWatcherEnabled(bool),
+    RssPreview,
+    RssPreviewed(Result<(u32, Vec<ferrent_protocol::v1::RssPreviewItem>), String>),
     HooksSelected(usize),
     HooksAdd,
     HooksRemove,
@@ -1282,6 +1284,8 @@ impl App {
                 if index < self.settings.rss.rows.len() {
                     self.settings.rss_selected = Some(index);
                 }
+                self.settings.rss_preview = None;
+                self.settings.rss_preview_error = None;
                 Task::none()
             }
             Message::RssAdd => {
@@ -1295,6 +1299,41 @@ impl App {
             Message::RssField(field, value) => {
                 if let Some(row) = self.settings.selected_rss_mut() {
                     row.set(field, value);
+                }
+                // Keep the preview block on screen while typing; removing it
+                // here rebuilds the tree and steals focus from the input.
+                Task::none()
+            }
+            Message::RssPreview => {
+                let Some(row) = self.settings.selected_rss() else {
+                    return Task::none();
+                };
+                let Some(client) = self.client.clone() else {
+                    self.settings.rss_preview_error = Some(i18n::t("Not connected").to_owned());
+                    return Task::none();
+                };
+                let url = row.url.clone();
+                let filter = row.filter.clone();
+                self.settings.rss_preview_loading = true;
+                self.settings.rss_preview_error = None;
+                self.settings.rss_preview_for = Some((url.clone(), filter.clone()));
+                Task::perform(
+                    async move { connection::rss_preview(&client, &url, &filter).await },
+                    Message::RssPreviewed,
+                )
+            }
+            Message::RssPreviewed(result) => {
+                self.settings.rss_preview_loading = false;
+                match result {
+                    Ok((total, items)) => {
+                        self.settings.rss_preview = Some((total, items));
+                        self.settings.rss_preview_error = None;
+                    }
+                    Err(error) => {
+                        self.settings.rss_preview = None;
+                        self.settings.rss_preview_for = None;
+                        self.settings.rss_preview_error = Some(error);
+                    }
                 }
                 Task::none()
             }
@@ -4423,7 +4462,7 @@ impl App {
                             &if feed.last_poll == 0 {
                                 i18n::t("never").to_owned()
                             } else {
-                                feed.last_poll.to_string()
+                                relative_epoch(feed.last_poll)
                             },
                         ],
                     ))
@@ -4565,10 +4604,11 @@ impl App {
 
     fn rss_editor_view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
+        let dim = theme::text_muted();
         let Some(row) = settings.selected_rss() else {
             return text("").size(1).into();
         };
-        column![
+        let mut editor = column![
             rss_field_view(row, RssField::Url, "https://example.org/feed.xml"),
             row![
                 rss_field_view(row, RssField::Label, "movies"),
@@ -4576,14 +4616,112 @@ impl App {
             ]
             .spacing(8),
             rss_field_view(row, RssField::Filter, "2160p"),
-            checkbox(i18n::t("Enabled"), row.enabled)
-                .on_toggle(Message::RssFeedEnabled)
-                .size(14)
-                .text_size(12),
+            row![
+                checkbox(i18n::t("Enabled"), row.enabled)
+                    .on_toggle(Message::RssFeedEnabled)
+                    .size(14)
+                    .text_size(12),
+                action_button(
+                    i18n::t("Preview"),
+                    Message::RssPreview,
+                    !settings.rss_preview_loading && !row.url.trim().is_empty(),
+                ),
+                horizontal_space(),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(10)
-        .max_width(560.0)
-        .into()
+        .spacing(10);
+
+        if settings.rss_preview_loading {
+            editor = editor.push(text(i18n::t("Downloading the feed…")).size(11).color(dim));
+        }
+        if let Some(error) = &settings.rss_preview_error {
+            editor = editor.push(
+                text(i18n::t_fmt("Preview failed: {}", &[error]))
+                    .size(11)
+                    .color(theme::error()),
+            );
+        }
+        if let Some((total, items)) = &settings.rss_preview {
+            let matched = items.iter().filter(|item| item.matched).count();
+            editor = editor.push(
+                text(i18n::t_fmt(
+                    "{} items · {} would be added",
+                    &[&total.to_string(), &matched.to_string()],
+                ))
+                .size(11)
+                .color(theme::text_secondary()),
+            );
+            let stale = settings
+                .rss_preview_for
+                .as_ref()
+                .is_none_or(|(url, filter)| url != row.url.trim() || filter != row.filter.trim());
+            editor = editor.push(
+                text(if stale {
+                    i18n::t("The feed or filter changed; run the preview again.")
+                } else {
+                    " "
+                })
+                .size(10)
+                .color(theme::queued()),
+            );
+            if items.is_empty() {
+                editor = editor.push(text(i18n::t("No items in this feed.")).size(11).color(dim));
+            } else {
+                let rows: Vec<Element<Message>> = items
+                    .iter()
+                    .map(|item| {
+                        let reason = if item.matched {
+                            String::new()
+                        } else if item.reason == "filter" {
+                            i18n::t("title does not match the filter").to_owned()
+                        } else {
+                            i18n::t("no .torrent link").to_owned()
+                        };
+                        let mut info = column![
+                            text(&item.title).size(11).width(Length::Fill),
+                            text(&item.torrent_url)
+                                .size(9)
+                                .color(dim)
+                                .width(Length::Fill),
+                        ]
+                        .spacing(1)
+                        .width(Length::Fill);
+                        if !reason.is_empty() {
+                            info = info.push(text(reason).size(10).color(dim));
+                        }
+                        row![
+                            text(if item.matched {
+                                glyph::CHECK
+                            } else {
+                                glyph::CLOSE
+                            })
+                            .font(icons::solid())
+                            .size(11.0)
+                            .color(if item.matched {
+                                theme::downloading()
+                            } else {
+                                dim
+                            }),
+                            info,
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center)
+                        .into()
+                    })
+                    .collect();
+                editor = editor.push(
+                    container(
+                        scrollable(WidgetColumn::with_children(rows).spacing(3))
+                            .height(Length::Fixed(190.0)),
+                    )
+                    .padding([4, 0]),
+                );
+            }
+        }
+
+        editor.padding([0, 10]).max_width(560.0).into()
     }
 
     fn settings_appearance_view(&self) -> Element<'_, Message> {
@@ -6709,9 +6847,16 @@ fn rss_field_view<'a>(
     field: RssField,
     placeholder: &'a str,
 ) -> Element<'a, Message> {
+    let id = match field {
+        RssField::Url => "rss-url",
+        RssField::Label => "rss-label",
+        RssField::SavePath => "rss-save-path",
+        RssField::Filter => "rss-filter",
+    };
     column![
         text(field.label()).size(11).color(theme::text_muted()),
         text_input(placeholder, row.text(field))
+            .id(iced::widget::text_input::Id::new(id))
             .style(muted_input_style)
             .padding([4, 8])
             .size(12)
@@ -7591,6 +7736,24 @@ fn format_size(bytes: u64) -> String {
         format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// A unix timestamp as a short age: `12 s`, `3 min`, `5 h`, `2 d`.
+fn relative_epoch(epoch: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    let secs = now.saturating_sub(epoch);
+    if secs < 60 {
+        format!("{secs} s")
+    } else if secs < 3600 {
+        format!("{} min", secs / 60)
+    } else if secs < 86_400 {
+        format!("{} h", secs / 3600)
+    } else {
+        format!("{} d", secs / 86_400)
     }
 }
 
