@@ -26,6 +26,17 @@ token_file = "/etc/ferrent/token"
 # outgoing_interfaces = "wg0"
 # watch_interface = "wg0"
 # grace_secs = 60
+# Outbound proxy: none | http | http_pw | socks5 | socks5_pw
+# proxy_type = "socks5"
+# proxy_host = "127.0.0.1"
+# proxy_port = 1080
+# proxy_username = ""
+# proxy_password = ""
+# proxy_peer_connections = true
+# Peer encryption: enabled | forced | disabled
+# encryption = "enabled"
+# upnp = true
+# natpmp = true
 
 # Optional Prometheus endpoint (M8-T4). Off by default; a token requires
 # `Authorization: Bearer <token>` on every scrape.
