@@ -51,6 +51,8 @@ pub struct FileConfig {
     pub network: NetworkConfig,
     /// Optional Prometheus endpoint (M8-T4).
     pub metrics: MetricsConfig,
+    /// Client-API emulations (M8-T2).
+    pub compat: CompatConfig,
 }
 
 /// Interface binding (M8-T4).
@@ -88,6 +90,50 @@ impl NetworkConfig {
         }
         if !self.watch_interface.is_empty() && self.watch_interface.contains(['/', ':', ' ']) {
             return Err("network.watch_interface must be a plain interface name".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Client-API emulations. Off by default; each one binds its own port.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CompatConfig {
+    pub qbittorrent: QbittorrentConfig,
+}
+
+/// qBittorrent Web API v2 emulation for Sonarr/Radarr (M8-T2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QbittorrentConfig {
+    pub enabled: bool,
+    pub listen: String,
+    /// Empty username means "no login required" (loopback only, please).
+    pub username: String,
+    pub password: String,
+    /// Category name → save path, exposed through `torrents/categories`.
+    pub category_paths: std::collections::BTreeMap<String, String>,
+}
+
+impl Default for QbittorrentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: "127.0.0.1:8090".to_owned(),
+            username: "admin".to_owned(),
+            password: String::new(),
+            category_paths: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl QbittorrentConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && !self.listen.contains(':') {
+            return Err("compat.qbittorrent.listen must be host:port".to_owned());
+        }
+        if self.enabled && self.username.is_empty() && self.password.is_empty() {
+            eprintln!("warning: compat.qbittorrent has no credentials; keep it on loopback");
         }
         Ok(())
     }
@@ -507,6 +553,7 @@ impl FileConfig {
             ratio: self.ratio.clone(),
             network: self.network.clone(),
             metrics: self.metrics.clone(),
+            compat: self.compat.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -531,6 +578,7 @@ pub struct ResolvedConfig {
     pub ratio: RatioConfig,
     pub network: NetworkConfig,
     pub metrics: MetricsConfig,
+    pub compat: CompatConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -554,6 +602,10 @@ impl ResolvedConfig {
         self.ratio.validate().map_err(ConfigError::invalid)?;
         self.network.validate().map_err(ConfigError::invalid)?;
         self.metrics.validate().map_err(ConfigError::invalid)?;
+        self.compat
+            .qbittorrent
+            .validate()
+            .map_err(ConfigError::invalid)?;
         Ok(())
     }
 }

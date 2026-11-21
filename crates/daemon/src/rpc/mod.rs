@@ -1265,6 +1265,7 @@ pub async fn serve(
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
     crate::automation::ratio::spawn_ratio(Arc::clone(&state));
     crate::netbind::spawn_netbind(Arc::clone(&state));
+    tokio::spawn(crate::compat::qbittorrent::serve(Arc::clone(&state)));
     if let Ok(config) = state.config.resolved() {
         if config.metrics.enabled {
             let listen = config.metrics.listen.clone();
@@ -1422,6 +1423,7 @@ fn to_proto_watch(event: EngineEvent) -> WatchResponse {
             download_rate,
             upload_rate,
             queue_position,
+            ..
         } => WatchEvent::Progress(Progress {
             id,
             progress,
