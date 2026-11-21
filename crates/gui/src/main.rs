@@ -124,7 +124,6 @@ enum Message {
     Field(Field, String),
     SaveProfile,
     Connect,
-    Disconnect,
     TrustFingerprint,
     CancelFingerprint,
     Connected(u64, Result<ClientHandle, String>),
@@ -365,8 +364,8 @@ impl Modal {
             Self::Settings => "Settings",
             Self::AddTorrent => "Add torrent",
             Self::Remove => "Remove torrents",
-            Self::SetLabel => "Set label",
-            Self::Rename => "Rename file",
+            Self::SetLabel => i18n::t("Set label"),
+            Self::Rename => i18n::t("Rename file"),
         }
     }
 
@@ -638,15 +637,6 @@ impl App {
                 Task::none()
             }
             Message::Connect => self.connect_clicked(),
-            Message::Disconnect => {
-                self.generation += 1;
-                self.client = None;
-                self.server_status = None;
-                self.reset_page();
-                self.state = ConnectionState::Offline;
-                self.status = "Disconnected".to_owned();
-                Task::none()
-            }
             Message::TrustFingerprint => self.trust_fingerprint(),
             Message::CancelFingerprint => {
                 self.pending = None;
@@ -4923,7 +4913,7 @@ impl App {
                     .size(11)
                     .color(theme::queued())
                     .width(Length::Fill),
-                action_button("Cancel", Message::LabelDeleteCancelled, true),
+                action_button(i18n::t("Cancel"), Message::LabelDeleteCancelled, true),
                 danger_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
             ]
             .spacing(8)
@@ -4951,7 +4941,7 @@ impl App {
             .map(|torrent| torrent.label.clone())
             .unwrap_or_default();
         let mut rows: Vec<Element<Message>> = vec![label_choice(
-            "None".to_owned(),
+            i18n::t("None").to_owned(),
             current.is_empty(),
             Message::ChooseLabel(None),
         )];
@@ -4963,9 +4953,12 @@ impl App {
             )
         }));
         let body = column![
-            text(format!("{} torrent(s) selected", self.selected.len()))
-                .size(12)
-                .color(theme::text_secondary()),
+            text(i18n::t_fmt(
+                "{} torrent(s) selected",
+                &[&self.selected.len().to_string()]
+            ))
+            .size(12)
+            .color(theme::text_secondary()),
             if self.settings.labels.is_empty() {
                 Element::from(
                     text(i18n::t(
@@ -4980,7 +4973,7 @@ impl App {
             },
             row![
                 horizontal_space(),
-                action_button("Cancel", Message::CloseModal, true),
+                action_button(i18n::t("Cancel"), Message::CloseModal, true),
             ],
         ]
         .spacing(10)
@@ -5048,9 +5041,9 @@ impl App {
             error,
             row![
                 horizontal_space(),
-                action_button("Cancel", Message::CloseModal, true),
+                action_button(i18n::t("Cancel"), Message::CloseModal, true),
                 action_button(
-                    "Rename",
+                    i18n::t("Rename"),
                     Message::RenameConfirmed,
                     self.rename_index.is_some() && !self.rename_in_flight,
                 ),
@@ -5064,7 +5057,7 @@ impl App {
 
     fn add_torrent_view(&self) -> Element<'_, Message> {
         let mut labels: Vec<Element<Message>> = vec![label_choice(
-            "None".to_owned(),
+            i18n::t("None").to_owned(),
             self.add_label.is_empty(),
             Message::AddLabelChanged(String::new()),
         )];
@@ -5127,7 +5120,7 @@ impl App {
                 .width(Length::Fill),
             row![
                 horizontal_space(),
-                action_button("Cancel", Message::CloseModal, true),
+                action_button(i18n::t("Cancel"), Message::CloseModal, true),
                 action_button("Add torrent", Message::AddConfirmed, !self.add_in_flight),
             ]
             .spacing(8)
@@ -5160,7 +5153,7 @@ impl App {
                 .on_toggle(Message::ToggleRemoveFiles),
             row![
                 horizontal_space(),
-                action_button("Cancel", Message::CloseModal, true),
+                action_button(i18n::t("Cancel"), Message::CloseModal, true),
                 action_button("Remove", Message::RemoveConfirmed, true),
             ]
             .spacing(8)
@@ -5426,7 +5419,7 @@ impl App {
                 pinned,
                 row![
                     button("Trust and connect").on_press(Message::TrustFingerprint),
-                    button("Cancel").on_press(Message::CancelFingerprint),
+                    button(i18n::t("Cancel")).on_press(Message::CancelFingerprint),
                 ]
                 .spacing(8),
             ]
