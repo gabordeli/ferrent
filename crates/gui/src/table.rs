@@ -920,14 +920,14 @@ fn short_name(name: &str, max: usize) -> String {
 #[must_use]
 pub fn state_label(state: i32) -> &'static str {
     match TorrentState::try_from(state).unwrap_or(TorrentState::Unspecified) {
-        TorrentState::Unspecified => "unknown",
-        TorrentState::Queued => "queued",
-        TorrentState::Checking => "checking",
-        TorrentState::Downloading => "downloading",
-        TorrentState::Seeding => "seeding",
-        TorrentState::Paused => "paused",
-        TorrentState::Moving => "moving",
-        TorrentState::Error => "error",
+        TorrentState::Unspecified => crate::i18n::t("unknown"),
+        TorrentState::Queued => crate::i18n::t("queued"),
+        TorrentState::Checking => crate::i18n::t("checking"),
+        TorrentState::Downloading => crate::i18n::t("downloading"),
+        TorrentState::Seeding => crate::i18n::t("seeding"),
+        TorrentState::Paused => crate::i18n::t("paused"),
+        TorrentState::Moving => crate::i18n::t("moving"),
+        TorrentState::Error => crate::i18n::t("error"),
     }
 }
 

@@ -71,6 +71,18 @@ pub fn t(english: &'static str) -> &'static str {
     }
 }
 
+/// Translates a message with `{}` placeholders, filled left to right.
+#[must_use]
+pub fn t_fmt(english: &'static str, args: &[&str]) -> String {
+    let mut text = t(english).to_owned();
+    for value in args {
+        if let Some(position) = text.find("{}") {
+            text.replace_range(position..position + 2, value);
+        }
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +105,22 @@ mod tests {
         assert_eq!(Lang::parse("EN-GB"), Lang::En);
         assert_eq!(Lang::parse("hu"), Lang::Hu);
         assert_eq!(Lang::parse("de"), Lang::Hu);
+    }
+
+    #[test]
+    fn placeholders_are_filled() {
+        install(Lang::Hu);
+        assert_eq!(t_fmt("{} active", &["5"]), "5 aktív");
+        assert_eq!(
+            t_fmt(
+                "{} torrents · ↓ {} · ↑ {} · {} free",
+                &["13", "1.2 KiB/s", "8.7 KiB/s", "12.1 GiB"]
+            ),
+            "13 torrent · ↓ 1.2 KiB/s · ↑ 8.7 KiB/s · 12.1 GiB szabad"
+        );
+        install(Lang::En);
+        assert_eq!(t_fmt("{} active", &["5"]), "5 active");
+        install(Lang::Hu);
     }
 
     #[test]

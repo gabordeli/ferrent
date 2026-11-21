@@ -4646,12 +4646,14 @@ impl App {
                         glyph::CHECK,
                         theme::downloading(),
                         "available",
-                        format!(
+                        i18n::t_fmt(
                             "{} torrents · ↓ {} · ↑ {} · {} free",
-                            status.torrent_count,
-                            table::format_rate(status.download_rate),
-                            table::format_rate(status.upload_rate),
-                            format_size(status.free_space_bytes)
+                            &[
+                                &status.torrent_count.to_string(),
+                                &table::format_rate(status.download_rate),
+                                &table::format_rate(status.upload_rate),
+                                &format_size(status.free_space_bytes),
+                            ],
                         ),
                     ),
                     (None, Some(error)) => (glyph::ERROR, theme::error(), "error", error.clone()),
@@ -5020,13 +5022,13 @@ impl App {
             button(
                 column![
                     text(if zoned_count == 1 {
-                        "1 disk".to_owned()
+                        i18n::t("1 disk").to_owned()
                     } else {
-                        format!("{zoned_count} disks")
+                        i18n::t_fmt("{} disks", &[&zoned_count.to_string()])
                     })
                     .size(10)
                     .color(theme::text_muted()),
-                    text(format!("{} free", format_size(zoned_free)))
+                    text(i18n::t_fmt("{} free", &[&format_size(zoned_free)]))
                         .size(10)
                         .color(if zoned_low {
                             theme::error()
@@ -5729,10 +5731,10 @@ impl App {
                 horizontal_space(),
                 text(format!("↓ {}", table::format_rate(down))).size(11),
                 text(format!("↑ {}", table::format_rate(up))).size(11),
-                text(format!("{active} active"))
+                text(i18n::t_fmt("{} active", &[&active.to_string()]))
                     .size(11)
                     .color(theme::text_secondary()),
-                text(format!("{total} torrents"))
+                text(i18n::t_fmt("{} torrents", &[&total.to_string()]))
                     .size(11)
                     .color(theme::text_secondary()),
             ]
@@ -6453,11 +6455,11 @@ fn status_numbers(
 
 fn state_style(state: ConnectionState) -> (&'static str, Color) {
     match state {
-        ConnectionState::Idle => ("idle", theme::text_muted()),
-        ConnectionState::Connecting => ("connecting", theme::connecting()),
-        ConnectionState::Connected => ("connected", theme::downloading()),
-        ConnectionState::Reconnecting => ("reconnecting", theme::connecting()),
-        ConnectionState::Offline => ("offline", theme::text_muted()),
+        ConnectionState::Idle => (i18n::t("idle"), theme::text_muted()),
+        ConnectionState::Connecting => (i18n::t("connecting"), theme::connecting()),
+        ConnectionState::Connected => (i18n::t("connected"), theme::downloading()),
+        ConnectionState::Reconnecting => (i18n::t("reconnecting"), theme::connecting()),
+        ConnectionState::Offline => (i18n::t("offline"), theme::text_muted()),
     }
 }
 
