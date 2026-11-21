@@ -14,27 +14,28 @@ use ferrent_engine::{
 use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
-    CreateTorrentRequest, CreateTorrentResponse, DeleteLabelRequest, DeleteLabelResponse,
-    Disk as ProtoDisk, DiskZone as ProtoDiskZone, GetAutoAddStatusRequest,
-    GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse, GetDisksRequest,
-    GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse, GetNotificationStatusRequest,
-    GetNotificationStatusResponse, GetRssStatusRequest, GetRssStatusResponse, GetStatusRequest,
-    GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
-    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
-    GetTorrentTrackersResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry,
-    LabelResponse, ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest,
-    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
-    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RecheckTorrentRequest,
-    RecheckTorrentResponse, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
-    RenameTorrentFileRequest, RenameTorrentFileResponse, ResumeTorrentRequest,
+    AddTorrentRequest, AddTorrentResponse, AddTrackerRequest, AddTrackerResponse, AutoAddDirStatus,
+    ConfigChanged, CreateLabelRequest, CreateTorrentRequest, CreateTorrentResponse,
+    DeleteLabelRequest, DeleteLabelResponse, Disk as ProtoDisk, DiskZone as ProtoDiskZone,
+    GetAutoAddStatusRequest, GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse,
+    GetDisksRequest, GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse,
+    GetNotificationStatusRequest, GetNotificationStatusResponse, GetRssStatusRequest,
+    GetRssStatusResponse, GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest,
+    GetTorrentFilesResponse, GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest,
+    GetTorrentResponse, GetTorrentTrackersRequest, GetTorrentTrackersResponse, GetWebSeedsRequest,
+    GetWebSeedsResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry, LabelResponse,
+    ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse,
+    MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
+    QueueDirection as ProtoQueueDirection, RecheckTorrentRequest, RecheckTorrentResponse,
+    RemoveTorrentRequest, RemoveTorrentResponse, RemoveTrackerRequest, RemoveTrackerResponse,
+    Removed, RenameTorrentFileRequest, RenameTorrentFileResponse, ResumeTorrentRequest,
     ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
     SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
     SetFilePrioritiesResponse, SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest,
     SetSuperSeedingResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
-    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
-    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
-    WatchRequest, WatchResponse,
+    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse,
+    SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState,
+    TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -1134,6 +1135,62 @@ impl Ferrent for FerrentService {
         Ok(Response::new(SetSuperSeedingResponse {}))
     }
 
+    async fn add_tracker(
+        &self,
+        request: Request<AddTrackerRequest>,
+    ) -> Result<Response<AddTrackerResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let url = announce_url(&request.url)?;
+        let id = request.id;
+        self.with_engine(move |engine| engine.add_tracker(id, &url))
+            .await?;
+        Ok(Response::new(AddTrackerResponse {}))
+    }
+
+    async fn remove_tracker(
+        &self,
+        request: Request<RemoveTrackerRequest>,
+    ) -> Result<Response<RemoveTrackerResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let url = announce_url(&request.url)?;
+        let id = request.id;
+        self.with_engine(move |engine| engine.remove_tracker(id, &url))
+            .await?;
+        Ok(Response::new(RemoveTrackerResponse {}))
+    }
+
+    async fn get_web_seeds(
+        &self,
+        request: Request<GetWebSeedsRequest>,
+    ) -> Result<Response<GetWebSeedsResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let id = request.into_inner().id;
+        let urls = self.with_engine(move |engine| engine.web_seeds(id)).await?;
+        Ok(Response::new(GetWebSeedsResponse { urls }))
+    }
+
+    async fn set_web_seeds(
+        &self,
+        request: Request<SetWebSeedsRequest>,
+    ) -> Result<Response<SetWebSeedsResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let mut urls = Vec::with_capacity(request.urls.len());
+        for raw in &request.urls {
+            urls.push(web_seed_url(raw)?);
+        }
+        let id = request.id;
+        let applied = self
+            .with_engine(move |engine| {
+                engine.set_web_seeds(id, &urls)?;
+                engine.web_seeds(id)
+            })
+            .await?;
+        Ok(Response::new(SetWebSeedsResponse { urls: applied }))
+    }
+
     async fn rename_torrent_file(
         &self,
         request: Request<RenameTorrentFileRequest>,
@@ -1533,6 +1590,34 @@ pub fn spawn_engine_watcher(state: Arc<AppState>) -> tokio::task::JoinHandle<()>
             }
         }
     })
+}
+
+/// Rejects announce URLs no tracker could ever answer.
+fn announce_url(raw: &str) -> Result<String, Status> {
+    let url = raw.trim().to_owned();
+    let host = ["http://", "https://", "udp://", "ws://"]
+        .iter()
+        .find_map(|scheme| url.strip_prefix(scheme));
+    match host {
+        Some(host) if !host.is_empty() && !host.starts_with('/') => Ok(url),
+        _ => Err(Status::invalid_argument(format!(
+            "the tracker URL must be http(s), udp or ws with a host: {url:?}"
+        ))),
+    }
+}
+
+/// Web seeds are HTTP(S) mirrors; anything else libtorrent ignores.
+fn web_seed_url(raw: &str) -> Result<String, Status> {
+    let url = raw.trim().to_owned();
+    let host = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"));
+    match host {
+        Some(host) if !host.is_empty() && !host.starts_with('/') => Ok(url),
+        _ => Err(Status::invalid_argument(format!(
+            "a web seed must be an http(s) URL with a host: {url:?}"
+        ))),
+    }
 }
 
 fn engine_status(error: EngineError) -> Status {
@@ -2186,5 +2271,34 @@ staging = true
         assert!(!disk.low, "plenty of space");
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn announce_urls_need_a_scheme_and_a_host() {
+        for good in [
+            "http://tracker.example/announce",
+            "https://tracker.example:443/announce",
+            "udp://tracker.example:1337",
+            "ws://localhost:8080/announce",
+        ] {
+            assert!(announce_url(good).is_ok(), "{good}");
+        }
+        for bad in ["", "not-a-url", "http://", "ftp://tracker.example/a"] {
+            assert!(announce_url(bad).is_err(), "{bad}");
+        }
+        // Surrounding whitespace is trimmed, not rejected.
+        assert_eq!(
+            announce_url("  http://t.example/a  ").expect("trim"),
+            "http://t.example/a"
+        );
+    }
+
+    #[test]
+    fn web_seeds_must_be_http() {
+        assert!(web_seed_url("http://mirror.example/files/").is_ok());
+        assert!(web_seed_url("https://mirror.example/files/").is_ok());
+        assert!(web_seed_url("udp://mirror.example/files/").is_err());
+        assert!(web_seed_url("https://").is_err());
+        assert!(web_seed_url("mirror.example/files/").is_err());
     }
 }

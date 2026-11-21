@@ -6,14 +6,15 @@ use std::path::PathBuf;
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
-    CreateLabelRequest, CreateTorrentRequest, DeleteLabelRequest, GetAutoAddStatusRequest,
-    GetConfigRequest, GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest,
-    GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
-    GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
-    RecheckTorrentRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
-    SetSuperSeedingRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
-    TorrentTracker, UpdateLabelRequest,
+    AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest, DeleteLabelRequest,
+    GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest, GetHookStatusRequest,
+    GetNotificationStatusRequest, GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest,
+    GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest, Label, LabelEntry,
+    ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest, RemoveTrackerRequest,
+    RenameTorrentFileRequest, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
+    SetFilePrioritiesRequest, SetSequentialRequest, SetSuperSeedingRequest, SetTorrentLabelRequest,
+    SetWebSeedsRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
+    UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -239,6 +240,58 @@ pub async fn trackers(client: &AuthClient, id: u64) -> Result<Vec<TorrentTracker
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.trackers)
+}
+
+/// Adds one announce URL to a torrent.
+pub async fn add_tracker(client: &AuthClient, id: u64, url: &str) -> Result<(), String> {
+    let mut client = client.clone();
+    client
+        .add_tracker(AddTrackerRequest {
+            id,
+            url: url.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
+    Ok(())
+}
+
+/// Removes one announce URL from a torrent.
+pub async fn remove_tracker(client: &AuthClient, id: u64, url: &str) -> Result<(), String> {
+    let mut client = client.clone();
+    client
+        .remove_tracker(RemoveTrackerRequest {
+            id,
+            url: url.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
+    Ok(())
+}
+
+/// Fetches the web seeds of one torrent.
+pub async fn web_seeds(client: &AuthClient, id: u64) -> Result<Vec<String>, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_web_seeds(GetWebSeedsRequest { id })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.urls)
+}
+
+/// Replaces the web seed list and returns what the engine kept.
+pub async fn set_web_seeds(
+    client: &AuthClient,
+    id: u64,
+    urls: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let mut client = client.clone();
+    let response = client
+        .set_web_seeds(SetWebSeedsRequest { id, urls })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.urls)
 }
 
 /// Replaces the per-file priorities and returns the refreshed file list.

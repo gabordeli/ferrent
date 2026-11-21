@@ -36,6 +36,13 @@ service Ferrent {
   rpc SetSequential(SetSequentialRequest) returns (SetSequentialResponse);
   rpc SetSuperSeeding(SetSuperSeedingRequest) returns (SetSuperSeedingResponse);
 
+  // Adds or removes one announce URL on a torrent.
+  rpc AddTracker(AddTrackerRequest) returns (AddTrackerResponse);
+  rpc RemoveTracker(RemoveTrackerRequest) returns (RemoveTrackerResponse);
+  // Reads or replaces the web seed (HTTP mirror) list of one torrent.
+  rpc GetWebSeeds(GetWebSeedsRequest) returns (GetWebSeedsResponse);
+  rpc SetWebSeeds(SetWebSeedsRequest) returns (SetWebSeedsResponse);
+
   // Renames one file inside a torrent (index from GetTorrentFiles).
   rpc RenameTorrentFile(RenameTorrentFileRequest) returns (RenameTorrentFileResponse);
   // Returns the connected peers of one torrent.
@@ -676,6 +683,42 @@ message SetSuperSeedingRequest {
 }
 
 message SetSuperSeedingResponse {}
+
+message AddTrackerRequest {
+  uint64 id = 1;
+  // Announce URL (http, https, udp or ws scheme).
+  string url = 2;
+}
+
+message AddTrackerResponse {}
+
+message RemoveTrackerRequest {
+  uint64 id = 1;
+  // The announce URL to drop from the torrent.
+  string url = 2;
+}
+
+message RemoveTrackerResponse {}
+
+message GetWebSeedsRequest {
+  uint64 id = 1;
+}
+
+message GetWebSeedsResponse {
+  // Web seed URLs, in the order libtorrent reports them.
+  repeated string urls = 1;
+}
+
+message SetWebSeedsRequest {
+  uint64 id = 1;
+  // Replaces the whole list; an empty list clears it.
+  repeated string urls = 2;
+}
+
+message SetWebSeedsResponse {
+  // The list the engine holds after the change.
+  repeated string urls = 1;
+}
 
 message RenameTorrentFileRequest {
   uint64 id = 1;

@@ -577,6 +577,82 @@ bool Session::set_super_seeding(uint64_t id, bool on) {
     return true;
 }
 
+bool Session::add_tracker(uint64_t id, rust::Str url) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    std::string text(url);
+    if (text.empty()) {
+        return false;
+    }
+    it->second.add_tracker(lt::announce_entry(text));
+    return true;
+}
+
+bool Session::remove_tracker(uint64_t id, rust::Str url) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    std::string target(url);
+    std::vector<lt::announce_entry> kept;
+    bool removed = false;
+    for (auto const &entry : it->second.trackers()) {
+        if (entry.url == target) {
+            removed = true;
+            continue;
+        }
+        kept.push_back(entry);
+    }
+    if (!removed) {
+        return false;
+    }
+    it->second.replace_trackers(kept);
+    return true;
+}
+
+rust::Vec<rust::String> Session::web_seeds(uint64_t id) const {
+    rust::Vec<rust::String> out;
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return out;
+    }
+    for (auto const &seed : it->second.url_seeds()) {
+        out.push_back(rust::String(seed));
+    }
+    return out;
+}
+
+bool Session::set_web_seeds(uint64_t id, rust::Str urls) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    // The whole set is replaced: drop what libtorrent holds, then add the
+    // requested URLs in order.
+    for (auto const &seed : it->second.url_seeds()) {
+        it->second.remove_url_seed(seed);
+    }
+    std::string text(urls);
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        auto end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        auto url = text.substr(start, end - start);
+        if (!url.empty()) {
+            it->second.add_url_seed(url);
+        }
+        if (end == text.size()) {
+            break;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
 bool Session::rename_file(uint64_t id, int32_t index, rust::Str name) {
     auto it = impl_->handles.find(id);
     if (it == impl_->handles.end()) {

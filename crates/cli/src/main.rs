@@ -11,12 +11,13 @@ use std::path::PathBuf;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, CreateLabelRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
-    GetNotificationStatusRequest, GetRssStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
-    GetTorrentTrackersRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
-    PauseTorrentRequest, QueueDirection, RecheckTorrentRequest, RemoveTorrentRequest,
+    AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest,
+    GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest, GetRssStatusRequest,
+    GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
+    Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
+    QueueDirection, RecheckTorrentRequest, RemoveTorrentRequest, RemoveTrackerRequest,
     RenameTorrentFileRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
-    SetFilePrioritiesRequest, SortField, WatchRequest,
+    SetFilePrioritiesRequest, SetWebSeedsRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -152,6 +153,21 @@ enum Command {
     Trackers {
         /// Torrent id.
         id: u64,
+        /// Add this announce URL before listing.
+        #[arg(long)]
+        add: Option<String>,
+        /// Remove this announce URL before listing.
+        #[arg(long)]
+        remove: Option<String>,
+    },
+    /// List the web seeds of one torrent; `--set` replaces the list.
+    #[command(name = "webseeds", visible_alias = "web-seeds")]
+    WebSeeds {
+        /// Torrent id.
+        id: u64,
+        /// Comma-separated URLs; an empty value clears the list.
+        #[arg(long)]
+        set: Option<String>,
     },
     /// List the files of one torrent; `--set` changes their priorities.
     Files {
@@ -643,7 +659,15 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_files(&files);
             }
         }
-        Command::Trackers { id } => {
+        Command::Trackers { id, add, remove } => {
+            if let Some(url) = add {
+                client.add_tracker(AddTrackerRequest { id, url }).await?;
+            }
+            if let Some(url) = remove {
+                client
+                    .remove_tracker(RemoveTrackerRequest { id, url })
+                    .await?;
+            }
             let trackers = client
                 .get_torrent_trackers(GetTorrentTrackersRequest { id })
                 .await?
@@ -653,6 +677,39 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_json(&output::trackers_json(&trackers));
             } else {
                 output::print_trackers(&trackers);
+            }
+        }
+        Command::WebSeeds { id, set } => {
+            let urls = match set {
+                Some(spec) => {
+                    let urls: Vec<String> = spec
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|url| !url.is_empty())
+                        .map(str::to_owned)
+                        .collect();
+                    client
+                        .set_web_seeds(SetWebSeedsRequest { id, urls })
+                        .await?
+                        .into_inner()
+                        .urls
+                }
+                None => {
+                    client
+                        .get_web_seeds(GetWebSeedsRequest { id })
+                        .await?
+                        .into_inner()
+                        .urls
+                }
+            };
+            if json {
+                output::print_json(&json!({ "id": id, "web_seeds": urls }));
+            } else if urls.is_empty() {
+                println!("no web seeds");
+            } else {
+                for url in urls {
+                    println!("{url}");
+                }
             }
         }
         Command::Files { id, set } => {

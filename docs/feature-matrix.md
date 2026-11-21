@@ -147,8 +147,8 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Force recheck** | ✅ | ✅ | ✅ | ✅ | sor-menü + `ferrent-cli recheck` (M11-T4) |
 | **Átnevezés** (torrent/fájl) | ✅ | ✅ | ✅ | 🟡 | fájlnév a torrenten belül (sor-menü + CLI); torrent-név még nincs |
 | **Temp / incomplete mappa** | ✅ | ✅ | ✅ | ✅ | `[session] temp_dir`: a payload oda megy, befejezéskor a zónába/download_dir-be mozdul (M12-T1) |
-| **Tracker szerkesztés** | ✅ | ✅ | ✅ | ❌ | tracker hozzáadás/törlés torrentenként |
-| **Web seed kezelés** | ✅ | rész | rész | 🟡 | libtorrent tudja, nincs felület |
+| **Tracker szerkesztés** | ✅ | ✅ | ✅ | ✅ | Trackers fül: hozzáadás/törlés + CLI `trackers --add/--remove` (M12-T2) |
+| **Web seed kezelés** | ✅ | rész | rész | ✅ | Trackers fül + `webseeds <id> [--set …]` (M12-T2) |
 | **Sequential download** | ✅ | ❌ | ✅ | ✅ | sor-menü + `add --sequential` (M12-T1) |
 | **Super-seeding** | ✅ | ❌ | ✅ | ✅ | sor-menü, torrentenként (M12-T1) |
 | **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ❌ | blokklista + `ip_filter` |

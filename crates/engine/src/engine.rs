@@ -116,6 +116,30 @@ pub trait TorrentEngine: Send + 'static {
         Ok(())
     }
 
+    /// Adds one announce URL to a torrent.
+    fn add_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        let _ = (id, url);
+        Ok(())
+    }
+
+    /// Removes one announce URL from a torrent.
+    fn remove_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        let _ = (id, url);
+        Ok(())
+    }
+
+    /// The torrent's web seeds (HTTP mirrors declared in the metainfo).
+    fn web_seeds(&mut self, id: TorrentId) -> Result<Vec<String>, EngineError> {
+        let _ = id;
+        Ok(Vec::new())
+    }
+
+    /// Replaces every web seed of a torrent.
+    fn set_web_seeds(&mut self, id: TorrentId, urls: &[String]) -> Result<(), EngineError> {
+        let _ = (id, urls);
+        Ok(())
+    }
+
     /// Builds a .torrent for a path on the engine host.
     fn create_torrent(
         &mut self,

@@ -143,6 +143,15 @@ enum Message {
     RenameFinished(Result<Vec<TorrentFile>, String>),
     RecheckFinished(Result<(), String>),
     FlagFinished(Result<(), String>),
+    TrackerDraftChanged(String),
+    TrackerAdded,
+    TrackerRemoved(String),
+    WebSeedDraftChanged(String),
+    WebSeedAdded,
+    WebSeedRemoved(String),
+    WebSeedsLoaded(Result<Vec<String>, String>),
+    WebSeedsSaved(Result<Vec<String>, String>),
+    TrackersEdited(Result<(), String>),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -435,6 +444,9 @@ struct App {
     rename_value: String,
     rename_error: Option<String>,
     rename_in_flight: bool,
+    tracker_draft: String,
+    webseed_draft: String,
+    web_seeds: Vec<String>,
     activity: ActivityLog,
 
     modifiers: Modifiers,
@@ -537,6 +549,9 @@ impl Default for App {
             rename_value: String::new(),
             rename_error: None,
             rename_in_flight: false,
+            tracker_draft: String::new(),
+            webseed_draft: String::new(),
+            web_seeds: Vec::new(),
             activity: ActivityLog::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
@@ -777,6 +792,77 @@ impl App {
                     self.set_notice(error);
                 }
                 self.refresh_page()
+            }
+            Message::TrackerDraftChanged(value) => {
+                self.tracker_draft = value;
+                Task::none()
+            }
+            Message::TrackerAdded => {
+                let Some(id) = self.details_for else {
+                    return Task::none();
+                };
+                let url = self.tracker_draft.trim().to_owned();
+                if url.is_empty() {
+                    return Task::none();
+                }
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                self.tracker_draft.clear();
+                Task::perform(
+                    async move { connection::add_tracker(&client, id, &url).await },
+                    Message::TrackersEdited,
+                )
+            }
+            Message::TrackerRemoved(url) => {
+                let Some(id) = self.details_for else {
+                    return Task::none();
+                };
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { connection::remove_tracker(&client, id, &url).await },
+                    Message::TrackersEdited,
+                )
+            }
+            Message::WebSeedDraftChanged(value) => {
+                self.webseed_draft = value;
+                Task::none()
+            }
+            Message::WebSeedAdded => {
+                let url = self.webseed_draft.trim().to_owned();
+                if url.is_empty() {
+                    return Task::none();
+                }
+                self.webseed_draft.clear();
+                if !self.web_seeds.contains(&url) {
+                    self.web_seeds.push(url);
+                }
+                self.save_web_seeds()
+            }
+            Message::WebSeedRemoved(url) => {
+                self.web_seeds.retain(|seed| *seed != url);
+                self.save_web_seeds()
+            }
+            Message::WebSeedsLoaded(result) => {
+                if let Ok(urls) = result {
+                    self.web_seeds = urls;
+                }
+                Task::none()
+            }
+            Message::WebSeedsSaved(result) => {
+                match result {
+                    Ok(urls) => self.web_seeds = urls,
+                    Err(error) => self.set_notice(error),
+                }
+                Task::none()
+            }
+            Message::TrackersEdited(result) => {
+                if let Err(error) = result {
+                    self.set_notice(error);
+                }
+                self.load_details()
             }
             Message::PageLoaded {
                 request,
@@ -2280,6 +2366,21 @@ impl App {
 
     fn set_notice(&mut self, message: impl Into<String>) {
         self.notice = Some((message.into(), Instant::now()));
+    }
+
+    /// Pushes the current web seed list to the daemon.
+    fn save_web_seeds(&mut self) -> Task<Message> {
+        let Some(id) = self.details_for else {
+            return Task::none();
+        };
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let urls = self.web_seeds.clone();
+        Task::perform(
+            async move { connection::set_web_seeds(&client, id, urls).await },
+            Message::WebSeedsSaved,
+        )
     }
 
     /// Flips one per-torrent engine flag and refreshes the row.
@@ -5660,17 +5761,26 @@ impl App {
                     Err(error) => Message::DetailsFailed(error),
                 },
             ),
-            DetailsTab::Trackers => Task::perform(
-                async move {
-                    connection::trackers(&client, id)
-                        .await
-                        .map(DetailsPayload::Trackers)
-                },
-                |result| match result {
-                    Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
-                    Err(error) => Message::DetailsFailed(error),
-                },
-            ),
+            DetailsTab::Trackers => {
+                let seeds_client = client.clone();
+                Task::batch([
+                    Task::perform(
+                        async move {
+                            connection::trackers(&client, id)
+                                .await
+                                .map(DetailsPayload::Trackers)
+                        },
+                        |result| match result {
+                            Ok(payload) => Message::DetailsLoaded(Box::new(payload)),
+                            Err(error) => Message::DetailsFailed(error),
+                        },
+                    ),
+                    Task::perform(
+                        async move { connection::web_seeds(&seeds_client, id).await },
+                        Message::WebSeedsLoaded,
+                    ),
+                ])
+            }
             DetailsTab::General | DetailsTab::Activity => Task::none(),
         }
     }
@@ -5881,7 +5991,7 @@ impl App {
 
     fn trackers_body(&self) -> Element<'_, Message> {
         let dim = theme::text_secondary();
-        match &self.details_payload {
+        let list: Element<'_, Message> = match &self.details_payload {
             Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
                 let header = row![
                     text(i18n::t("TRACKER"))
@@ -5929,6 +6039,11 @@ impl App {
                                     .size(11)
                                     .color(status_color)
                                     .width(Length::Fixed(96.0)),
+                                action_button(
+                                    "×",
+                                    Message::TrackerRemoved(tracker.url.clone()),
+                                    true,
+                                ),
                             ]
                             .spacing(16)
                             .into(),
@@ -5942,7 +6057,7 @@ impl App {
                 children.push(header.into());
                 children.extend(rows);
                 scrollable(WidgetColumn::with_children(children).spacing(8))
-                    .height(Length::Fill)
+                    .height(Length::Fixed(200.0))
                     .into()
             }
             Some(_) => text(i18n::t("No trackers reported."))
@@ -5950,7 +6065,66 @@ impl App {
                 .color(dim)
                 .into(),
             None => self.pending_details(dim),
+        };
+
+        let mut seed_rows: Vec<Element<Message>> = self
+            .web_seeds
+            .iter()
+            .map(|url| {
+                row![
+                    text(url).size(11).width(Length::Fill),
+                    action_button("×", Message::WebSeedRemoved(url.clone()), true),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+            })
+            .collect();
+        if seed_rows.is_empty() {
+            seed_rows.push(
+                text(i18n::t("No web seeds."))
+                    .size(11)
+                    .color(theme::text_muted())
+                    .into(),
+            );
         }
+
+        column![
+            list,
+            row![
+                text_input("https://tracker.example/announce", &self.tracker_draft)
+                    .on_input(Message::TrackerDraftChanged)
+                    .width(Length::Fill),
+                action_button(
+                    "Add tracker",
+                    Message::TrackerAdded,
+                    !self.tracker_draft.trim().is_empty(),
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            text(i18n::t("WEB SEEDS"))
+                .size(10)
+                .color(theme::text_muted()),
+            WidgetColumn::with_children(seed_rows)
+                .spacing(2)
+                .height(Length::Fixed(96.0)),
+            row![
+                text_input("https://mirror.example/file", &self.webseed_draft)
+                    .on_input(Message::WebSeedDraftChanged)
+                    .width(Length::Fill),
+                action_button(
+                    "Add web seed",
+                    Message::WebSeedAdded,
+                    !self.webseed_draft.trim().is_empty(),
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(8)
+        .height(Length::Fill)
+        .into()
     }
 
     fn activity_body(&self) -> Element<'_, Message> {

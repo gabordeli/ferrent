@@ -93,6 +93,25 @@ enum Command {
         on: bool,
         reply: Sender<Result<(), EngineError>>,
     },
+    AddTracker {
+        id: TorrentId,
+        url: String,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    RemoveTracker {
+        id: TorrentId,
+        url: String,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    WebSeeds {
+        id: TorrentId,
+        reply: Sender<Result<Vec<String>, EngineError>>,
+    },
+    SetWebSeeds {
+        id: TorrentId,
+        urls: Vec<String>,
+        reply: Sender<Result<(), EngineError>>,
+    },
     RenameFile {
         id: TorrentId,
         index: usize,
@@ -286,6 +305,42 @@ impl TorrentEngine for LibtorrentEngine {
     fn set_super_seeding(&mut self, id: TorrentId, on: bool) -> Result<(), EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::SetSuperSeeding { id, on, reply })?;
+        Self::recv(response)
+    }
+
+    fn add_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::AddTracker {
+            id,
+            url: url.to_owned(),
+            reply,
+        })?;
+        Self::recv(response)
+    }
+
+    fn remove_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::RemoveTracker {
+            id,
+            url: url.to_owned(),
+            reply,
+        })?;
+        Self::recv(response)
+    }
+
+    fn web_seeds(&mut self, id: TorrentId) -> Result<Vec<String>, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::WebSeeds { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn set_web_seeds(&mut self, id: TorrentId, urls: &[String]) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetWebSeeds {
+            id,
+            urls: urls.to_vec(),
+            reply,
+        })?;
         Self::recv(response)
     }
 
@@ -572,6 +627,41 @@ fn run_worker(
             }
             Ok(Command::SetSuperSeeding { id, on, reply }) => {
                 let result = if session.pin_mut().set_super_seeding(id, on) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
+            Ok(Command::AddTracker { id, url, reply }) => {
+                let result = if session.pin_mut().add_tracker(id, &url) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
+            Ok(Command::RemoveTracker { id, url, reply }) => {
+                let result = if session.pin_mut().remove_tracker(id, &url) {
+                    Ok(())
+                } else {
+                    Err(EngineError::Rejected {
+                        reason: format!("tracker {url:?} is not on torrent {id}"),
+                    })
+                };
+                let _ = reply.send(result);
+            }
+            Ok(Command::WebSeeds { id, reply }) => {
+                let seeds: Vec<String> = session
+                    .web_seeds(id)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+                let _ = reply.send(Ok(seeds));
+            }
+            Ok(Command::SetWebSeeds { id, urls, reply }) => {
+                let joined = urls.join("\n");
+                let result = if session.pin_mut().set_web_seeds(id, &joined) {
                     Ok(())
                 } else {
                     Err(EngineError::NotFound { id })

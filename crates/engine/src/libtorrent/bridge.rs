@@ -139,6 +139,10 @@ pub(crate) mod ffi {
         fn force_recheck(self: Pin<&mut Session>, id: u64) -> bool;
         fn set_sequential(self: Pin<&mut Session>, id: u64, on: bool) -> bool;
         fn set_super_seeding(self: Pin<&mut Session>, id: u64, on: bool) -> bool;
+        fn add_tracker(self: Pin<&mut Session>, id: u64, url: &str) -> bool;
+        fn remove_tracker(self: Pin<&mut Session>, id: u64, url: &str) -> bool;
+        fn web_seeds(self: &Session, id: u64) -> Vec<String>;
+        fn set_web_seeds(self: Pin<&mut Session>, id: u64, urls: &str) -> bool;
         fn rename_file(self: Pin<&mut Session>, id: u64, index: i32, name: &str) -> bool;
         fn set_file_priorities(self: Pin<&mut Session>, id: u64, priorities: &[i32]) -> bool;
         fn peers(self: &Session, id: u64) -> Vec<FfiPeer>;

@@ -53,6 +53,11 @@ class Session {
     bool force_recheck(uint64_t id);
     bool set_sequential(uint64_t id, bool on);
     bool set_super_seeding(uint64_t id, bool on);
+    bool add_tracker(uint64_t id, rust::Str url);
+    bool remove_tracker(uint64_t id, rust::Str url);
+    rust::Vec<rust::String> web_seeds(uint64_t id) const;
+    /// Replaces every web seed; the URLs are separated by newlines.
+    bool set_web_seeds(uint64_t id, rust::Str urls);
     bool rename_file(uint64_t id, int32_t index, rust::Str name);
     bool set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities);
     rust::Vec<FfiPeer> peers(uint64_t id) const;
