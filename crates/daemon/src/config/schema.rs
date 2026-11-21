@@ -88,6 +88,11 @@ pub struct NetworkConfig {
     pub upnp: bool,
     /// Same through NAT-PMP.
     pub natpmp: bool,
+    /// IP blocklist sources: local paths or http(s) URLs (eMule/PeerGuardian
+    /// text or CIDR lines).
+    pub blocklist: Vec<String>,
+    /// Hours between automatic blocklist reloads; `0` disables the timer.
+    pub blocklist_refresh_hours: u64,
 }
 
 impl Default for NetworkConfig {
@@ -106,6 +111,8 @@ impl Default for NetworkConfig {
             encryption: String::new(),
             upnp: true,
             natpmp: true,
+            blocklist: Vec::new(),
+            blocklist_refresh_hours: 24,
         }
     }
 }

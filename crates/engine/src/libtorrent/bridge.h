@@ -58,6 +58,8 @@ class Session {
     rust::Vec<rust::String> web_seeds(uint64_t id) const;
     /// Replaces every web seed; the URLs are separated by newlines.
     bool set_web_seeds(uint64_t id, rust::Str urls);
+    /// Installs an IP blocklist; the ranges are `a.b.c.d-a.b.c.d` lines.
+    bool set_ip_filter(rust::Str ranges);
     bool rename_file(uint64_t id, int32_t index, rust::Str name);
     bool set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities);
     rust::Vec<FfiPeer> peers(uint64_t id) const;

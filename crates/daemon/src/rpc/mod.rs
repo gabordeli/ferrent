@@ -27,15 +27,16 @@ use ferrent_protocol::v1::{
     ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse,
     MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
     QueueDirection as ProtoQueueDirection, RecheckTorrentRequest, RecheckTorrentResponse,
-    RemoveTorrentRequest, RemoveTorrentResponse, RemoveTrackerRequest, RemoveTrackerResponse,
-    Removed, RenameTorrentFileRequest, RenameTorrentFileResponse, ResumeTorrentRequest,
-    ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
-    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
-    SetFilePrioritiesResponse, SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest,
-    SetSuperSeedingResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
-    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse,
-    SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState,
-    TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
+    RefreshBlocklistRequest, RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse,
+    RemoveTrackerRequest, RemoveTrackerResponse, Removed, RenameTorrentFileRequest,
+    RenameTorrentFileResponse, ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest,
+    ScanAutoAddResponse, SendTestNotificationRequest, SendTestNotificationResponse,
+    SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest, SetFilePrioritiesResponse,
+    SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest, SetSuperSeedingResponse,
+    SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
+    SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse, SortField, StateChanged,
+    Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
+    UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -128,6 +129,16 @@ pub struct AppState {
     pub(crate) ratio: Mutex<crate::automation::ratio::RatioState>,
     /// Last ratio evaluation, for the status RPC and the dry run.
     pub ratio_status: Mutex<crate::automation::ratio::RatioStatus>,
+    /// Installed IP blocklist summary, shared with `GetStatus`.
+    pub(crate) blocklist: Mutex<BlocklistStatus>,
+}
+
+/// What the last blocklist load produced, for the status RPC.
+#[derive(Debug, Clone, Default)]
+pub struct BlocklistStatus {
+    pub ranges: u32,
+    pub refreshed_unix: i64,
+    pub error: Option<String>,
 }
 
 impl AppState {
@@ -163,6 +174,7 @@ impl AppState {
             disk_levels: Mutex::new(BTreeMap::new()),
             ratio: Mutex::new(crate::automation::ratio::RatioState::default()),
             ratio_status: Mutex::new(crate::automation::ratio::RatioStatus::default()),
+            blocklist: Mutex::new(BlocklistStatus::default()),
         }
     }
 
@@ -1191,6 +1203,25 @@ impl Ferrent for FerrentService {
         Ok(Response::new(SetWebSeedsResponse { urls: applied }))
     }
 
+    async fn refresh_blocklist(
+        &self,
+        request: Request<RefreshBlocklistRequest>,
+    ) -> Result<Response<RefreshBlocklistResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let errors = self.state.refresh_blocklist().await;
+        let status = self
+            .state
+            .blocklist
+            .lock()
+            .expect("blocklist mutex poisoned")
+            .clone();
+        Ok(Response::new(RefreshBlocklistResponse {
+            ranges: status.ranges,
+            refreshed_unix: status.refreshed_unix,
+            errors,
+        }))
+    }
+
     async fn rename_torrent_file(
         &self,
         request: Request<RenameTorrentFileRequest>,
@@ -1298,6 +1329,12 @@ impl Ferrent for FerrentService {
         self.state.auth.check(request.metadata())?;
         let status = self.state.aggregate_status();
         let scheduler = self.state.scheduler_status();
+        let blocklist = self
+            .state
+            .blocklist
+            .lock()
+            .expect("blocklist mutex poisoned")
+            .clone();
         Ok(Response::new(GetStatusResponse {
             torrent_count: status.torrent_count,
             download_rate: status.download_rate,
@@ -1320,6 +1357,9 @@ impl Ferrent for FerrentService {
                 .level
                 .map_or_else(String::new, |level| level.label().to_owned()),
             scheduler_next_unix: scheduler.next_unix,
+            blocklist_ranges: blocklist.ranges,
+            blocklist_refreshed_unix: blocklist.refreshed_unix,
+            blocklist_error: blocklist.error.clone().unwrap_or_default(),
         }))
     }
 
@@ -1510,12 +1550,74 @@ impl Ferrent for FerrentService {
 }
 
 /// Starts the TLS gRPC server on an already-bound listener.
+impl AppState {
+    /// Reloads the configured blocklist sources into the session filter.
+    ///
+    /// Returns the per-source failures; a bad line is a warning, a missing
+    /// source is an error, and either leaves the previous filter in place
+    /// (libtorrent only sees a new filter when the load produced ranges).
+    pub async fn refresh_blocklist(&self) -> Vec<String> {
+        let sources = match self.config.resolved() {
+            Ok(config) => config.network.blocklist.clone(),
+            Err(error) => return vec![error.to_string()],
+        };
+        let mut errors = Vec::new();
+        let mut ranges = Vec::new();
+        for source in &sources {
+            match crate::blocklist::load_source(source).await {
+                Ok(text) => {
+                    let (mut parsed, warnings) = crate::blocklist::parse(&text);
+                    errors.extend(
+                        warnings
+                            .into_iter()
+                            .take(5)
+                            .map(|warning| format!("{source}: {warning}")),
+                    );
+                    ranges.append(&mut parsed);
+                }
+                Err(error) => errors.push(error),
+            }
+        }
+        ranges.sort_unstable();
+        ranges.dedup();
+        let pairs: Vec<(u32, u32)> = ranges
+            .iter()
+            .map(|range| (range.start, range.end))
+            .collect();
+        let engine = Arc::clone(&self.engine);
+        let applied = tokio::task::spawn_blocking(move || {
+            let mut engine = engine.lock().expect("engine mutex poisoned");
+            engine.set_ip_filter(&pairs)
+        })
+        .await;
+        let mut status = self.blocklist.lock().expect("blocklist mutex poisoned");
+        match applied {
+            Ok(Ok(())) => {
+                status.ranges = u32::try_from(ranges.len()).unwrap_or(u32::MAX);
+                status.refreshed_unix = chrono::Utc::now().timestamp();
+                status.error = if errors.is_empty() {
+                    None
+                } else {
+                    Some(errors.join("; "))
+                };
+            }
+            Ok(Err(error)) => status.error = Some(error.to_string()),
+            Err(error) => status.error = Some(error.to_string()),
+        }
+        errors
+    }
+}
+
 pub async fn serve(
     listener: TcpListener,
     state: Arc<AppState>,
     tls: &TlsMaterial,
 ) -> Result<(), tonic::transport::Error> {
     let _engine_watcher = spawn_engine_watcher(Arc::clone(&state));
+    // The IP filter has to exist before peers connect, so the first load is
+    // synchronous with the start.
+    let _ = state.refresh_blocklist().await;
+    crate::blocklist::spawn_refresh(Arc::clone(&state));
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));

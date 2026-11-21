@@ -13,11 +13,12 @@ use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest,
     GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest, GetRssStatusRequest,
-    GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
-    Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
-    QueueDirection, RecheckTorrentRequest, RemoveTorrentRequest, RemoveTrackerRequest,
-    RenameTorrentFileRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
-    SetFilePrioritiesRequest, SetWebSeedsRequest, SortField, WatchRequest,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest,
+    GetWebSeedsRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
+    PauseTorrentRequest, QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest,
+    RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetWebSeedsRequest,
+    SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -168,6 +169,12 @@ enum Command {
         /// Comma-separated URLs; an empty value clears the list.
         #[arg(long)]
         set: Option<String>,
+    },
+    /// Show the IP blocklist status; `--refresh` reloads the sources.
+    Blocklist {
+        /// Reload the configured sources before printing.
+        #[arg(long)]
+        refresh: bool,
     },
     /// List the files of one torrent; `--set` changes their priorities.
     Files {
@@ -709,6 +716,37 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             } else {
                 for url in urls {
                     println!("{url}");
+                }
+            }
+        }
+        Command::Blocklist { refresh } => {
+            let (ranges, refreshed, errors) = if refresh {
+                let response = client
+                    .refresh_blocklist(RefreshBlocklistRequest {})
+                    .await?
+                    .into_inner();
+                (response.ranges, response.refreshed_unix, response.errors)
+            } else {
+                let status = client.get_status(GetStatusRequest {}).await?.into_inner();
+                (
+                    status.blocklist_ranges,
+                    status.blocklist_refreshed_unix,
+                    Vec::new(),
+                )
+            };
+            if json {
+                output::print_json(&json!({
+                    "ranges": ranges,
+                    "refreshed_unix": refreshed,
+                    "errors": errors,
+                }));
+            } else {
+                println!("ranges: {ranges}");
+                if refreshed > 0 {
+                    println!("refreshed_unix: {refreshed}");
+                }
+                for error in &errors {
+                    println!("warning: {error}");
                 }
             }
         }

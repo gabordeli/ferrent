@@ -653,6 +653,35 @@ bool Session::set_web_seeds(uint64_t id, rust::Str urls) {
     return true;
 }
 
+bool Session::set_ip_filter(rust::Str ranges) {
+    lt::ip_filter filter;
+    std::string text(ranges);
+    std::size_t start = 0;
+    while (start < text.size()) {
+        auto end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        auto line = text.substr(start, end - start);
+        auto dash = line.find('-');
+        if (dash != std::string::npos) {
+            lt::error_code from_error;
+            lt::error_code to_error;
+            auto first = lt::make_address(line.substr(0, dash), from_error);
+            auto last = lt::make_address(line.substr(dash + 1), to_error);
+            if (!from_error && !to_error) {
+                filter.add_rule(first, last, lt::ip_filter::blocked);
+            }
+        }
+        if (end == text.size()) {
+            break;
+        }
+        start = end + 1;
+    }
+    impl_->session.set_ip_filter(filter);
+    return true;
+}
+
 bool Session::rename_file(uint64_t id, int32_t index, rust::Str name) {
     auto it = impl_->handles.find(id);
     if (it == impl_->handles.end()) {

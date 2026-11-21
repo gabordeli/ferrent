@@ -140,6 +140,12 @@ pub trait TorrentEngine: Send + 'static {
         Ok(())
     }
 
+    /// Installs an IP blocklist (inclusive `start..=end` ranges, IPv4).
+    fn set_ip_filter(&mut self, ranges: &[(u32, u32)]) -> Result<(), EngineError> {
+        let _ = ranges;
+        Ok(())
+    }
+
     /// Builds a .torrent for a path on the engine host.
     fn create_torrent(
         &mut self,

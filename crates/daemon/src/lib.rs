@@ -2,6 +2,7 @@
 
 pub mod autoadd;
 pub mod automation;
+pub mod blocklist;
 pub mod compat;
 pub mod config;
 pub mod control;

@@ -151,7 +151,7 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Web seed kezelés** | ✅ | rész | rész | ✅ | Trackers fül + `webseeds <id> [--set …]` (M12-T2) |
 | **Sequential download** | ✅ | ❌ | ✅ | ✅ | sor-menü + `add --sequential` (M12-T1) |
 | **Super-seeding** | ✅ | ❌ | ✅ | ✅ | sor-menü, torrentenként (M12-T1) |
-| **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ❌ | blokklista + `ip_filter` |
+| **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ✅ | `[network] blocklist` + `ip_filter`; CLI `blocklist`, GUI Network fül (M12-T3) |
 | **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ❌ | session + torrent szint |
@@ -171,7 +171,7 @@ Haszon/ár szerint rendezve; a „kód” oszlop a becsült érintettséget jelz
 | 4 | ~~**Force recheck + átnevezés**~~ – **kész (M11-T4)**: sor-menü + rename modal, `RecheckTorrent`/`RenameTorrentFile` RPC, CLI; élesben mérve (`docs/measurements/m11-recheck-rename.md`) | — | — | kész |
 | 5 | **Tracker szerkesztés + web seed** | privát trackereknél napi haszon | közepes | M11-T5 |
 | 6 | **Sequential + super-seeding + temp mappa** | watch-while-downloading; temp mappa a DiskGuardhoz illik | közepes | M12-T1 |
-| 7 | **IP filter (eMule/P2P formátum)** | anti-leech / privát tracker | kicsi–közepes | M12-T2 |
+| 7 | ~~**IP filter (eMule/P2P formátum)**~~ – **kész (M12-T3)**: `[network] blocklist` + CIDR/p2p parser, `blocklist` CLI, GUI Network fül (`docs/measurements/m12-ip-filter.md`) | — | — | kész |
 | 8 | **Statisztika-nézet** | session-összesítés, grafikon | közepes | M12-T3 |
 | 9 | **Kereső (több oldal)** | qB-szintű kényelem; plugin-architektúrát igényel | nagy | M13 jelölt |
 

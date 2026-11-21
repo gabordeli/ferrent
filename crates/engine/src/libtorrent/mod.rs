@@ -112,6 +112,10 @@ enum Command {
         urls: Vec<String>,
         reply: Sender<Result<(), EngineError>>,
     },
+    SetIpFilter {
+        ranges: Vec<(u32, u32)>,
+        reply: Sender<Result<(), EngineError>>,
+    },
     RenameFile {
         id: TorrentId,
         index: usize,
@@ -339,6 +343,15 @@ impl TorrentEngine for LibtorrentEngine {
         self.send(Command::SetWebSeeds {
             id,
             urls: urls.to_vec(),
+            reply,
+        })?;
+        Self::recv(response)
+    }
+
+    fn set_ip_filter(&mut self, ranges: &[(u32, u32)]) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetIpFilter {
+            ranges: ranges.to_vec(),
             reply,
         })?;
         Self::recv(response)
@@ -667,6 +680,17 @@ fn run_worker(
                     Err(EngineError::NotFound { id })
                 };
                 let _ = reply.send(result);
+            }
+            Ok(Command::SetIpFilter { ranges, reply }) => {
+                let mut text = String::with_capacity(ranges.len() * 32);
+                for (start, end) in ranges {
+                    text.push_str(&std::net::Ipv4Addr::from(start).to_string());
+                    text.push('-');
+                    text.push_str(&std::net::Ipv4Addr::from(end).to_string());
+                    text.push('\n');
+                }
+                session.pin_mut().set_ip_filter(&text);
+                let _ = reply.send(Ok(()));
             }
             Ok(Command::RenameFile {
                 id,

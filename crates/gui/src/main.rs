@@ -198,6 +198,8 @@ enum Message {
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
     SettingsNetworkFlag(settings::NetworkFlag, bool),
+    SettingsRefreshBlocklist,
+    BlocklistRefreshed(Result<u32, String>),
     SettingsQueueEnabled(bool),
     SettingsReload,
     SettingsSave,
@@ -1150,6 +1152,30 @@ impl App {
             Message::SettingsSeedMode(value) => {
                 self.settings.form.seed_mode = value;
                 Task::none()
+            }
+            Message::SettingsRefreshBlocklist => {
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { connection::refresh_blocklist(&client).await },
+                    Message::BlocklistRefreshed,
+                )
+            }
+            Message::BlocklistRefreshed(result) => {
+                match result {
+                    Ok(ranges) => {
+                        self.set_notice(i18n::t_fmt("Blocklist: {} ranges", &[&ranges.to_string()]))
+                    }
+                    Err(error) => self.set_notice(error),
+                }
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { connection::status(&client).await },
+                    Message::StatusPolled,
+                )
             }
             Message::SettingsNetworkFlag(flag, value) => {
                 self.settings.form.set_network_flag(flag, value);
@@ -3400,6 +3426,21 @@ impl App {
             .on_toggle(|value| Message::SettingsNetworkFlag(settings::NetworkFlag::Natpmp, value))
             .size(12)
             .text_size(12),
+            row![
+                text(i18n::t_fmt(
+                    "Blocklist: {} ranges",
+                    &[&self
+                        .server_status
+                        .as_ref()
+                        .map_or(0, |status| status.blocklist_ranges)
+                        .to_string()]
+                ))
+                .size(11)
+                .color(theme::text_secondary()),
+                action_button("Refresh blocklist", Message::SettingsRefreshBlocklist, true),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
             detail_row(
                 "Profile",
                 self.config.active.clone().unwrap_or_else(|| "—".to_owned()),

@@ -10,11 +10,11 @@ use ferrent_protocol::v1::{
     GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest, GetHookStatusRequest,
     GetNotificationStatusRequest, GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest,
     GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest, Label, LabelEntry,
-    ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest, RemoveTrackerRequest,
-    RenameTorrentFileRequest, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
-    SetFilePrioritiesRequest, SetSequentialRequest, SetSuperSeedingRequest, SetTorrentLabelRequest,
-    SetWebSeedsRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
-    UpdateLabelRequest,
+    ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest, RefreshBlocklistRequest,
+    RemoveTrackerRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
+    SetSuperSeedingRequest, SetTorrentLabelRequest, SetWebSeedsRequest, SortField, Torrent,
+    TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -88,6 +88,8 @@ pub struct ServerStatus {
     pub checking: u32,
     pub moving: u32,
     pub active: u32,
+    /// Installed IP blocklist ranges; `0` when none is loaded.
+    pub blocklist_ranges: u32,
 }
 
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
@@ -150,6 +152,7 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
         checking: response.checking_count,
         moving: response.moving_count,
         active: response.active_count,
+        blocklist_ranges: response.blocklist_ranges,
     })
 }
 
@@ -266,6 +269,17 @@ pub async fn remove_tracker(client: &AuthClient, id: u64, url: &str) -> Result<(
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
     Ok(())
+}
+
+/// Reloads the daemon's IP blocklist and returns the installed range count.
+pub async fn refresh_blocklist(client: &AuthClient) -> Result<u32, String> {
+    let mut client = client.clone();
+    let response = client
+        .refresh_blocklist(RefreshBlocklistRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.ranges)
 }
 
 /// Fetches the web seeds of one torrent.

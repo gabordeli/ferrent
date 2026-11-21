@@ -42,6 +42,8 @@ service Ferrent {
   // Reads or replaces the web seed (HTTP mirror) list of one torrent.
   rpc GetWebSeeds(GetWebSeedsRequest) returns (GetWebSeedsResponse);
   rpc SetWebSeeds(SetWebSeedsRequest) returns (SetWebSeedsResponse);
+  // Reloads the configured IP blocklist sources.
+  rpc RefreshBlocklist(RefreshBlocklistRequest) returns (RefreshBlocklistResponse);
 
   // Renames one file inside a torrent (index from GetTorrentFiles).
   rpc RenameTorrentFile(RenameTorrentFileRequest) returns (RenameTorrentFileResponse);
@@ -195,6 +197,12 @@ message GetStatusResponse {
   string scheduler_level = 14;
   // Unix seconds of the next hour boundary; `0` when disabled.
   int64 scheduler_next_unix = 15;
+  // Installed IP blocklist ranges; `0` when none is loaded.
+  uint32 blocklist_ranges = 16;
+  // Unix seconds of the last successful blocklist load; `0` when never.
+  int64 blocklist_refreshed_unix = 17;
+  // Last blocklist load error; empty when the filter is healthy.
+  string blocklist_error = 18;
 }
 
 // Request to add a torrent.
@@ -718,6 +726,17 @@ message SetWebSeedsRequest {
 message SetWebSeedsResponse {
   // The list the engine holds after the change.
   repeated string urls = 1;
+}
+
+message RefreshBlocklistRequest {}
+
+message RefreshBlocklistResponse {
+  // Ranges installed after the reload.
+  uint32 ranges = 1;
+  // Unix seconds of the reload.
+  int64 refreshed_unix = 2;
+  // Per-source failures; empty on success.
+  repeated string errors = 3;
 }
 
 message RenameTorrentFileRequest {

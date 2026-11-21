@@ -48,6 +48,7 @@ ferrent-cli config get
 ferrent-cli config set <file> [--revision N]
 ferrent-cli trackers <id> [--add <url>] [--remove <url>]
 ferrent-cli webseeds <id> [--set <url,url>]
+ferrent-cli blocklist [--refresh]
 ferrent-cli import-deluge --state-dir <dir> [--config-dir <dir>] [--dry-run]
 ```
 
@@ -61,6 +62,9 @@ ferrent-cli import-deluge --state-dir <dir> [--config-dir <dir>] [--dry-run]
   ír a listába (http/https/udp/ws, host kötelező), majd kiírja a friss listát.
 - `webseeds <id>`: a web seed (HTTP tükör) lista; `--set` a teljes listát
   cseréli (üres érték töröl). A végrehajtott listát írja vissza.
+- `blocklist`: az IP-blokklista állapota (tartomány-szám, utolsó betöltés);
+  `--refresh` újratölti a `[network] blocklist` forrásait (path vagy http(s)
+  URL, eMule/PeerGuardian vagy CIDR sorok).
 - `config get`: a daemon config TOML dokumentuma és a revízió; `--json`-nal
   `{"revision", "env_locked", "toml"}`.
 - `config set <file>`: a teljes TOML-t feltölti; `--revision N` nélkül a CLI
