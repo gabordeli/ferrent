@@ -20,7 +20,7 @@ pub const VISIBLE_ROWS: usize = 64;
 const MENU_WIDTH: f32 = 160.0;
 const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
-const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 5.0;
+const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 7.0;
 
 fn bg_header() -> Color {
     crate::theme::bg_secondary()
@@ -391,6 +391,8 @@ pub enum MenuAction {
     Label,
     Recheck,
     Rename,
+    ToggleSequential,
+    ToggleSuperSeeding,
     Remove,
 }
 
@@ -400,6 +402,8 @@ pub struct ContextMenu {
     pub x: f32,
     pub y: f32,
     pub paused: bool,
+    pub sequential: bool,
+    pub super_seeding: bool,
 }
 
 #[must_use]
@@ -422,7 +426,9 @@ pub fn menu_action_at(menu: &ContextMenu, point: Point) -> Option<MenuAction> {
         1 => Some(MenuAction::Label),
         2 => Some(MenuAction::Recheck),
         3 => Some(MenuAction::Rename),
-        4 => Some(MenuAction::Remove),
+        4 => Some(MenuAction::ToggleSequential),
+        5 => Some(MenuAction::ToggleSuperSeeding),
+        6 => Some(MenuAction::Remove),
         _ => None,
     }
 }
@@ -736,12 +742,24 @@ impl Table<'_> {
                 .with_color(menu_border())
                 .with_width(1.0),
         );
+        let sequential = if menu.sequential {
+            crate::i18n::t("✓ Sequential download")
+        } else {
+            crate::i18n::t("Sequential download")
+        };
+        let super_seeding = if menu.super_seeding {
+            crate::i18n::t("✓ Super-seeding")
+        } else {
+            crate::i18n::t("Super-seeding")
+        };
         let labels = if menu.paused {
             [
                 crate::i18n::t("Resume"),
                 crate::i18n::t("Set label…"),
                 crate::i18n::t("Force recheck"),
                 crate::i18n::t("Rename file…"),
+                sequential,
+                super_seeding,
                 crate::i18n::t("Remove"),
             ]
         } else {
@@ -750,6 +768,8 @@ impl Table<'_> {
                 crate::i18n::t("Set label…"),
                 crate::i18n::t("Force recheck"),
                 crate::i18n::t("Rename file…"),
+                sequential,
+                super_seeding,
                 crate::i18n::t("Remove"),
             ]
         };
@@ -1059,6 +1079,8 @@ mod tests {
             x: 100.0,
             y: 100.0,
             paused: false,
+            sequential: false,
+            super_seeding: false,
         };
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 108.0)),
@@ -1078,6 +1100,14 @@ mod tests {
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 212.0)),
+            Some(MenuAction::ToggleSequential)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 238.0)),
+            Some(MenuAction::ToggleSuperSeeding)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 264.0)),
             Some(MenuAction::Remove)
         );
         assert_eq!(menu_action_at(&menu, Point::new(10.0, 10.0)), None);

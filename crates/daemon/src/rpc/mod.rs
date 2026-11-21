@@ -1105,8 +1105,15 @@ impl Ferrent for FerrentService {
         self.state.auth.check(request.metadata())?;
         let request = request.into_inner();
         let (id, on) = (request.id, request.on);
-        self.with_engine(move |engine| engine.set_sequential(id, on))
+        let status = self
+            .with_engine(move |engine| {
+                engine.set_sequential(id, on)?;
+                engine.status(id)
+            })
             .await?;
+        // The table is served from the mirror, so the new flag has to land
+        // there; the engine only reports it in its own status snapshot.
+        self.state.mirror.apply(EngineEvent::Added(status));
         Ok(Response::new(SetSequentialResponse {}))
     }
 
@@ -1117,8 +1124,13 @@ impl Ferrent for FerrentService {
         self.state.auth.check(request.metadata())?;
         let request = request.into_inner();
         let (id, on) = (request.id, request.on);
-        self.with_engine(move |engine| engine.set_super_seeding(id, on))
+        let status = self
+            .with_engine(move |engine| {
+                engine.set_super_seeding(id, on)?;
+                engine.status(id)
+            })
             .await?;
+        self.state.mirror.apply(EngineEvent::Added(status));
         Ok(Response::new(SetSuperSeedingResponse {}))
     }
 

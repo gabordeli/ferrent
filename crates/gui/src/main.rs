@@ -142,6 +142,7 @@ enum Message {
     RenameConfirmed,
     RenameFinished(Result<Vec<TorrentFile>, String>),
     RecheckFinished(Result<(), String>),
+    FlagFinished(Result<(), String>),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -321,6 +322,12 @@ impl DetailsTab {
             Self::Activity => i18n::t("Activity"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flag {
+    Sequential,
+    SuperSeeding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -764,6 +771,12 @@ impl App {
                     }
                 }
                 Task::none()
+            }
+            Message::FlagFinished(result) => {
+                if let Err(error) = result {
+                    self.set_notice(error);
+                }
+                self.refresh_page()
             }
             Message::PageLoaded {
                 request,
@@ -1861,6 +1874,12 @@ impl App {
                     MenuAction::Label => return self.open_set_label(),
                     MenuAction::Recheck => return self.recheck_selected(),
                     MenuAction::Rename => return self.open_rename(),
+                    MenuAction::ToggleSequential => {
+                        return self.toggle_flag(menu.row, Flag::Sequential, !menu.sequential);
+                    }
+                    MenuAction::ToggleSuperSeeding => {
+                        return self.toggle_flag(menu.row, Flag::SuperSeeding, !menu.super_seeding);
+                    }
                     MenuAction::Remove => return self.open_remove_modal(),
                 };
                 return self.start_action(action);
@@ -1972,6 +1991,8 @@ impl App {
             x,
             y,
             paused,
+            sequential: torrent.sequential,
+            super_seeding: torrent.super_seeding,
         });
         self.status = format!("{} selected", self.selected.len());
         Task::none()
@@ -2259,6 +2280,28 @@ impl App {
 
     fn set_notice(&mut self, message: impl Into<String>) {
         self.notice = Some((message.into(), Instant::now()));
+    }
+
+    /// Flips one per-torrent engine flag and refreshes the row.
+    fn toggle_flag(&mut self, id: u64, flag: Flag, on: bool) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        self.set_notice(match (flag, on) {
+            (Flag::Sequential, true) => i18n::t("Sequential download on"),
+            (Flag::Sequential, false) => i18n::t("Sequential download off"),
+            (Flag::SuperSeeding, true) => i18n::t("Super-seeding on"),
+            (Flag::SuperSeeding, false) => i18n::t("Super-seeding off"),
+        });
+        Task::perform(
+            async move {
+                match flag {
+                    Flag::Sequential => connection::set_sequential(&client, id, on).await,
+                    Flag::SuperSeeding => connection::set_super_seeding(&client, id, on).await,
+                }
+            },
+            Message::FlagFinished,
+        )
     }
 
     fn recheck_selected(&mut self) -> Task<Message> {

@@ -11,9 +11,9 @@ use ferrent_protocol::v1::{
     GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest,
     GetTorrentTrackersRequest, Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest,
     RecheckTorrentRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
-    SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
-    UpdateLabelRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
+    SetSuperSeedingRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
+    TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -197,6 +197,26 @@ pub async fn rename_torrent_file(
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.files)
+}
+
+/// Downloads the torrent's pieces in order (or back to rarest-first).
+pub async fn set_sequential(client: &AuthClient, id: u64, on: bool) -> Result<(), String> {
+    let mut client = client.clone();
+    client
+        .set_sequential(SetSequentialRequest { id, on })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
+    Ok(())
+}
+
+/// Turns super-seeding on or off for one torrent.
+pub async fn set_super_seeding(client: &AuthClient, id: u64, on: bool) -> Result<(), String> {
+    let mut client = client.clone();
+    client
+        .set_super_seeding(SetSuperSeedingRequest { id, on })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
+    Ok(())
 }
 
 /// Fetches the connected peers of one torrent.
