@@ -92,6 +92,21 @@ lesz (`docs/apt-install.md`).
 
 A kulcs részletei és a rotáció: `packaging/apt/README.md`.
 
+## Perf harness
+
+A `ci/perf.sh` friss adatkönyvtáron mér: `mvp_prepare` (alapból 2000 torrent,
+a workflow 1000-rel fut), daemon-indítás, majd 30 `ListTorrents` hívás egy
+csatornán. A kimenet JSON: `startup_ms`, `rss_kb`, `list_p50_ms`,
+`list_p95_ms`; a `ci/perf-baseline.json`-hoz hasonlít **10%** toleranciával,
+és `1`-gyel lép ki regressziónál. A baseline-t az első futás írja; utána
+szándékosan kell frissíteni (pl. nagyobb gép, új verzió).
+
+- Workflow: `.github/workflows/perf.yml` (nightly 03:17 + kézi indítás),
+  feltölti a `perf-result.json` artifactot.
+- A mérés a `localhost` SAN-t használja (a tanúsítványban nincs IP SAN).
+- Mérve 2026-11-21, 1000 torrent: `startup_ms 657–880`, `rss_kb 45 120`,
+  `list_p95_ms 48.1`.
+
 ## Kiadási kapu
 
 A `v0.1.0` nem soak-eredményhez kötött: a daemonnak **hónapokig** kell éles

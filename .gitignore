@@ -39,3 +39,6 @@ tls-fingerprint.txt
 # AppImage build output
 dist/
 .tools/
+
+# ci/perf.sh writes the current run here; the baseline is committed
+/perf-result.json

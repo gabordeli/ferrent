@@ -1,0 +1,10 @@
+{
+  "torrents": 1000,
+  "calls": 30,
+  "list_p50_ms": 44.2,
+  "list_p95_ms": 48.1,
+  "list_max_ms": 48.2,
+  "startup_ms": 880.2,
+  "rss_kb": 45120,
+  "restored": 1000
+}
