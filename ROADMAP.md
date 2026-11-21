@@ -21,7 +21,7 @@
 - [ ] `.torrent` hozzáadás nyers bájton át megy (távoli daemon is).
 - [ ] Legalább egy valós torrent végigfut a daemonon, és a restart nem okoz rechecket.
 - [ ] Az eredmények `docs/measurements/mvp.md`-ben rögzítve.
-- [ ] Éles torrenteken (≥5 torrent, ~1 hét) bizonyított működés után `v0.1.0` tag (M2-T5).
+- [ ] Éles torrenteken, hónapokig tartó (cél: 6 hónap) napi használat után `v0.1.0` tag (M2-T5).
 
 **Non-goals (MVP)**
 
@@ -249,9 +249,9 @@
 
 **Acceptance**
 
-- [ ] Legalább 5 éles torrent legalább 7 napon át a daemonon, napi használat mellett.
+- [ ] Legalább 5 éles torrent pár hónapig (cél: 6 hónap) a daemonon, napi használat mellett.
 - [ ] A torrentek tényleg dolgoznak: peer/tracker forgalom látszik, nem csak a state.
-- [ ] Nincs crash és nincs kényszerű újraindítás; a Bugsinkben nincs új daemon-hiba.
+- [ ] A futás alatt nincs crash és nincs kényszerű újraindítás; a Bugsinkben nincs új daemon-hiba.
 - [ ] Éles restart recheck nélkül, a state (seeding/paused) megmarad; indulás ≤ 30 s.
 - [ ] Tapasztalatok a `docs/measurements/mvp.md`-ben (éles szakasz); `v0.1.0` tag.
 
