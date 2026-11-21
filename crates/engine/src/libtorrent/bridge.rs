@@ -134,6 +134,8 @@ pub(crate) mod ffi {
         fn status(self: &Session, id: u64) -> FfiStatus;
         fn list(self: &Session) -> Vec<FfiStatus>;
         fn files(self: &Session, id: u64) -> Vec<FfiFile>;
+        fn force_recheck(self: Pin<&mut Session>, id: u64) -> bool;
+        fn rename_file(self: Pin<&mut Session>, id: u64, index: i32, name: &str) -> bool;
         fn set_file_priorities(self: Pin<&mut Session>, id: u64, priorities: &[i32]) -> bool;
         fn peers(self: &Session, id: u64) -> Vec<FfiPeer>;
         fn trackers(self: &Session, id: u64) -> Vec<FfiTracker>;

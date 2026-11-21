@@ -79,6 +79,16 @@ enum Command {
         id: TorrentId,
         reply: Sender<Result<Vec<crate::TorrentFileInfo>, EngineError>>,
     },
+    ForceRecheck {
+        id: TorrentId,
+        reply: Sender<Result<(), EngineError>>,
+    },
+    RenameFile {
+        id: TorrentId,
+        index: usize,
+        name: String,
+        reply: Sender<Result<(), EngineError>>,
+    },
     SetFilePriorities {
         id: TorrentId,
         priorities: Vec<i32>,
@@ -248,6 +258,23 @@ impl TorrentEngine for LibtorrentEngine {
     fn files(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentFileInfo>, EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Files { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn force_recheck(&mut self, id: TorrentId) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::ForceRecheck { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn rename_file(&mut self, id: TorrentId, index: usize, name: &str) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::RenameFile {
+            id,
+            index,
+            name: name.to_owned(),
+            reply,
+        })?;
         Self::recv(response)
     }
 
@@ -504,6 +531,27 @@ fn run_worker(
                     })
                     .collect();
                 let _ = reply.send(Ok(files));
+            }
+            Ok(Command::ForceRecheck { id, reply }) => {
+                let result = if session.pin_mut().force_recheck(id) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
+            Ok(Command::RenameFile {
+                id,
+                index,
+                name,
+                reply,
+            }) => {
+                let result = if session.pin_mut().rename_file(id, index as i32, &name) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
             }
             Ok(Command::SetFilePriorities {
                 id,

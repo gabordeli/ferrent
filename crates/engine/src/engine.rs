@@ -92,6 +92,18 @@ pub trait TorrentEngine: Send + 'static {
         Ok(())
     }
 
+    /// Asks the engine to verify the existing data against the hashes.
+    fn force_recheck(&mut self, id: TorrentId) -> Result<(), EngineError> {
+        let _ = id;
+        Ok(())
+    }
+
+    /// Renames one file inside a torrent (index from [`Self::files`]).
+    fn rename_file(&mut self, id: TorrentId, index: usize, name: &str) -> Result<(), EngineError> {
+        let _ = (id, index, name);
+        Ok(())
+    }
+
     /// Builds a .torrent for a path on the engine host.
     fn create_torrent(
         &mut self,

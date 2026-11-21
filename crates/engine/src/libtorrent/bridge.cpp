@@ -548,6 +548,24 @@ rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
     return out;
 }
 
+bool Session::force_recheck(uint64_t id) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.force_recheck();
+    return true;
+}
+
+bool Session::rename_file(uint64_t id, int32_t index, rust::Str name) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    it->second.rename_file(lt::file_index_t(index), static_cast<std::string>(name));
+    return true;
+}
+
 bool Session::set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities) {
     auto it = impl_->handles.find(id);
     if (it == impl_->handles.end()) {

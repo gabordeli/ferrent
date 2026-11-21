@@ -50,6 +50,8 @@ class Session {
     bool move_in_queue(uint64_t id, bool up);
     FfiStatus status(uint64_t id) const;
     rust::Vec<FfiFile> files(uint64_t id) const;
+    bool force_recheck(uint64_t id);
+    bool rename_file(uint64_t id, int32_t index, rust::Str name);
     bool set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities);
     rust::Vec<FfiPeer> peers(uint64_t id) const;
     rust::Vec<FfiTracker> trackers(uint64_t id) const;
