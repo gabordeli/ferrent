@@ -8,7 +8,7 @@ mod output;
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
@@ -307,7 +307,11 @@ fn parse_file_priorities(spec: &str, file_count: usize) -> Result<Vec<i32>, CliE
 #[tokio::main]
 async fn main() {
     let _telemetry = ferrent_telemetry::init("ferrent-cli");
-    let cli = Cli::parse();
+    ferrent_i18n::Lang::from_env();
+    // clap bakes the derive-d strings in, so the command tree is rebuilt and
+    // translated before parsing; `--json` keys stay untouched.
+    let command = localize_command(Cli::command());
+    let cli = Cli::from_arg_matches(&command.get_matches()).unwrap_or_else(|error| error.exit());
     if let Err(error) = run(cli).await {
         // Only defects are reported; a stopped daemon or a mistyped id is a
         // normal answer and would otherwise flood the issue tracker.
@@ -318,6 +322,52 @@ async fn main() {
         eprintln!("ferrent-cli: {error}");
         std::process::exit(error.exit_code());
     }
+}
+
+/// Translates a command tree in place: about/long-about, argument help and
+/// value names, recursively for every subcommand.
+fn localize_command(command: clap::Command) -> clap::Command {
+    let mut command = command.mut_args(localize_arg);
+    if let Some(about) = command.get_about().map(ToString::to_string) {
+        command = command.about(ferrent_i18n::translate(&about));
+    }
+    if let Some(long) = command.get_long_about().map(ToString::to_string) {
+        command = command.long_about(ferrent_i18n::translate(&long));
+    }
+    let names: Vec<String> = command
+        .get_subcommands()
+        .map(|sub| sub.get_name().to_owned())
+        .collect();
+    for name in names {
+        command = command.mut_subcommand(name, localize_command);
+    }
+    command
+}
+
+fn localize_arg(arg: clap::Arg) -> clap::Arg {
+    let help = arg.get_help().map(ToString::to_string);
+    let long_help = arg.get_long_help().map(ToString::to_string);
+    let names: Option<Vec<String>> = arg
+        .get_value_names()
+        .map(|names| names.iter().map(ToString::to_string).collect());
+    let mut arg = arg;
+    if let Some(help) = help {
+        arg = arg.help(ferrent_i18n::translate(&help));
+    }
+    if let Some(long_help) = long_help {
+        arg = arg.long_help(ferrent_i18n::translate(&long_help));
+    }
+    if let Some(names) = names {
+        // clap only accepts `Str`-convertible names, and a translated name is
+        // owned; the command lives for the rest of the process, so leaking it
+        // is bounded by the number of arguments.
+        let translated: Vec<&'static str> = names
+            .iter()
+            .map(|name| &*Box::leak(ferrent_i18n::translate(name).into_boxed_str()))
+            .collect();
+        arg = arg.value_names(translated);
+    }
+    arg
 }
 
 async fn run(cli: Cli) -> Result<(), CliError> {
@@ -894,6 +944,24 @@ fn print_import_warnings(warnings: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_renders_in_both_languages() {
+        ferrent_i18n::install(ferrent_i18n::Lang::Hu);
+        let hungarian = localize_command(Cli::command()).render_help().to_string();
+        assert!(
+            hungarian.contains("Torrentek listázása"),
+            "hungarian help missing: {hungarian}"
+        );
+
+        ferrent_i18n::install(ferrent_i18n::Lang::En);
+        let english = localize_command(Cli::command()).render_help().to_string();
+        assert!(
+            english.contains("List torrents"),
+            "english help missing: {english}"
+        );
+        ferrent_i18n::install(ferrent_i18n::Lang::Hu);
+    }
 
     #[test]
     fn file_priority_spec_keeps_unlisted_files_normal() {

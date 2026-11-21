@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+ferrent-i18n = { path = "../i18n" }
 ferrent-protocol = { path = "../protocol" }
 ferrent-telemetry = { path = "../telemetry" }
 serde = { version = "1", features = ["derive"] }

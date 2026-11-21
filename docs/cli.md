@@ -2,6 +2,13 @@
 
 A `ferrent-cli` a Ferrent daemon TLS gRPC API-ját vezérli.
 
+## Nyelv
+
+A help és a hibaüzenetek a GUI-val közös `ferrent-i18n` katalógusból jönnek:
+alapértelmezés a **magyar**, `FERRENT_LANG=en` angolra vált. A `--json`
+kimenet kulcsai nyelvtől függetlenek (gépi forma), a `--help` és a
+hibaszövegek lokalizáltak; a nem fordított kulcs angolul jelenik meg.
+
 ## Konfiguráció
 
 Precedencia: **flag > környezeti változó > config fájl > default**.

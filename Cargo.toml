@@ -10,6 +10,7 @@ members = [
     "crates/daemon",
     "crates/cli",
     "crates/gui",
+    "crates/i18n",
     "crates/web",
     "crates/telemetry",
 ]

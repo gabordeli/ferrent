@@ -1,0 +1,15 @@
+[package]
+name = "ferrent-i18n"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Shared hu/en message catalogue for the Ferrent clients"
+
+[lints]
+workspace = true
+
+[dependencies]
+toml = "0.8"
