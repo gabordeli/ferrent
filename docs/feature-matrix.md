@@ -144,8 +144,8 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | Proxy (HTTP/SOCKS) | ✅ | ❌ | ✅ | ✅ | M10-T1 |
 | Web UI + távvezérlés | ✅ | ✅ | plugin | ✅ | `ferrent-web` + gRPC |
 | Címkék/kategóriák | ✅ | ❌ | plugin | ✅ | label + auto-match |
-| **Force recheck** | ✅ | ✅ | ✅ | ❌ | egy torrent újraellenőrzése |
-| **Átnevezés** (torrent/fájl) | ✅ | ✅ | ✅ | ❌ | torrent-név és fájlnév |
+| **Force recheck** | ✅ | ✅ | ✅ | ✅ | sor-menü + `ferrent-cli recheck` (M11-T4) |
+| **Átnevezés** (torrent/fájl) | ✅ | ✅ | ✅ | 🟡 | fájlnév a torrenten belül (sor-menü + CLI); torrent-név még nincs |
 | **Temp / incomplete mappa** | ✅ | ✅ | ✅ | 🟡 | DiskGuard staging zóna + move-on-complete; nincs globális „incomplete" path |
 | **Tracker szerkesztés** | ✅ | ✅ | ✅ | ❌ | tracker hozzáadás/törlés torrentenként |
 | **Web seed kezelés** | ✅ | rész | rész | 🟡 | libtorrent tudja, nincs felület |
@@ -168,7 +168,7 @@ Haszon/ár szerint rendezve; a „kód” oszlop a becsült érintettséget jelz
 | 1 | **Bugsink-hibák javítása** (FERRENT-4 redb lock, FERRENT-5 transport, FERRENT-11 `unwrap`) | a kiadási kapu része; valódi felhasználói hibák | kicsi–közepes | M11-T1 (hardening) |
 | 2 | ~~**Téma: sötét/világos + akcentus**~~ – **kész (M11-T2)**: `Palette` + accessorok, Settings → Appearance, `gui.toml` (`docs/measurements/m11-theme.md`) | — | — | kész |
 | 3 | **Nyelvesítés (hu default, en)** | a user kérése; induláshoz elég a GUI+CLI szövegei | közepes | M11-T3 |
-| 4 | **Force recheck + átnevezés** | alap kliens-paritás; a set location **már van** (`MoveTorrent` → `move_storage`) | közepes | M11-T4 |
+| 4 | ~~**Force recheck + átnevezés**~~ – **kész (M11-T4)**: sor-menü + rename modal, `RecheckTorrent`/`RenameTorrentFile` RPC, CLI; élesben mérve (`docs/measurements/m11-recheck-rename.md`) | — | — | kész |
 | 5 | **Tracker szerkesztés + web seed** | privát trackereknél napi haszon | közepes | M11-T5 |
 | 6 | **Sequential + super-seeding + temp mappa** | watch-while-downloading; temp mappa a DiskGuardhoz illik | közepes | M12-T1 |
 | 7 | **IP filter (eMule/P2P formátum)** | anti-leech / privát tracker | kicsi–közepes | M12-T2 |
