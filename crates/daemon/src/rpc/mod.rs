@@ -1296,6 +1296,15 @@ impl Ferrent for FerrentService {
             listen_interfaces: resolved.network.listen_interfaces.clone(),
             outgoing_interfaces: resolved.network.outgoing_interfaces.clone(),
             default_trackers: resolved.session.default_trackers.clone(),
+            proxy_type: resolved.network.proxy_type.clone(),
+            proxy_host: resolved.network.proxy_host.clone(),
+            proxy_port: resolved.network.proxy_port,
+            proxy_username: resolved.network.proxy_username.clone(),
+            proxy_password: resolved.network.proxy_password.clone(),
+            proxy_peer_connections: resolved.network.proxy_peer_connections,
+            encryption: resolved.network.encryption.clone(),
+            upnp: resolved.network.upnp,
+            natpmp: resolved.network.natpmp,
         };
         self.with_engine(move |engine| {
             engine.set_settings(settings);

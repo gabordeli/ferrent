@@ -85,6 +85,12 @@ pub enum ConfigField {
     ActiveDownloads,
     ActiveSeeds,
     ActiveLimit,
+    ProxyType,
+    ProxyHost,
+    ProxyPort,
+    ProxyUsername,
+    ProxyPassword,
+    Encryption,
 }
 
 impl ConfigField {
@@ -100,6 +106,12 @@ impl ConfigField {
             Self::ActiveDownloads => "Active downloads",
             Self::ActiveSeeds => "Active seeds",
             Self::ActiveLimit => "Active torrents",
+            Self::ProxyType => "Proxy type (none/http/socks5/…)",
+            Self::ProxyHost => "Proxy host",
+            Self::ProxyPort => "Proxy port",
+            Self::ProxyUsername => "Proxy user",
+            Self::ProxyPassword => "Proxy password",
+            Self::Encryption => "Encryption (enabled/forced/disabled)",
         }
     }
 
@@ -115,7 +127,13 @@ impl ConfigField {
             | Self::UploadRateLimit
             | Self::ActiveDownloads
             | Self::ActiveSeeds
-            | Self::ActiveLimit => "",
+            | Self::ActiveLimit
+            | Self::ProxyType
+            | Self::ProxyHost
+            | Self::ProxyPort
+            | Self::ProxyUsername
+            | Self::ProxyPassword
+            | Self::Encryption => "",
         }
     }
 }
@@ -134,6 +152,34 @@ pub struct ConfigForm {
     pub active_limit: String,
     pub seed_mode: bool,
     pub queue_enabled: bool,
+    pub proxy_type: String,
+    pub proxy_host: String,
+    pub proxy_port: String,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    pub encryption: String,
+    pub proxy_peer_connections: bool,
+    pub upnp: bool,
+    pub natpmp: bool,
+}
+
+/// Boolean network switches rendered as checkboxes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkFlag {
+    ProxyPeerConnections,
+    Upnp,
+    Natpmp,
+}
+
+impl NetworkFlag {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProxyPeerConnections => "Proxy peer connections",
+            Self::Upnp => "UPnP port mapping",
+            Self::Natpmp => "NAT-PMP port mapping",
+        }
+    }
 }
 
 impl Default for ConfigForm {
@@ -150,6 +196,15 @@ impl Default for ConfigForm {
             active_limit: "0".to_owned(),
             seed_mode: false,
             queue_enabled: true,
+            proxy_type: String::new(),
+            proxy_host: String::new(),
+            proxy_port: "0".to_owned(),
+            proxy_username: String::new(),
+            proxy_password: String::new(),
+            encryption: String::new(),
+            proxy_peer_connections: false,
+            upnp: true,
+            natpmp: true,
         }
     }
 }
@@ -176,6 +231,13 @@ impl ConfigForm {
                 .unwrap_or(0)
                 .to_string()
         };
+        let section_text = |section: &str, key: &str| {
+            doc.get(section)
+                .and_then(|item| item.get(key))
+                .and_then(Item::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         let flag = |section: &str, key: &str, default: bool| {
             doc.get(section)
                 .and_then(|item| item.get(key))
@@ -195,6 +257,15 @@ impl ConfigForm {
             active_limit: number("session", "active_limit"),
             seed_mode: flag("session", "seed_mode", false),
             queue_enabled: flag("queue", "enabled", true),
+            proxy_type: section_text("network", "proxy_type"),
+            proxy_host: section_text("network", "proxy_host"),
+            proxy_port: number("network", "proxy_port"),
+            proxy_username: section_text("network", "proxy_username"),
+            proxy_password: section_text("network", "proxy_password"),
+            encryption: section_text("network", "encryption"),
+            proxy_peer_connections: flag("network", "proxy_peer_connections", false),
+            upnp: flag("network", "upnp", true),
+            natpmp: flag("network", "natpmp", true),
         })
     }
 
@@ -211,6 +282,12 @@ impl ConfigForm {
             ConfigField::ActiveDownloads => &self.active_downloads,
             ConfigField::ActiveSeeds => &self.active_seeds,
             ConfigField::ActiveLimit => &self.active_limit,
+            ConfigField::ProxyType => &self.proxy_type,
+            ConfigField::ProxyHost => &self.proxy_host,
+            ConfigField::ProxyPort => &self.proxy_port,
+            ConfigField::ProxyUsername => &self.proxy_username,
+            ConfigField::ProxyPassword => &self.proxy_password,
+            ConfigField::Encryption => &self.encryption,
         }
     }
 
@@ -226,6 +303,31 @@ impl ConfigForm {
             ConfigField::ActiveDownloads => self.active_downloads = text,
             ConfigField::ActiveSeeds => self.active_seeds = text,
             ConfigField::ActiveLimit => self.active_limit = text,
+            ConfigField::ProxyType => self.proxy_type = text,
+            ConfigField::ProxyHost => self.proxy_host = text,
+            ConfigField::ProxyPort => self.proxy_port = text,
+            ConfigField::ProxyUsername => self.proxy_username = text,
+            ConfigField::ProxyPassword => self.proxy_password = text,
+            ConfigField::Encryption => self.encryption = text,
+        }
+    }
+
+    /// Returns one of the network checkboxes.
+    #[must_use]
+    pub fn network_flag(&self, flag: NetworkFlag) -> bool {
+        match flag {
+            NetworkFlag::ProxyPeerConnections => self.proxy_peer_connections,
+            NetworkFlag::Upnp => self.upnp,
+            NetworkFlag::Natpmp => self.natpmp,
+        }
+    }
+
+    /// Replaces one of the network checkboxes.
+    pub fn set_network_flag(&mut self, flag: NetworkFlag, value: bool) {
+        match flag {
+            NetworkFlag::ProxyPeerConnections => self.proxy_peer_connections = value,
+            NetworkFlag::Upnp => self.upnp = value,
+            NetworkFlag::Natpmp => self.natpmp = value,
         }
     }
 
@@ -316,6 +418,35 @@ impl ConfigForm {
         }
         set_bool(&mut doc, "session", "seed_mode", self.seed_mode);
         set_bool(&mut doc, "queue", "enabled", self.queue_enabled);
+        set_str(&mut doc, "network", "proxy_type", self.proxy_type.trim());
+        set_str(&mut doc, "network", "proxy_host", self.proxy_host.trim());
+        set_number(
+            &mut doc,
+            "network",
+            "proxy_port",
+            parse_number(&self.proxy_port, "Proxy port", u64::from(u16::MAX))?,
+        )?;
+        set_str(
+            &mut doc,
+            "network",
+            "proxy_username",
+            self.proxy_username.trim(),
+        );
+        set_str(
+            &mut doc,
+            "network",
+            "proxy_password",
+            self.proxy_password.trim(),
+        );
+        set_str(&mut doc, "network", "encryption", self.encryption.trim());
+        set_bool(
+            &mut doc,
+            "network",
+            "proxy_peer_connections",
+            self.proxy_peer_connections,
+        );
+        set_bool(&mut doc, "network", "upnp", self.upnp);
+        set_bool(&mut doc, "network", "natpmp", self.natpmp);
 
         Ok(doc.to_string())
     }
@@ -353,6 +484,10 @@ fn set_number(doc: &mut DocumentMut, section: &str, key: &str, number: u64) -> R
 
 fn set_bool(doc: &mut DocumentMut, section: &str, key: &str, flag: bool) {
     table(doc, section)[key] = value(flag);
+}
+
+fn set_str(doc: &mut DocumentMut, section: &str, key: &str, text: &str) {
+    table(doc, section)[key] = value(text);
 }
 
 fn table<'a>(doc: &'a mut DocumentMut, key: &str) -> &'a mut Table {

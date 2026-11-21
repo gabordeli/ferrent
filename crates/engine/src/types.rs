@@ -91,7 +91,7 @@ pub struct AddTorrent {
 }
 
 /// Engine-wide rate limits. A value of `0` means unlimited.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineSettings {
     /// Download limit in bytes per second.
     pub download_rate_limit: u64,
@@ -116,6 +116,45 @@ pub struct EngineSettings {
     pub outgoing_interfaces: String,
     /// Trackers added to torrents whose metainfo has no announce URL.
     pub default_trackers: Vec<String>,
+    /// Outbound proxy: `none`, `http`, `http_pw`, `socks5` or `socks5_pw`.
+    /// An empty value keeps the engine default (no proxy).
+    pub proxy_type: String,
+    pub proxy_host: String,
+    pub proxy_port: u16,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    /// Send peer connections through the proxy too.
+    pub proxy_peer_connections: bool,
+    /// Peer encryption: `enabled`, `forced` or `disabled`; empty = enabled.
+    pub encryption: String,
+    pub upnp: bool,
+    pub natpmp: bool,
+}
+
+impl Default for EngineSettings {
+    fn default() -> Self {
+        Self {
+            download_rate_limit: 0,
+            upload_rate_limit: 0,
+            seed_mode: false,
+            active_downloads: 0,
+            active_seeds: 0,
+            active_limit: 0,
+            listen_interfaces: String::new(),
+            outgoing_interfaces: String::new(),
+            default_trackers: Vec::new(),
+            proxy_type: String::new(),
+            proxy_host: String::new(),
+            proxy_port: 0,
+            proxy_username: String::new(),
+            proxy_password: String::new(),
+            proxy_peer_connections: false,
+            encryption: String::new(),
+            // libtorrent enables both by default; keep that unless configured.
+            upnp: true,
+            natpmp: true,
+        }
+    }
 }
 
 /// One torrent-creation request, resolved on the engine host.

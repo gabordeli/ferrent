@@ -345,6 +345,44 @@ void Session::set_default_trackers(rust::Str trackers) {
     impl_->default_trackers = split_lines(static_cast<std::string>(trackers));
 }
 
+void Session::set_network_settings(rust::Str proxy_type, rust::Str proxy_host,
+                                   uint16_t proxy_port, rust::Str proxy_username,
+                                   rust::Str proxy_password, bool proxy_peer_connections,
+                                   rust::Str encryption, bool upnp, bool natpmp) {
+    lt::settings_pack pack;
+    auto const kind = static_cast<std::string>(proxy_type);
+    int type = lt::settings_pack::none;
+    if (kind == "http") {
+        type = lt::settings_pack::http;
+    } else if (kind == "http_pw") {
+        type = lt::settings_pack::http_pw;
+    } else if (kind == "socks5") {
+        type = lt::settings_pack::socks5;
+    } else if (kind == "socks5_pw") {
+        type = lt::settings_pack::socks5_pw;
+    }
+    pack.set_int(lt::settings_pack::proxy_type, type);
+    pack.set_str(lt::settings_pack::proxy_hostname, static_cast<std::string>(proxy_host));
+    pack.set_int(lt::settings_pack::proxy_port, static_cast<int>(proxy_port));
+    pack.set_str(lt::settings_pack::proxy_username, static_cast<std::string>(proxy_username));
+    pack.set_str(lt::settings_pack::proxy_password, static_cast<std::string>(proxy_password));
+    pack.set_bool(lt::settings_pack::proxy_peer_connections, proxy_peer_connections);
+
+    auto const policy = static_cast<std::string>(encryption);
+    int peers = lt::settings_pack::pe_enabled;
+    if (policy == "forced") {
+        peers = lt::settings_pack::pe_forced;
+    } else if (policy == "disabled") {
+        peers = lt::settings_pack::pe_disabled;
+    }
+    pack.set_int(lt::settings_pack::in_enc_policy, peers);
+    pack.set_int(lt::settings_pack::out_enc_policy, peers);
+
+    pack.set_bool(lt::settings_pack::enable_upnp, upnp);
+    pack.set_bool(lt::settings_pack::enable_natpmp, natpmp);
+    impl_->session.apply_settings(pack);
+}
+
 bool Session::set_torrent_limits(uint64_t id, uint64_t download_rate_limit,
                                  uint64_t upload_rate_limit, uint32_t connections_limit,
                                  uint32_t upload_slots_limit) {

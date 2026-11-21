@@ -21,13 +21,13 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Web UI | ✅ | `ferrent-web`: REST + SSE + SPA |
 | Console UI | ✅ | `ferrent-cli` (JSON kimenet, lapozás) |
 | GTK+ UI | ✅ | natív `iced` GUI (nem GTK, de desktop kliens) |
-| BitTorrent Protocol Encryption | 🟡 | libtorrent default (prefer), nincs ki/be kapcsoló |
+| BitTorrent Protocol Encryption | ✅ | `[network] encryption` = enabled/forced/disabled (M10-T1) |
 | Mainline DHT | 🟡 | default be |
 | Local Peer Discovery (LSD) | 🟡 | default be |
 | FAST protocol extension | 🟡 | default be |
 | µTorrent Peer Exchange (PEX) | 🟡 | default be |
-| UPnP és NAT-PMP | 🟡 | default be, a státusz nem látszik |
-| Proxy support | ❌ | se HTTP, se SOCKS5, se peer-proxy |
+| UPnP és NAT-PMP | ✅ | `[network] upnp/natpmp` (default: be), a státusz nem látszik |
+| Proxy support | ✅ | `[network]` HTTP/SOCKS5 (+ jelszavas), peer-proxy is (M10-T1) |
 | Web seed | ✅ | metainfóból, libtorrent |
 | Private torrents | ✅ | csak tracker, DHT/LSD nélkül (libtorrent) |
 | Global és per-torrent sebességlimit | ✅ | globális config + torrentenkénti RPC + label override |
@@ -101,8 +101,9 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 1. ~~**Per-file prioritás + szelektív letöltés**~~ – **kész (M10-T2)**: RPC +
    GUI Files (kattintható sorok) + CLI; a skip-elt fájl nem töltődik le, a
    prioritás restart után is megmarad (`docs/measurements/m10-file-priorities.md`).
-2. **Proxy támogatás** (HTTP/SOCKS5 + peer-proxy) – privacy/VPN felhasználóknál
-   alapelvárás, a config és az engine-kapcsolat megvan hozzá.
+2. ~~**Proxy támogatás** (HTTP/SOCKS5 + peer-proxy)~~ – **kész (M10-T1)**:
+   `[network]` proxy + encryption + UPnP/NAT-PMP, SOCKS5-tel mérve
+   (`docs/measurements/m10-network-settings.md`).
 3. **RSS-watcher** – a Deluge-ban is csak plugin (YaRSS2, a TRaSH szerint
    halott); beépítve ez valódi differenciáló.
 4. **IP blocklist** – privát trackereknél/anti-leechhez; közepes.

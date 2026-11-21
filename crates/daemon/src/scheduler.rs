@@ -360,6 +360,15 @@ fn session_settings(
         listen_interfaces: config.network.listen_interfaces.clone(),
         outgoing_interfaces: config.network.outgoing_interfaces.clone(),
         default_trackers: config.session.default_trackers.clone(),
+        proxy_type: config.network.proxy_type.clone(),
+        proxy_host: config.network.proxy_host.clone(),
+        proxy_port: config.network.proxy_port,
+        proxy_username: config.network.proxy_username.clone(),
+        proxy_password: config.network.proxy_password.clone(),
+        proxy_peer_connections: config.network.proxy_peer_connections,
+        encryption: config.network.encryption.clone(),
+        upnp: config.network.upnp,
+        natpmp: config.network.natpmp,
     }
 }
 

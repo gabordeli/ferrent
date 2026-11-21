@@ -37,6 +37,14 @@ class Session {
                             uint64_t upload_rate_limit, uint32_t connections_limit,
                             uint32_t upload_slots_limit);
     void set_default_trackers(rust::Str trackers);
+
+    /// Applies proxy, encryption and UPnP/NAT-PMP settings. Some of them only
+    /// take effect on a fresh session, which is why a config save restarts the
+    /// daemon.
+    void set_network_settings(rust::Str proxy_type, rust::Str proxy_host,
+                              uint16_t proxy_port, rust::Str proxy_username,
+                              rust::Str proxy_password, bool proxy_peer_connections,
+                              rust::Str encryption, bool upnp, bool natpmp);
     bool move_storage(uint64_t id, rust::Str path);
     bool remove(uint64_t id, bool delete_files);
     bool move_in_queue(uint64_t id, bool up);

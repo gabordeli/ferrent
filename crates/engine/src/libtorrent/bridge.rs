@@ -115,6 +115,19 @@ pub(crate) mod ffi {
             upload_slots_limit: u32,
         ) -> bool;
         fn set_default_trackers(self: Pin<&mut Session>, trackers: &str);
+        #[allow(clippy::too_many_arguments)]
+        fn set_network_settings(
+            self: Pin<&mut Session>,
+            proxy_type: &str,
+            proxy_host: &str,
+            proxy_port: u16,
+            proxy_username: &str,
+            proxy_password: &str,
+            proxy_peer_connections: bool,
+            encryption: &str,
+            upnp: bool,
+            natpmp: bool,
+        );
         fn move_storage(self: Pin<&mut Session>, id: u64, path: &str) -> bool;
         fn remove(self: Pin<&mut Session>, id: u64, delete_files: bool) -> bool;
         fn move_in_queue(self: Pin<&mut Session>, id: u64, up: bool) -> bool;

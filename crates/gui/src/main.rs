@@ -176,6 +176,7 @@ enum Message {
     SettingsTab(Tab),
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
+    SettingsNetworkFlag(settings::NetworkFlag, bool),
     SettingsQueueEnabled(bool),
     SettingsReload,
     SettingsSave,
@@ -888,6 +889,10 @@ impl App {
             }
             Message::SettingsSeedMode(value) => {
                 self.settings.form.seed_mode = value;
+                Task::none()
+            }
+            Message::SettingsNetworkFlag(flag, value) => {
+                self.settings.form.set_network_flag(flag, value);
                 Task::none()
             }
             Message::SettingsQueueEnabled(value) => {
@@ -2978,6 +2983,39 @@ impl App {
             field(ConfigField::DownloadDir),
             field(ConfigField::Bind),
             field(ConfigField::TokenFile),
+            text("Network").size(12).color(theme::TEXT),
+            field(ConfigField::ProxyType),
+            row![field(ConfigField::ProxyHost), field(ConfigField::ProxyPort),].spacing(10),
+            row![
+                field(ConfigField::ProxyUsername),
+                field(ConfigField::ProxyPassword),
+            ]
+            .spacing(10),
+            field(ConfigField::Encryption),
+            checkbox(
+                settings::NetworkFlag::ProxyPeerConnections.label(),
+                form.network_flag(settings::NetworkFlag::ProxyPeerConnections),
+            )
+            .on_toggle(|value| Message::SettingsNetworkFlag(
+                settings::NetworkFlag::ProxyPeerConnections,
+                value
+            ))
+            .size(12)
+            .text_size(12),
+            checkbox(
+                settings::NetworkFlag::Upnp.label(),
+                form.network_flag(settings::NetworkFlag::Upnp),
+            )
+            .on_toggle(|value| Message::SettingsNetworkFlag(settings::NetworkFlag::Upnp, value))
+            .size(12)
+            .text_size(12),
+            checkbox(
+                settings::NetworkFlag::Natpmp.label(),
+                form.network_flag(settings::NetworkFlag::Natpmp),
+            )
+            .on_toggle(|value| Message::SettingsNetworkFlag(settings::NetworkFlag::Natpmp, value))
+            .size(12)
+            .text_size(12),
             detail_row(
                 "Profile",
                 self.config.active.clone().unwrap_or_else(|| "—".to_owned()),

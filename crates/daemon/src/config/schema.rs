@@ -70,6 +70,22 @@ pub struct NetworkConfig {
     pub watch_interface: String,
     /// How long the interface must be back before torrents resume.
     pub grace_secs: u64,
+    /// Outbound proxy: `none`, `http`, `http_pw`, `socks5` or `socks5_pw`.
+    pub proxy_type: String,
+    /// Proxy hostname or IP. Required for every type but `none`.
+    pub proxy_host: String,
+    /// Proxy port; `0` with a proxy type is an error.
+    pub proxy_port: u16,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    /// Send peer connections through the proxy as well, not just trackers.
+    pub proxy_peer_connections: bool,
+    /// Peer encryption policy: `enabled`, `forced` or `disabled`.
+    pub encryption: String,
+    /// Ask the router to open the listen port.
+    pub upnp: bool,
+    /// Same through NAT-PMP.
+    pub natpmp: bool,
 }
 
 impl Default for NetworkConfig {
@@ -79,9 +95,23 @@ impl Default for NetworkConfig {
             outgoing_interfaces: String::new(),
             watch_interface: String::new(),
             grace_secs: 60,
+            proxy_type: String::new(),
+            proxy_host: String::new(),
+            proxy_port: 0,
+            proxy_username: String::new(),
+            proxy_password: String::new(),
+            proxy_peer_connections: false,
+            encryption: String::new(),
+            upnp: true,
+            natpmp: true,
         }
     }
 }
+
+/// The proxy types libtorrent accepts, with the spelling the config uses.
+pub const PROXY_TYPES: [&str; 5] = ["http", "http_pw", "socks5", "socks5_pw", "none"];
+/// Encryption policies accepted by the config.
+pub const ENCRYPTION_POLICIES: [&str; 3] = ["enabled", "forced", "disabled"];
 
 impl NetworkConfig {
     pub fn validate(&self) -> Result<(), String> {
@@ -90,6 +120,28 @@ impl NetworkConfig {
         }
         if !self.watch_interface.is_empty() && self.watch_interface.contains(['/', ':', ' ']) {
             return Err("network.watch_interface must be a plain interface name".to_owned());
+        }
+        let proxy = self.proxy_type.trim();
+        if !proxy.is_empty() && !PROXY_TYPES.contains(&proxy) {
+            return Err(format!(
+                "network.proxy_type must be one of {}",
+                PROXY_TYPES.join(", ")
+            ));
+        }
+        if !proxy.is_empty() && proxy != "none" {
+            if self.proxy_host.trim().is_empty() {
+                return Err("network.proxy_host is required for a proxy".to_owned());
+            }
+            if self.proxy_port == 0 {
+                return Err("network.proxy_port is required for a proxy".to_owned());
+            }
+        }
+        let encryption = self.encryption.trim();
+        if !encryption.is_empty() && !ENCRYPTION_POLICIES.contains(&encryption) {
+            return Err(format!(
+                "network.encryption must be one of {}",
+                ENCRYPTION_POLICIES.join(", ")
+            ));
         }
         Ok(())
     }
@@ -698,6 +750,56 @@ default_trackers = ["udp://tracker.example:6969/announce", "https://t.example/a"
                 "https://t.example/a".to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn proxy_settings_are_validated() {
+        let file = FileConfig::parse(
+            r#"
+[network]
+proxy_type = "socks5"
+proxy_host = "127.0.0.1"
+proxy_port = 1080
+encryption = "forced"
+"#,
+        )
+        .expect("proxy config");
+        let resolved = file
+            .resolve(&std::collections::BTreeMap::new())
+            .expect("resolve");
+        assert_eq!(resolved.network.proxy_type, "socks5");
+        assert_eq!(resolved.network.proxy_port, 1080);
+        assert_eq!(resolved.network.encryption, "forced");
+
+        let error = FileConfig::parse(
+            r#"
+[network]
+proxy_type = "socks5"
+"#,
+        )
+        .expect("parses")
+        .resolve(&std::collections::BTreeMap::new())
+        .expect_err("a proxy without a host");
+        assert!(error.to_string().contains("proxy_host"), "{error}");
+
+        let error = FileConfig::parse(
+            r#"
+[network]
+proxy_type = "socks9"
+proxy_host = "h"
+proxy_port = 1
+"#,
+        )
+        .expect("parses")
+        .resolve(&std::collections::BTreeMap::new())
+        .expect_err("unknown proxy type");
+        assert!(error.to_string().contains("proxy_type"), "{error}");
+
+        let error = FileConfig::parse("[network]\nencryption = \"maybe\"\n")
+            .expect("parses")
+            .resolve(&std::collections::BTreeMap::new())
+            .expect_err("unknown encryption");
+        assert!(error.to_string().contains("encryption"), "{error}");
     }
 
     #[test]

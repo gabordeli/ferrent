@@ -336,6 +336,17 @@ fn run_worker(
     session
         .pin_mut()
         .set_default_trackers(&settings.default_trackers.join("\n"));
+    session.pin_mut().set_network_settings(
+        &settings.proxy_type,
+        &settings.proxy_host,
+        settings.proxy_port,
+        &settings.proxy_username,
+        &settings.proxy_password,
+        settings.proxy_peer_connections,
+        &settings.encryption,
+        settings.upnp,
+        settings.natpmp,
+    );
     let mut last_progress = Instant::now();
     let mut finished = std::collections::BTreeSet::new();
 
@@ -561,6 +572,17 @@ fn run_worker(
                 session
                     .pin_mut()
                     .set_default_trackers(&settings.default_trackers.join("\n"));
+                session.pin_mut().set_network_settings(
+                    &settings.proxy_type,
+                    &settings.proxy_host,
+                    settings.proxy_port,
+                    &settings.proxy_username,
+                    &settings.proxy_password,
+                    settings.proxy_peer_connections,
+                    &settings.encryption,
+                    settings.upnp,
+                    settings.natpmp,
+                );
                 let _ = reply.send(());
             }
             Ok(Command::CreateTorrent { spec, reply }) => {
