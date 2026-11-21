@@ -33,6 +33,12 @@ pub const REGULAR_BYTES: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Reg
 pub const MEDIUM_BYTES: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf");
 pub const SEMIBOLD_BYTES: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
 
+/// Rendered at 3× (338×90) so the sidebar lockup stays crisp; the widget
+/// scales it down to 113×30.
+pub const LOGO_BYTES: &[u8] = include_bytes!("../assets/logo.png");
+/// The square mark alone, for the collapsed sidebar and the window icon.
+pub const MARK_BYTES: &[u8] = include_bytes!("../assets/mark.png");
+
 #[must_use]
 pub fn regular() -> Font {
     Font {

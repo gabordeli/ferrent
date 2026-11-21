@@ -5,9 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use ferrent_gui::actions::{self, TorrentAction};
+use ferrent_gui::activity::{
+    ActivityLog, Change, Event as ActivityEvent, Source as ActivitySource,
+};
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
@@ -389,7 +392,7 @@ struct App {
     details_for: Option<u64>,
     details_payload: Option<DetailsPayload>,
     details_error: Option<String>,
-    activity: Vec<String>,
+    activity: ActivityLog,
 
     modifiers: Modifiers,
     measure: bool,
@@ -479,7 +482,7 @@ impl Default for App {
             details_for: None,
             details_payload: None,
             details_error: None,
-            activity: Vec::new(),
+            activity: ActivityLog::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
             measure_started: None,
@@ -1395,6 +1398,7 @@ impl App {
         }
         match result {
             Ok(page) => {
+                self.activity.observe(&page.torrents, SystemTime::now());
                 self.page = page;
                 self.page_offset = Some(offset);
                 let max = table::max_scroll(self.page.total as usize);
@@ -1784,6 +1788,26 @@ impl App {
         self.action_in_flight = false;
         if errors.is_empty() {
             self.status = format!("{} ok ({} torrent(s))", action.label(), undo.selected.len());
+            let at = SystemTime::now();
+            match action {
+                TorrentAction::Pause => {
+                    self.activity.client_states(
+                        &undo.selected_torrents,
+                        TorrentState::Paused as i32,
+                        at,
+                    );
+                }
+                TorrentAction::Resume => {
+                    self.activity.client_states(
+                        &undo.selected_torrents,
+                        TorrentState::Downloading as i32,
+                        at,
+                    );
+                }
+                TorrentAction::Remove { .. } => {
+                    self.activity.client_removed(&undo.selected_torrents, at);
+                }
+            }
             if matches!(action, TorrentAction::Remove { .. }) {
                 self.refresh_page()
             } else {
@@ -4506,18 +4530,12 @@ impl App {
         };
         let expanded = !self.sidebar_collapsed;
 
-        let mark = container(text("").size(1.0))
-            .width(Length::Fixed(4.0))
-            .height(Length::Fixed(18.0))
-            .style(|_theme: &iced::Theme| container::Style {
-                background: Some(theme::PRIMARY.into()),
-                border: iced::Border {
-                    color: theme::PRIMARY,
-                    width: 0.0,
-                    radius: 2.0.into(),
-                },
-                ..container::Style::default()
-            });
+        let mark = iced::widget::image(iced::widget::image::Handle::from_bytes(theme::MARK_BYTES))
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0));
+        let logo = iced::widget::image(iced::widget::image::Handle::from_bytes(theme::LOGO_BYTES))
+            .width(Length::Fixed(113.0))
+            .height(Length::Fixed(30.0));
         let toggle = icon_button(
             if expanded {
                 glyph::CHEVRON_LEFT
@@ -4528,15 +4546,10 @@ impl App {
         );
 
         let header: Element<Message> = if expanded {
-            row![
-                mark,
-                text("Ferrent").size(18).font(theme::semibold()),
-                horizontal_space(),
-                toggle,
-            ]
-            .spacing(10)
-            .align_y(iced::Alignment::Center)
-            .into()
+            row![logo, horizontal_space(), toggle]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
         } else {
             row![mark, toggle]
                 .spacing(6)
@@ -4920,6 +4933,11 @@ impl App {
             .into();
         }
         let Some(torrent) = self.selected_torrents.values().next() else {
+            // The activity log is session-wide, so it is worth showing even
+            // when no row is selected.
+            if self.details_tab == DetailsTab::Activity {
+                return self.activity_body();
+            }
             return column![
                 text("Nothing selected").size(12).color(dim),
                 text("Click a row to inspect it. Space pause/resume · Delete remove")
@@ -5119,19 +5137,68 @@ impl App {
 
     fn activity_body(&self) -> Element<'_, Message> {
         let dim = theme::TEXT_SECONDARY;
-        if self.activity.is_empty() {
-            return text("No events observed yet.").size(12).color(dim).into();
+        // With a torrent selected the tab is its history; without one it is
+        // the whole session, newest first.
+        let only = self.active;
+        if self.activity.is_empty(only) {
+            let message = if only.is_some() {
+                "No events for this torrent yet."
+            } else {
+                "No events observed yet."
+            };
+            return text(message).size(12).color(dim).into();
         }
         let rows = self
             .activity
-            .iter()
-            .rev()
-            .take(40)
-            .map(|line| text(line.clone()).size(11).color(dim).into())
+            .iter(only)
+            .map(|event| self.activity_row(event))
             .collect::<Vec<Element<Message>>>();
         scrollable(WidgetColumn::with_children(rows).spacing(2))
             .height(Length::Fill)
             .into()
+    }
+
+    fn activity_row(&self, event: &ActivityEvent) -> Element<'_, Message> {
+        let dim = theme::TEXT_SECONDARY;
+        let (change, color) = match &event.change {
+            Change::State(state) => {
+                let label = table::state_label(*state);
+                let color = if *state == TorrentState::Error as i32 {
+                    theme::ERROR
+                } else {
+                    dim
+                };
+                (label.to_owned(), color)
+            }
+            Change::Removed => ("removed".to_owned(), theme::ERROR),
+        };
+        let from = event.from.map_or_else(
+            || "—".to_owned(),
+            |state| table::state_label(state).to_owned(),
+        );
+        let source = match event.source {
+            ActivitySource::Client => "client",
+            ActivitySource::Daemon => "daemon",
+        };
+        let when = chrono::DateTime::<chrono::Local>::from(event.at)
+            .format("%H:%M:%S")
+            .to_string();
+        row![
+            text(when).size(11).color(dim).width(Length::Fixed(64.0)),
+            text(from).size(11).color(dim).width(Length::Fixed(92.0)),
+            text(change)
+                .size(11)
+                .color(color)
+                .width(Length::Fixed(92.0)),
+            text(source).size(11).color(dim).width(Length::Fixed(56.0)),
+            text(event.name.clone()).size(11).width(Length::Fill),
+            text(format!("#{}", event.torrent_id))
+                .size(11)
+                .color(dim)
+                .width(Length::Fixed(56.0)),
+        ]
+        .spacing(8)
+        .into()
     }
 
     fn pending_details(&self, dim: Color) -> Element<'_, Message> {
@@ -5995,7 +6062,11 @@ fn main() -> iced::Result {
         .font(theme::SEMIBOLD_BYTES)
         .font(icons::SOLID_BYTES)
         .subscription(App::subscription)
-        .window_size(Size::new(1440.0, 900.0));
+        .window(iced::window::Settings {
+            size: Size::new(1440.0, 900.0),
+            icon: iced::window::icon::from_file_data(theme::MARK_BYTES, None).ok(),
+            ..iced::window::Settings::default()
+        });
 
     let result =
         if std::env::args().any(|argument| argument == "--connect" || argument == "--measure") {
