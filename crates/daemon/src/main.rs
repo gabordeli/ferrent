@@ -90,8 +90,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     };
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
-    let store = RedbStore::open(data_dir.join("state.redb"))?;
-    let mut persisted = persist::load_torrents(&store)?;
+    let mut store = RedbStore::open(data_dir.join("state.redb"))?;
+    let (mut persisted, quarantined) = persist::load_torrents_quarantining(&mut store)?;
     let queue_order = persist::load_queue_order(&store)?;
     order_for_restore(&mut persisted, &queue_order);
     let labels = LabelState::load(&store, &persisted)?;
@@ -152,6 +152,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let local = listener.local_addr()?;
     println!("ferrentd listening on https://{local}");
     println!("restored_torrents={restored_count}");
+    if !quarantined.is_empty() {
+        println!("quarantined_records={}", quarantined.len());
+        for record in &quarantined {
+            println!("quarantined={} reason={}", record.key, record.reason);
+        }
+    }
     println!("download_dir={}", download_dir.display());
     println!("startup_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
     println!("TLS fingerprint: {}", tls.fingerprint);

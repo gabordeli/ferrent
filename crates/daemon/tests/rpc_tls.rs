@@ -496,3 +496,59 @@ async fn watch_streams_config_changes() {
 
     server.shutdown();
 }
+
+#[tokio::test]
+async fn garbage_on_the_tls_port_does_not_kill_the_server() {
+    let server = start_server("secret").await;
+
+    // Plain bytes where the TLS handshake is expected: the acceptor fails, the
+    // server must keep serving instead of taking the process down with it.
+    {
+        use std::io::Write as _;
+        let mut socket = std::net::TcpStream::connect(server.addr).expect("raw connect");
+        socket
+            .write_all(b"GARBAGE /ferrent.v1.FerrentService/ListTorrents HTTP/1.1\r\n\r\n")
+            .expect("write garbage");
+        socket.flush().expect("flush");
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect after the garbage");
+    let listed = client
+        .list_torrents(list_request())
+        .await
+        .expect("list after the garbage")
+        .into_inner();
+    assert_eq!(listed.total, 0);
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn an_unknown_enum_value_is_tolerated() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    // 99 is not a SortField variant, 0xdead is not a TorrentState filter:
+    // prost hands both through as plain integers.
+    let listed = client
+        .list_torrents(ListTorrentsRequest {
+            filter: String::new(),
+            sort: 99,
+            descending: true,
+            offset: 0,
+            limit: 5,
+            state_filter: 0xdead,
+            label_filter: String::new(),
+        })
+        .await
+        .expect("unknown enum values must not fail the call")
+        .into_inner();
+    assert_eq!(listed.total, 0);
+
+    server.shutdown();
+}

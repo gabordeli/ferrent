@@ -16,6 +16,8 @@ const METAINFO: &str = "metainfo";
 const FAST_RESUME: &str = "fastresume";
 const PAUSED: &str = "paused";
 const LABEL: &str = "label";
+/// Unreadable records are moved here instead of being deleted.
+const QUARANTINE_PREFIX: &str = "quarantine:";
 /// Single record holding the download queue order (ids, little endian u64).
 const QUEUE_ORDER: &str = "queue:order";
 
@@ -179,52 +181,132 @@ pub fn remove_torrent(store: &mut dyn StateStore, id: TorrentId) -> Result<(), S
 }
 
 /// Loads every complete torrent record, ordered by id.
+///
+/// Read-only: unreadable keys are dropped. The daemon uses
+/// [`load_torrents_quarantining`] so the bad records survive for inspection.
 pub fn load_torrents(store: &dyn StateStore) -> Result<Vec<PersistedTorrent>, StoreError> {
     let entries = store.list(PREFIX)?;
-    let mut records: BTreeMap<TorrentId, PartialRecord> = BTreeMap::new();
+    Ok(assemble(&entries).0)
+}
 
-    for (key, value) in entries {
-        let rest = key.strip_prefix(PREFIX).ok_or_else(|| {
-            StoreError::Backend(format!("unexpected store key without prefix: {key}"))
-        })?;
-        let (id, field) = rest
-            .split_once(':')
-            .ok_or_else(|| StoreError::Backend(format!("malformed torrent key: {key}")))?;
-        let id: TorrentId = id.parse().map_err(|error| {
-            StoreError::Backend(format!("malformed torrent id in {key}: {error}"))
-        })?;
+/// A record key that could not be restored, moved aside during startup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedRecord {
+    pub key: String,
+    pub reason: String,
+}
+
+/// Loads the torrents and moves unreadable or incomplete records under
+/// `quarantine:<original key>`, so one bad row cannot stop the daemon.
+pub fn load_torrents_quarantining(
+    store: &mut dyn StateStore,
+) -> Result<(Vec<PersistedTorrent>, Vec<QuarantinedRecord>), StoreError> {
+    let entries = store.list(PREFIX)?;
+    let (torrents, incomplete, mut quarantined) = assemble_split(&entries);
+
+    for id in incomplete {
+        let prefix = key(id, "");
+        for (stored, _) in &entries {
+            if stored.starts_with(&prefix) {
+                quarantined.push(QuarantinedRecord {
+                    key: stored.clone(),
+                    reason: format!("incomplete record for torrent {id}"),
+                });
+            }
+        }
+    }
+
+    if !quarantined.is_empty() {
+        let mut ops = Vec::with_capacity(quarantined.len() * 2);
+        for record in &quarantined {
+            if let Some((_, value)) = entries.iter().find(|(stored, _)| *stored == record.key) {
+                ops.push(StoreOp::Put {
+                    key: format!("{QUARANTINE_PREFIX}{}", record.key),
+                    value: value.clone(),
+                });
+            }
+            ops.push(StoreOp::Delete {
+                key: record.key.clone(),
+            });
+        }
+        store.batch(ops)?;
+    }
+
+    Ok((torrents, quarantined))
+}
+
+fn assemble(entries: &[(String, Vec<u8>)]) -> (Vec<PersistedTorrent>, Vec<QuarantinedRecord>) {
+    let (torrents, _, quarantined) = assemble_split(entries);
+    (torrents, quarantined)
+}
+
+fn assemble_split(
+    entries: &[(String, Vec<u8>)],
+) -> (
+    Vec<PersistedTorrent>,
+    Vec<TorrentId>,
+    Vec<QuarantinedRecord>,
+) {
+    let mut records: BTreeMap<TorrentId, PartialRecord> = BTreeMap::new();
+    let mut quarantined = Vec::new();
+
+    for (stored, value) in entries {
+        let Some(rest) = stored.strip_prefix(PREFIX) else {
+            continue;
+        };
+        let Some((id, field)) = rest.split_once(':') else {
+            quarantined.push(QuarantinedRecord {
+                key: stored.clone(),
+                reason: "malformed torrent key".to_owned(),
+            });
+            continue;
+        };
+        let Ok(id) = id.parse::<TorrentId>() else {
+            quarantined.push(QuarantinedRecord {
+                key: stored.clone(),
+                reason: "malformed torrent id".to_owned(),
+            });
+            continue;
+        };
         let record = records.entry(id).or_default();
+        let text = |value: &[u8]| match String::from_utf8(value.to_vec()) {
+            Ok(text) => Ok(text),
+            Err(_) => Err(QuarantinedRecord {
+                key: stored.clone(),
+                reason: format!("invalid utf-8 in {field}"),
+            }),
+        };
         match field {
-            NAME => {
-                record.name = Some(String::from_utf8(value).map_err(|error| {
-                    StoreError::Backend(format!("invalid name for torrent {id}: {error}"))
-                })?);
-            }
-            SAVE_PATH => {
-                record.save_path = Some(PathBuf::from(String::from_utf8(value).map_err(
-                    |error| StoreError::Backend(format!("invalid save path for {id}: {error}")),
-                )?));
-            }
-            METAINFO => record.metainfo = Some(value),
-            FAST_RESUME => record.resume_data = Some(value),
+            NAME => match text(value) {
+                Ok(name) => record.name = Some(name),
+                Err(bad) => quarantined.push(bad),
+            },
+            SAVE_PATH => match text(value) {
+                Ok(path) => record.save_path = Some(PathBuf::from(path)),
+                Err(bad) => quarantined.push(bad),
+            },
+            METAINFO => record.metainfo = Some(value.clone()),
+            FAST_RESUME => record.resume_data = Some(value.clone()),
             PAUSED => record.paused_by_user = value.first().is_some_and(|byte| *byte != 0),
             LABEL => {
-                record.label = if value.is_empty() {
-                    None
+                if value.is_empty() {
+                    record.label = None;
                 } else {
-                    Some(String::from_utf8(value).map_err(|error| {
-                        StoreError::Backend(format!("invalid label for torrent {id}: {error}"))
-                    })?)
-                };
+                    match text(value) {
+                        Ok(label) => record.label = Some(label),
+                        Err(bad) => quarantined.push(bad),
+                    }
+                }
             }
             _ => {}
         }
     }
 
     let mut out = Vec::new();
+    let mut incomplete = Vec::new();
     for (id, record) in records {
-        if let (Some(metainfo), Some(save_path)) = (record.metainfo, record.save_path) {
-            out.push(PersistedTorrent {
+        match (record.metainfo, record.save_path) {
+            (Some(metainfo), Some(save_path)) => out.push(PersistedTorrent {
                 id,
                 name: record.name.unwrap_or_else(|| format!("torrent-{id}")),
                 save_path,
@@ -232,10 +314,11 @@ pub fn load_torrents(store: &dyn StateStore) -> Result<Vec<PersistedTorrent>, St
                 resume_data: record.resume_data,
                 paused_by_user: record.paused_by_user,
                 label: record.label,
-            });
+            }),
+            _ => incomplete.push(id),
         }
     }
-    Ok(out)
+    (out, incomplete, quarantined)
 }
 
 #[derive(Default)]
@@ -255,6 +338,7 @@ fn key(id: TorrentId, field: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::MemoryStore;
     use crate::store::RedbStore;
 
     fn temp_db(name: &str) -> PathBuf {
@@ -319,6 +403,120 @@ mod tests {
 
         let loaded = load_torrents(&store).expect("load");
         assert!(loaded.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_unreadable_field_is_quarantined_and_the_torrent_still_loads() {
+        let mut store = MemoryStore::new();
+        save_torrent(&mut store, &record(0, "good")).expect("save good");
+        save_torrent(&mut store, &record(1, "bad")).expect("save bad");
+        store
+            .batch(vec![StoreOp::Put {
+                key: key(0, NAME),
+                value: vec![0xff, 0xfe],
+            }])
+            .expect("corrupt the name");
+
+        let (loaded, quarantined) =
+            load_torrents_quarantining(&mut store).expect("load quarantining");
+
+        assert_eq!(loaded.len(), 2, "both torrents survive");
+        assert_eq!(loaded[0].name, "torrent-0", "fallback name is used");
+        assert_eq!(quarantined.len(), 1);
+        assert_eq!(quarantined[0].key, key(0, NAME));
+        assert!(quarantined[0].reason.contains("invalid utf-8"));
+        assert_eq!(
+            store
+                .get(&format!("{QUARANTINE_PREFIX}{}", key(0, NAME)))
+                .expect("get"),
+            Some(vec![0xff, 0xfe])
+        );
+        assert!(store.get(&key(0, NAME)).expect("get").is_none());
+    }
+
+    #[test]
+    fn a_malformed_key_is_quarantined_instead_of_failing_the_load() {
+        let mut store = MemoryStore::new();
+        save_torrent(&mut store, &record(3, "good")).expect("save good");
+        store
+            .batch(vec![StoreOp::Put {
+                key: "torrent:not-an-id:name".to_owned(),
+                value: b"junk".to_vec(),
+            }])
+            .expect("corrupt the key");
+
+        let (loaded, quarantined) =
+            load_torrents_quarantining(&mut store).expect("load quarantining");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(quarantined.len(), 1);
+        assert_eq!(quarantined[0].key, "torrent:not-an-id:name");
+        assert_eq!(quarantined[0].reason, "malformed torrent id");
+        assert_eq!(
+            store.get("quarantine:torrent:not-an-id:name").expect("get"),
+            Some(b"junk".to_vec())
+        );
+    }
+
+    #[test]
+    fn an_incomplete_record_is_quarantined_as_a_whole() {
+        let mut store = MemoryStore::new();
+        save_torrent(&mut store, &record(4, "good")).expect("save good");
+        store
+            .batch(vec![
+                StoreOp::Put {
+                    key: key(9, NAME),
+                    value: b"no save path".to_vec(),
+                },
+                StoreOp::Put {
+                    key: key(9, METAINFO),
+                    value: vec![1, 2, 3],
+                },
+            ])
+            .expect("write an incomplete record");
+
+        let (loaded, quarantined) =
+            load_torrents_quarantining(&mut store).expect("load quarantining");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, 4);
+        assert_eq!(quarantined.len(), 2, "both keys of the broken record move");
+        assert!(
+            quarantined
+                .iter()
+                .all(|record| record.reason.contains("incomplete record"))
+        );
+        assert!(store.list("torrent:9:").expect("list").is_empty());
+        assert_eq!(store.list("quarantine:torrent:9:").expect("list").len(), 2);
+    }
+
+    #[test]
+    fn quarantine_is_written_to_redb_before_the_daemon_serves() {
+        let path = temp_db("quarantine-redb");
+        {
+            let mut store = RedbStore::open(&path).expect("open");
+            save_torrent(&mut store, &record(0, "good")).expect("save 0");
+            store.put(&key(1, SAVE_PATH), b"/data").expect("put path");
+            store.put(&key(1, METAINFO), &[1, 2, 3]).expect("put meta");
+            store.put(&key(1, NAME), &[0xff, 0xfe]).expect("put name");
+            store.flush().expect("flush");
+
+            let (loaded, quarantined) =
+                load_torrents_quarantining(&mut store).expect("load quarantining");
+            assert_eq!(loaded.len(), 2);
+            assert_eq!(quarantined.len(), 1);
+        }
+
+        let store = RedbStore::open(&path).expect("reopen");
+        assert!(store.get(&key(1, NAME)).expect("get").is_none());
+        assert_eq!(
+            store
+                .get(&format!("{QUARANTINE_PREFIX}{}", key(1, NAME)))
+                .expect("get"),
+            Some(vec![0xff, 0xfe])
+        );
+        assert_eq!(load_torrents(&store).expect("second load").len(), 2);
         let _ = std::fs::remove_file(&path);
     }
 }
