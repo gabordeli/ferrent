@@ -26,7 +26,7 @@ const DEFAULT_TOKEN_FILE: &str = "/etc/ferrent/token";
 /// Every field has a default so a missing file (or a partial file) is valid.
 /// `deny_unknown_fields` makes a typo a startup error rather than a silently
 /// ignored setting.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FileConfig {
     pub data_dir: Option<PathBuf>,
@@ -45,6 +45,90 @@ pub struct FileConfig {
     pub notify: NotifyConfig,
     /// Storage zones and disk guard thresholds (M6).
     pub diskguard: DiskGuardConfig,
+    /// Ratio and seed-time policy (M8-T3).
+    pub ratio: RatioConfig,
+}
+
+/// Ratio / seed-time auto-remove (M8-T3).
+///
+/// Zero means "off": a torrent is only acted on when a threshold is set,
+/// either in its label override or in the session defaults here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RatioConfig {
+    pub enabled: bool,
+    /// Stop seeding when uploaded/downloaded reaches this (0 = off).
+    pub stop_at_ratio: f32,
+    /// Remove when uploaded/downloaded reaches this (0 = off).
+    pub remove_at_ratio: f32,
+    /// Remove after this many hours of seeding (0 = off).
+    pub seed_time_hours: u32,
+    /// Removal deletes the payload; without it only the torrent goes.
+    pub remove_with_data: bool,
+    /// Per-label overrides, matched by label name.
+    pub label: Vec<LabelRatio>,
+    /// Report the candidates without pausing or removing anything.
+    pub dry_run: bool,
+    /// Evaluation period in seconds.
+    pub poll_secs: u64,
+}
+
+impl Default for RatioConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stop_at_ratio: 0.0,
+            remove_at_ratio: 0.0,
+            seed_time_hours: 0,
+            remove_with_data: false,
+            label: Vec::new(),
+            dry_run: false,
+            poll_secs: 300,
+        }
+    }
+}
+
+impl RatioConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_secs < 30 || self.poll_secs > 3_600 {
+            return Err("ratio.poll_secs must be between 30 and 3600".to_owned());
+        }
+        for (name, value) in [
+            ("stop_at_ratio", self.stop_at_ratio),
+            ("remove_at_ratio", self.remove_at_ratio),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!("ratio.{name} must be a non-negative number"));
+            }
+        }
+        for (index, label) in self.label.iter().enumerate() {
+            if label.name.trim().is_empty() {
+                return Err(format!("ratio.label[{index}].name must not be empty"));
+            }
+            if !label.stop_at_ratio.is_finite() || label.stop_at_ratio < 0.0 {
+                return Err(format!(
+                    "ratio.label[{index}].stop_at_ratio must be a non-negative number"
+                ));
+            }
+            if !label.remove_at_ratio.is_finite() || label.remove_at_ratio < 0.0 {
+                return Err(format!(
+                    "ratio.label[{index}].remove_at_ratio must be a non-negative number"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A label's ratio overrides; zero fields inherit the session default.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LabelRatio {
+    pub name: String,
+    pub stop_at_ratio: f32,
+    pub remove_at_ratio: f32,
+    pub seed_time_hours: u32,
+    pub remove_with_data: bool,
 }
 
 /// Outbound notification settings.
@@ -346,6 +430,7 @@ impl FileConfig {
             scheduler: self.scheduler.clone(),
             notify: self.notify.clone(),
             diskguard: self.diskguard.clone(),
+            ratio: self.ratio.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -354,7 +439,7 @@ impl FileConfig {
 }
 
 /// A resolved configuration with environment overrides applied.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedConfig {
     pub data_dir: PathBuf,
     pub download_dir: PathBuf,
@@ -367,6 +452,7 @@ pub struct ResolvedConfig {
     pub scheduler: SchedulerConfig,
     pub notify: NotifyConfig,
     pub diskguard: DiskGuardConfig,
+    pub ratio: RatioConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -387,6 +473,7 @@ impl ResolvedConfig {
         }
         validate_bind(&self.bind)?;
         self.diskguard.validate().map_err(ConfigError::invalid)?;
+        self.ratio.validate().map_err(ConfigError::invalid)?;
         Ok(())
     }
 }

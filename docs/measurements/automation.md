@@ -88,3 +88,26 @@ után a daemon `StateMirror::set_save_path`-tal frissíti a snapshotot és
 - A fake HTTP szerver egy kérést szolgál ki; a Telegram `retry_after`
   viselkedését külön unit/integrációs tesztek fedik (`tests/notify.rs`).
 - Egy hoszt, egy lemez; a több mountos viselkedés az M6 DiskGuard mérése.
+
+## M8-T3 – Ratio / seed-time auto-remove
+
+Mérve 2026-11-20. A döntés tiszta függvény (`daemon/src/automation/ratio.rs`),
+a daemon oldala csak a configot, a mirrort és a műveleteket adja.
+
+- **Limit forrása:** a címke `[[ratio.label]]` szabálya felülírja a session
+  defaultot **mezőnként** (0 = öröklés); a session default a `[ratio]` blokk.
+- **Arány:** `uploaded / max(downloaded, total)` — a torrent mérete a nevező,
+  ha kevesebb lett letöltve (kész adattal hozzáadott torrentnél nem ad
+  végtelent). Az `all_time_upload/download` a libtorrent resume datából jön,
+  tehát restart után is megmarad.
+- **Sorrend:** remove > seed-idő lejárat > stop. A stop a `RATIO`
+  pause-reasonnel megy (nem írja felül a user/scheduler/guard okokat).
+- **Dry-run:** a jelölteket a daemon logba írja
+  (`ratio dry-run: would act on …`) és a `ratio_status`-ban is megtartja;
+  semmit nem módosít.
+- **Törlés:** a payload törlése a `remove_with_data`-tól függ; a torrent
+  rekord a redb-ből is törlődik, a label-hozzárendelés és a pause-reason is.
+
+Teszt: 6 integációs eset (`crates/daemon/tests/ratio.rs`) — stop, küszöb
+alatt marad, remove, dry-run, label-felülírás, letöltő torrent kihagyása —
+mind zöld.

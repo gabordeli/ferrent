@@ -1,3 +1,18 @@
 data_dir = "/var/lib/ferrent"
 bind = "127.0.0.1:50051"
 token_file = "/etc/ferrent/token"
+
+# Ratio / seed-time auto-remove (M8-T3). Zero means "off"; a label can
+# override any field by name. `poll_secs` is the evaluation period.
+# [ratio]
+# enabled = true
+# stop_at_ratio = 2.0
+# remove_at_ratio = 3.0
+# seed_time_hours = 0
+# remove_with_data = false
+# dry_run = false
+# poll_secs = 300
+#
+# [[ratio.label]]
+# name = "music"
+# stop_at_ratio = 3.0

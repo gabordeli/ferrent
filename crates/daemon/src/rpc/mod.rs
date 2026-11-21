@@ -119,6 +119,10 @@ pub struct AppState {
     pub(crate) disks: Mutex<Option<crate::diskguard::StorageReport>>,
     /// Disk guard threshold state per filesystem.
     pub(crate) disk_levels: Mutex<BTreeMap<PathBuf, crate::diskguard::guard::Level>>,
+    /// Ratio/seed-time loop state.
+    pub(crate) ratio: Mutex<crate::automation::ratio::RatioState>,
+    /// Last ratio evaluation, for the status RPC and the dry run.
+    pub ratio_status: Mutex<crate::automation::ratio::RatioStatus>,
 }
 
 impl AppState {
@@ -152,6 +156,8 @@ impl AppState {
             moves: Mutex::new(BTreeMap::new()),
             disks: Mutex::new(None),
             disk_levels: Mutex::new(BTreeMap::new()),
+            ratio: Mutex::new(crate::automation::ratio::RatioState::default()),
+            ratio_status: Mutex::new(crate::automation::ratio::RatioStatus::default()),
         }
     }
 
@@ -1255,6 +1261,7 @@ pub async fn serve(
     crate::autoadd::spawn_autoadd(Arc::clone(&state));
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
+    crate::automation::ratio::spawn_ratio(Arc::clone(&state));
     crate::notify::spawn_notifier(Arc::clone(&state));
     crate::diskguard::moves::spawn_move_retry(Arc::clone(&state));
     crate::diskguard::guard::spawn_disk_guard(Arc::clone(&state));

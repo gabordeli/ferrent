@@ -1,6 +1,7 @@
 //! Ferrent daemon library: persistence and, later, the RPC server.
 
 pub mod autoadd;
+pub mod automation;
 pub mod config;
 pub mod control;
 pub mod diskguard;
