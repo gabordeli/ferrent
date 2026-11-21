@@ -90,6 +90,10 @@ pub struct ServerStatus {
     pub active: u32,
     /// Installed IP blocklist ranges; `0` when none is loaded.
     pub blocklist_ranges: u32,
+    /// Scheduler master switch and the level it currently enforces.
+    pub scheduler_enabled: bool,
+    pub scheduler_level: String,
+    pub scheduler_next_unix: i64,
 }
 
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
@@ -153,6 +157,9 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
         moving: response.moving_count,
         active: response.active_count,
         blocklist_ranges: response.blocklist_ranges,
+        scheduler_enabled: response.scheduler_enabled,
+        scheduler_level: response.scheduler_level,
+        scheduler_next_unix: response.scheduler_next_unix,
     })
 }
 

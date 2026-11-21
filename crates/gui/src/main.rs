@@ -162,6 +162,8 @@ enum Message {
     FilterChanged(String),
     FilterSettled(u64),
     Table(TableMessage),
+    /// The status bar's clock: open Settings on the scheduler grid.
+    OpenScheduler,
     /// One entry of the floating row menu was chosen.
     MenuPick(MenuAction),
     Refresh,
@@ -1043,6 +1045,10 @@ impl App {
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenServers => self.open_servers(),
             Message::OpenSettings => self.open_settings(),
+            Message::OpenScheduler => {
+                self.settings.tab = Tab::Scheduler;
+                self.open_settings()
+            }
             Message::OpenStorage => {
                 self.settings.tab = Tab::Storage;
                 Task::batch([self.open_settings(), self.load_disks()])
@@ -6418,7 +6424,11 @@ impl App {
         );
         container(
             row![
-                text("●").size(9).color(color),
+                text("●").size(11).color(if self.client.is_some() {
+                    theme::downloading()
+                } else {
+                    theme::error()
+                }),
                 text(label).size(11).color(color),
                 text(server).size(11).color(theme::text_secondary()),
                 text(
@@ -6441,6 +6451,7 @@ impl App {
                 text(i18n::t_fmt("{} torrents", &[&total.to_string()]))
                     .size(11)
                     .color(theme::text_secondary()),
+                scheduler_icon(self.server_status.as_ref()),
             ]
             .spacing(14)
             .align_y(iced::Alignment::Center),
@@ -6458,6 +6469,43 @@ impl App {
         })
         .into()
     }
+}
+
+/// The scheduler's state as a coloured clock; clicking it opens the grid.
+fn scheduler_icon(status: Option<&ServerStatus>) -> Element<'_, Message> {
+    let level = status
+        .map(|status| status.scheduler_level.to_lowercase())
+        .unwrap_or_default();
+    let (color, hint) = if level.starts_with("green") || level.starts_with("zöld") {
+        (theme::downloading(), i18n::t("Scheduler: full speed"))
+    } else if level.starts_with("yellow") || level.starts_with("sárga") {
+        (theme::queued(), i18n::t("Scheduler: limited"))
+    } else if level.starts_with("red") || level.starts_with("piros") {
+        (theme::error(), i18n::t("Scheduler: paused"))
+    } else if status.is_some_and(|status| !status.scheduler_enabled) {
+        (theme::text_muted(), i18n::t("Scheduler: off"))
+    } else {
+        (theme::text_muted(), i18n::t("Scheduler"))
+    };
+    button(
+        tooltip(
+            text(glyph::HOURGLASS)
+                .font(icons::solid())
+                .size(12.0)
+                .color(color),
+            text(hint).size(11).color(theme::text()),
+            iced::widget::tooltip::Position::Top,
+        )
+        .gap(6)
+        .style(tooltip_style),
+    )
+    .on_press(Message::OpenScheduler)
+    .padding([2, 4])
+    .style(|_theme: &iced::Theme, _status| button::Style {
+        background: Some(Color::TRANSPARENT.into()),
+        ..button::Style::default()
+    })
+    .into()
 }
 
 fn stat_cell<'a>(label: &'a str, value: String) -> Element<'a, Message> {
