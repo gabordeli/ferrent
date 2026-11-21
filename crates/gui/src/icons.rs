@@ -50,4 +50,7 @@ pub mod glyph {
     pub const TAG: char = '\u{f02b}';
     pub const ARROW_UP: char = '\u{f062}';
     pub const ARROW_DOWN: char = '\u{f063}';
+    pub const FOLDER_OPEN: char = '\u{f07c}';
+    pub const LIST_OL: char = '\u{f0cb}';
+    pub const ROCKET: char = '\u{f135}';
 }

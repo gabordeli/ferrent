@@ -20,7 +20,7 @@ pub const VISIBLE_ROWS: usize = 64;
 pub const MENU_WIDTH: f32 = 160.0;
 pub const MENU_ITEM_HEIGHT: f32 = 26.0;
 pub const MENU_PADDING: f32 = 4.0;
-pub const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 7.0;
+pub const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 8.0;
 
 fn bg_header() -> Color {
     crate::theme::bg_secondary()
@@ -62,7 +62,9 @@ const BAR_HEIGHT: f32 = 8.0;
 /// One table column. `State` is displayed but not server-sortable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Column {
-    Id,
+    /// Queue position while the torrent is still downloading; a dash once it
+    /// seeds, because the number means nothing there.
+    Position,
     Name,
     Label,
     Size,
@@ -79,7 +81,7 @@ pub enum Column {
 impl Column {
     /// Every column, in display order.
     pub const ALL: [Self; 12] = [
-        Self::Id,
+        Self::Position,
         Self::Name,
         Self::Label,
         Self::Size,
@@ -96,7 +98,7 @@ impl Column {
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
-            Self::Id => crate::i18n::t("ID"),
+            Self::Position => "#",
             Self::Name => crate::i18n::t("NAME"),
             Self::Label => crate::i18n::t("LABEL"),
             Self::Size => crate::i18n::t("SIZE"),
@@ -114,7 +116,7 @@ impl Column {
     #[must_use]
     pub fn sort_field(self) -> Option<SortField> {
         match self {
-            Self::Id => Some(SortField::Id),
+            Self::Position => Some(SortField::Queue),
             Self::Name => Some(SortField::Name),
             Self::Label => Some(SortField::Label),
             Self::Progress => Some(SortField::Progress),
@@ -126,7 +128,7 @@ impl Column {
 
     fn default_width(self) -> f32 {
         match self {
-            Self::Id => 42.0,
+            Self::Position => 42.0,
             Self::Name => 260.0,
             Self::Label => 88.0,
             Self::Size => 74.0,
@@ -141,7 +143,7 @@ impl Column {
 
     const fn min_width(self) -> f32 {
         match self {
-            Self::Id => 28.0,
+            Self::Position => 28.0,
             Self::Name => 120.0,
             Self::Progress => 92.0,
             Self::SavePath => 90.0,
@@ -160,7 +162,7 @@ impl Column {
     pub fn right_aligned(self) -> bool {
         matches!(
             self,
-            Self::Id
+            Self::Position
                 | Self::Size
                 | Self::Download
                 | Self::Upload
@@ -267,10 +269,45 @@ impl ColumnLayout {
         slots
     }
 
+    /// Narrowest sensible table: the visible fixed columns plus the name
+    /// column at its minimum. A narrower viewport scrolls sideways.
+    #[must_use]
+    pub fn min_total(&self) -> f32 {
+        let visible: Vec<Column> = Column::ALL
+            .iter()
+            .copied()
+            .filter(|column| self.is_visible(*column))
+            .collect();
+        let fixed: f32 = visible
+            .iter()
+            .filter(|column| !column.flexible())
+            .map(|column| self.width_of(*column))
+            .sum();
+        let gaps = GAP * visible.len().saturating_sub(1) as f32;
+        fixed + gaps + Column::Name.min_width()
+    }
+
+    /// How far a table of the given usable width can scroll sideways.
+    #[must_use]
+    pub fn max_hscroll(&self, usable_width: f32) -> f32 {
+        (self.min_total() - usable_width.max(1.0)).max(0.0)
+    }
+
+    /// Slots for a table that can be wider than the viewport: the columns are
+    /// laid out at least at their minimum total, then shifted by `hscroll`.
+    #[must_use]
+    pub fn slots_scrolled(&self, width: f32, hscroll: f32) -> Vec<Slot> {
+        let mut slots = self.slots(width.max(self.min_total()));
+        for slot in &mut slots {
+            slot.x -= hscroll;
+        }
+        slots
+    }
+
     /// The column under a header x coordinate.
     #[must_use]
-    pub fn column_at(&self, x: f32, width: f32) -> Option<Column> {
-        self.slots(width)
+    pub fn column_at(&self, x: f32, width: f32, hscroll: f32) -> Option<Column> {
+        self.slots_scrolled(width, hscroll)
             .into_iter()
             .find(|slot| x >= slot.x && x < slot.x + slot.width)
             .map(|slot| slot.column)
@@ -279,8 +316,8 @@ impl ColumnLayout {
     /// The column whose right edge is within grabbing distance of `x`, so a
     /// drag can start on a boundary even when the pointer sits in the gap.
     #[must_use]
-    pub fn resize_handle(&self, x: f32, width: f32) -> Option<Column> {
-        self.slots(width)
+    pub fn resize_handle(&self, x: f32, width: f32, hscroll: f32) -> Option<Column> {
+        self.slots_scrolled(width, hscroll)
             .into_iter()
             .filter(|slot| !slot.column.flexible())
             .find(|slot| (x - (slot.x + slot.width)).abs() <= RESIZE_GRAB)
@@ -380,6 +417,7 @@ pub fn clamp_menu(x: f32, y: f32) -> (f32, f32) {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
+    Open,
     Pause,
     Resume,
     Label,
@@ -415,14 +453,15 @@ pub fn menu_action_at(menu: &ContextMenu, point: Point) -> Option<MenuAction> {
     }
     let index = ((point.y - menu.y - MENU_PADDING) / MENU_ITEM_HEIGHT).floor() as usize;
     match index {
-        0 if menu.paused => Some(MenuAction::Resume),
-        0 => Some(MenuAction::Pause),
-        1 => Some(MenuAction::Label),
-        2 => Some(MenuAction::Recheck),
-        3 => Some(MenuAction::Rename),
-        4 => Some(MenuAction::ToggleSequential),
-        5 => Some(MenuAction::ToggleSuperSeeding),
-        6 => Some(MenuAction::Remove),
+        0 => Some(MenuAction::Open),
+        1 if menu.paused => Some(MenuAction::Resume),
+        1 => Some(MenuAction::Pause),
+        2 => Some(MenuAction::Label),
+        3 => Some(MenuAction::Recheck),
+        4 => Some(MenuAction::Rename),
+        5 => Some(MenuAction::ToggleSequential),
+        6 => Some(MenuAction::ToggleSuperSeeding),
+        7 => Some(MenuAction::Remove),
         _ => None,
     }
 }
@@ -440,6 +479,29 @@ pub enum TableMessage {
     ResizeStart(Column, f32),
     Resize(Column, f32),
     ResizeEnd,
+    /// Horizontal offset request, in pixels.
+    HScroll(f32),
+}
+
+/// Height of the horizontal scrollbar strip at the bottom of the table.
+pub const HSCROLL_HEIGHT: f32 = 10.0;
+
+/// Geometry of the horizontal scrollbar for one frame.
+#[derive(Debug, Clone, Copy)]
+pub struct HBar {
+    pub thumb_x: f32,
+    pub thumb_w: f32,
+    track_w: f32,
+    max: f32,
+}
+
+impl HBar {
+    /// The horizontal offset that puts the thumb's left edge at `x`.
+    #[must_use]
+    pub fn offset_for(&self, x: f32) -> f32 {
+        let span = (self.track_w - self.thumb_w).max(1.0);
+        (x / span).clamp(0.0, 1.0) * self.max
+    }
 }
 
 pub struct Table<'a> {
@@ -456,27 +518,44 @@ pub struct Table<'a> {
     pub column_menu: Option<Point>,
     /// Column currently being dragged wider/narrower.
     pub resizing: Option<Column>,
+    /// Horizontal offset, for a viewport narrower than the columns.
+    pub hscroll: f32,
     /// label name → chip colour, built by the app for this frame.
     pub label_colors: BTreeMap<String, Color>,
 }
 
+/// Canvas state: whether the horizontal scrollbar thumb is being dragged,
+/// with the grab offset inside the thumb.
+#[derive(Debug, Default)]
+pub struct TableState {
+    hdrag: Option<f32>,
+}
+
 impl canvas::Program<TableMessage> for Table<'_> {
-    type State = ();
+    type State = TableState;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: canvas::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<TableMessage>) {
         use canvas::event::Status;
+        let bar = self.hbar(bounds);
         match event {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                let dy = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => y * ROW_HEIGHT * 3.0,
-                    mouse::ScrollDelta::Pixels { y, .. } => y,
+                let (dx, dy) = match delta {
+                    mouse::ScrollDelta::Lines { x, y } => (x * 40.0, y * ROW_HEIGHT * 3.0),
+                    mouse::ScrollDelta::Pixels { x, y } => (x, y),
                 };
+                if dx.abs() > 0.0 {
+                    // A horizontal wheel or trackpad swipe moves the columns.
+                    return (
+                        Status::Captured,
+                        Some(TableMessage::HScroll(self.hscroll + dx)),
+                    );
+                }
                 (Status::Captured, Some(TableMessage::Scroll(dy)))
             }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(button)) => {
@@ -485,6 +564,16 @@ impl canvas::Program<TableMessage> for Table<'_> {
                 };
                 match button {
                     mouse::Button::Left => {
+                        if let Some(bar) = bar {
+                            if point.y >= bounds.height - HSCROLL_HEIGHT {
+                                let grab = (point.x - bar.thumb_x).clamp(0.0, bar.thumb_w);
+                                state.hdrag = Some(grab);
+                                return (
+                                    Status::Captured,
+                                    Some(TableMessage::HScroll(bar.offset_for(point.x - grab))),
+                                );
+                            }
+                        }
                         if let Some(origin) = self.column_menu {
                             let action = column_menu_item(origin, bounds.width, point);
                             return (
@@ -496,7 +585,10 @@ impl canvas::Program<TableMessage> for Table<'_> {
                             );
                         }
                         if point.y < HEADER_HEIGHT {
-                            if let Some(column) = self.layout.resize_handle(point.x, bounds.width) {
+                            if let Some(column) =
+                                self.layout
+                                    .resize_handle(point.x, bounds.width, self.hscroll)
+                            {
                                 return (
                                     Status::Captured,
                                     Some(TableMessage::ResizeStart(column, point.x)),
@@ -519,6 +611,14 @@ impl canvas::Program<TableMessage> for Table<'_> {
                 }
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let (Some(grab), Some(point), Some(bar)) =
+                    (state.hdrag, cursor.position_in(bounds), bar)
+                {
+                    return (
+                        Status::Captured,
+                        Some(TableMessage::HScroll(bar.offset_for(point.x - grab))),
+                    );
+                }
                 if let (Some(column), Some(point)) = (self.resizing, cursor.position_in(bounds)) {
                     return (
                         Status::Captured,
@@ -528,6 +628,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
                 (Status::Ignored, None)
             }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.hdrag = None;
                 if self.resizing.is_some() {
                     return (Status::Captured, Some(TableMessage::ResizeEnd));
                 }
@@ -555,10 +656,11 @@ impl canvas::Program<TableMessage> for Table<'_> {
             Size::new(bounds.width, HEADER_HEIGHT),
             bg_header(),
         );
-        // Leave room for the scrollbar: with a column layout the last
-        // column would otherwise sit under it.
-        let content_width = bounds.width - if self.total > 0 { 14.0 } else { 0.0 };
-        self.draw_header(&mut frame, content_width);
+        // Leave room for the vertical scrollbar: with a column layout the
+        // last column would otherwise sit under it. When the columns still do
+        // not fit, they keep their minimum width and scroll sideways.
+        let content_width = self.content_width(bounds.width);
+        self.draw_header(&mut frame, content_width, self.hscroll);
 
         let range = visible_range(self.scroll, self.total);
         let page_end = self.page_offset + self.rows.len();
@@ -590,6 +692,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
                     torrent,
                     y,
                     content_width,
+                    self.hscroll,
                 ),
                 None => {
                     frame.fill_text(Text {
@@ -622,12 +725,61 @@ impl canvas::Program<TableMessage> for Table<'_> {
         }
 
         self.draw_scrollbar(&mut frame, bounds);
+        if let Some(bar) = self.hbar(bounds) {
+            let y = bounds.height - HSCROLL_HEIGHT;
+            frame.fill_rectangle(
+                Point::new(0.0, y),
+                Size::new(bounds.width, HSCROLL_HEIGHT),
+                track(),
+            );
+            frame.fill_rectangle(
+                Point::new(bar.thumb_x, y),
+                Size::new(bar.thumb_w, HSCROLL_HEIGHT),
+                thumb(),
+            );
+        }
         vec![frame.into_geometry()]
     }
 }
 
 impl Table<'_> {
-    fn draw_header(&self, frame: &mut Frame, width: f32) {
+    /// Space available to the columns; the vertical scrollbar keeps 14 px.
+    fn usable_width(&self, width: f32) -> f32 {
+        (width - if self.total > 0 { 14.0 } else { 0.0 }).max(1.0)
+    }
+
+    /// The width the columns are laid out at: the viewport, or their minimum
+    /// total when the window is narrower — the rest scrolls sideways.
+    fn content_width(&self, width: f32) -> f32 {
+        self.usable_width(width).max(self.layout.min_total())
+    }
+
+    /// How far the table can scroll sideways at this width.
+    #[must_use]
+    pub fn max_hscroll(&self, width: f32) -> f32 {
+        (self.content_width(width) - self.usable_width(width)).max(0.0)
+    }
+
+    fn hbar(&self, bounds: Rectangle) -> Option<HBar> {
+        let max = self.max_hscroll(bounds.width);
+        if max <= 0.0 {
+            return None;
+        }
+        let track_w = bounds.width;
+        let content = self.content_width(bounds.width);
+        let thumb_w = (track_w * self.usable_width(bounds.width) / content)
+            .max(40.0)
+            .min(track_w);
+        let fraction = (self.hscroll / max).clamp(0.0, 1.0);
+        Some(HBar {
+            thumb_x: fraction * (track_w - thumb_w),
+            thumb_w,
+            track_w,
+            max,
+        })
+    }
+
+    fn draw_header(&self, frame: &mut Frame, width: f32, hscroll: f32) {
         let marker = |field: SortField| {
             if self.sort == field {
                 if self.descending { " v" } else { " ^" }
@@ -635,7 +787,7 @@ impl Table<'_> {
                 ""
             }
         };
-        for slot in self.layout.slots(width) {
+        for slot in self.layout.slots_scrolled(width, hscroll) {
             let content = match slot.column.sort_field() {
                 Some(field) => format!("{}{}", slot.column.title(), marker(field)),
                 None => slot.column.title().to_owned(),
@@ -691,11 +843,12 @@ impl Table<'_> {
     }
 }
 
-/// The row menu's entries, top to bottom: label and action. Rendered as a
-/// widget panel above the canvas, because a canvas paints its fills before
-/// its texts and a menu drawn inside it cannot cover the row text beneath.
+/// The row menu's entries, top to bottom: icon, label and action. Rendered
+/// as a widget panel above the canvas, because a canvas paints its fills
+/// before its texts and a menu drawn inside it cannot cover the row text.
 #[must_use]
-pub fn menu_items(menu: &ContextMenu) -> Vec<(String, MenuAction)> {
+pub fn menu_items(menu: &ContextMenu) -> Vec<(char, String, MenuAction)> {
+    use crate::icons::glyph;
     let sequential = if menu.sequential {
         crate::i18n::t("✓ Sequential download")
     } else {
@@ -707,41 +860,57 @@ pub fn menu_items(menu: &ContextMenu) -> Vec<(String, MenuAction)> {
         crate::i18n::t("Super-seeding")
     };
     let first = if menu.paused {
-        (crate::i18n::t("Resume"), MenuAction::Resume)
+        (glyph::PLAY, crate::i18n::t("Resume"), MenuAction::Resume)
     } else {
-        (crate::i18n::t("Pause"), MenuAction::Pause)
+        (glyph::PAUSE, crate::i18n::t("Pause"), MenuAction::Pause)
     };
     vec![
-        (first.0.to_owned(), first.1),
-        (crate::i18n::t("Set label…").to_owned(), MenuAction::Label),
         (
+            glyph::FOLDER_OPEN,
+            crate::i18n::t("Open folder").to_owned(),
+            MenuAction::Open,
+        ),
+        (first.0, first.1.to_owned(), first.2),
+        (
+            glyph::TAG,
+            crate::i18n::t("Set label…").to_owned(),
+            MenuAction::Label,
+        ),
+        (
+            glyph::REFRESH,
             crate::i18n::t("Force recheck").to_owned(),
             MenuAction::Recheck,
         ),
         (
+            glyph::EDIT,
             crate::i18n::t("Rename file…").to_owned(),
             MenuAction::Rename,
         ),
-        (sequential.to_owned(), MenuAction::ToggleSequential),
-        (super_seeding.to_owned(), MenuAction::ToggleSuperSeeding),
-        (crate::i18n::t("Remove").to_owned(), MenuAction::Remove),
+        (
+            glyph::LIST_OL,
+            sequential.to_owned(),
+            MenuAction::ToggleSequential,
+        ),
+        (
+            glyph::ROCKET,
+            super_seeding.to_owned(),
+            MenuAction::ToggleSuperSeeding,
+        ),
+        (
+            glyph::TRASH,
+            crate::i18n::t("Remove").to_owned(),
+            MenuAction::Remove,
+        ),
     ]
 }
 
-/// The column chooser's entries: display label (with a check mark when the
-/// column is visible) and the column it toggles.
+/// The column chooser's entries: the column title and the column it toggles.
+/// The check mark is drawn as an icon by the panel, not baked into the text.
 #[must_use]
-pub fn column_menu_items(layout: &ColumnLayout) -> Vec<(String, Column)> {
+pub fn column_menu_items(_layout: &ColumnLayout) -> Vec<(String, Column)> {
     Column::ALL
         .iter()
-        .map(|column| {
-            let check = if layout.is_visible(*column) {
-                "[x]"
-            } else {
-                "[ ]"
-            };
-            (format!("{check} {}", column.title()), *column)
-        })
+        .map(|column| (column.title().to_owned(), *column))
         .collect()
 }
 
@@ -752,22 +921,39 @@ fn draw_row(
     torrent: &Torrent,
     y: f32,
     width: f32,
+    hscroll: f32,
 ) {
     let accent = state_color(torrent.state);
     let text_y = y + 5.0;
     let regular = crate::theme::regular();
     let mono = Font::MONOSPACE;
 
-    for slot in layout.slots(width) {
+    for slot in layout.slots_scrolled(width, hscroll) {
         let (content, color, size, font) = match slot.column {
-            Column::Id => (torrent.id.to_string(), text_dim(), 11.0, mono),
-            Column::Name => (short_name(&torrent.name, 42), text_main(), 12.0, regular),
+            Column::Position => (
+                // The queue number only means something while the torrent is
+                // still waiting for its pieces; a seeding row shows a dash.
+                if torrent.progress < 1.0 && torrent.queue_position >= 0 {
+                    torrent.queue_position.to_string()
+                } else {
+                    "—".to_owned()
+                },
+                text_dim(),
+                11.0,
+                mono,
+            ),
+            Column::Name => (
+                short_name(&torrent.name, chars_that_fit(slot.width, 12.0)),
+                text_main(),
+                12.0,
+                regular,
+            ),
             Column::Label => {
                 if torrent.label.is_empty() {
                     ("—".to_owned(), text_dim(), 11.0, regular)
                 } else {
                     (
-                        short_name(&torrent.label, 14),
+                        short_name(&torrent.label, chars_that_fit(slot.width, 11.0)),
                         label_colors
                             .get(&torrent.label)
                             .copied()
@@ -779,7 +965,10 @@ fn draw_row(
             }
             Column::Size => (format_size(torrent.total_bytes), text_dim(), 11.0, mono),
             Column::SavePath => (
-                short_name(&folder_label(&torrent.save_path), 30),
+                short_name(
+                    &folder_label(&torrent.save_path),
+                    chars_that_fit(slot.width, 11.0),
+                ),
                 text_dim(),
                 11.0,
                 regular,
@@ -896,6 +1085,13 @@ fn cell(
     });
 }
 
+/// How many characters of `size` pixels fit in `width`. The canvas text is
+/// truncated by character, not by measured advance, so the estimate keeps the
+/// tail of a long name from spilling into the next column.
+fn chars_that_fit(width: f32, size: f32) -> usize {
+    ((width / (size * 0.58)).floor() as usize).max(4)
+}
+
 fn short_name(name: &str, max: usize) -> String {
     if name.chars().count() <= max {
         name.to_owned()
@@ -964,11 +1160,14 @@ mod tests {
             .into_iter()
             .find(|slot| slot.column == Column::Name)
             .expect("name slot");
-        assert_eq!(layout.column_at(12.0, width), Some(Column::Id));
-        assert_eq!(layout.column_at(name.x + 2.0, width), Some(Column::Name));
+        assert_eq!(layout.column_at(12.0, width, 0.0), Some(Column::Position));
+        assert_eq!(
+            layout.column_at(name.x + 2.0, width, 0.0),
+            Some(Column::Name)
+        );
         assert_eq!(
             layout
-                .column_at(name.x + 2.0, width)
+                .column_at(name.x + 2.0, width, 0.0)
                 .and_then(Column::sort_field),
             Some(SortField::Name)
         );
@@ -1005,10 +1204,10 @@ mod tests {
             .find(|slot| slot.column == Column::Size)
             .expect("size slot");
         assert_eq!(
-            layout.resize_handle(size.x + size.width - 1.0, width),
+            layout.resize_handle(size.x + size.width - 1.0, width, 0.0),
             Some(Column::Size)
         );
-        assert_eq!(layout.resize_handle(size.x + 2.0, width), None);
+        assert_eq!(layout.resize_handle(size.x + 2.0, width, 0.0), None);
     }
 
     #[test]
@@ -1020,9 +1219,9 @@ mod tests {
         // Rows are hit-tested in display order, so the first row is ID.
         assert_eq!(
             column_menu_item(origin, 1224.0, Point::new(rect.x + 12.0, rect.y + 8.0)),
-            Some(Column::Id)
+            Some(Column::Position)
         );
-        assert!(layout.is_visible(Column::Id));
+        assert!(layout.is_visible(Column::Position));
     }
 
     #[test]
@@ -1037,30 +1236,34 @@ mod tests {
         };
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 108.0)),
-            Some(MenuAction::Pause)
+            Some(MenuAction::Open)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 134.0)),
-            Some(MenuAction::Label)
+            Some(MenuAction::Pause)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 160.0)),
-            Some(MenuAction::Recheck)
+            Some(MenuAction::Label)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 186.0)),
-            Some(MenuAction::Rename)
+            Some(MenuAction::Recheck)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 212.0)),
-            Some(MenuAction::ToggleSequential)
+            Some(MenuAction::Rename)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 238.0)),
-            Some(MenuAction::ToggleSuperSeeding)
+            Some(MenuAction::ToggleSequential)
         );
         assert_eq!(
             menu_action_at(&menu, Point::new(110.0, 264.0)),
+            Some(MenuAction::ToggleSuperSeeding)
+        );
+        assert_eq!(
+            menu_action_at(&menu, Point::new(110.0, 290.0)),
             Some(MenuAction::Remove)
         );
         assert_eq!(menu_action_at(&menu, Point::new(10.0, 10.0)), None);
@@ -1080,16 +1283,17 @@ mod tests {
                 super_seeding: false,
             };
             let items = menu_items(&menu);
-            assert_eq!(items.len(), 7);
+            assert_eq!(items.len(), 8);
+            assert_eq!(items[0].2, MenuAction::Open);
             assert_eq!(
-                items[0].1,
+                items[1].2,
                 if paused {
                     MenuAction::Resume
                 } else {
                     MenuAction::Pause
                 }
             );
-            for (index, (label, action)) in items.iter().enumerate() {
+            for (index, (_icon, label, action)) in items.iter().enumerate() {
                 assert!(!label.is_empty());
                 let y = menu.y + MENU_PADDING + index as f32 * MENU_ITEM_HEIGHT + 1.0;
                 assert_eq!(menu_action_at(&menu, Point::new(20.0, y)), Some(*action));

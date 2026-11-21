@@ -90,11 +90,11 @@ impl Palette {
         }
     }
 
-    /// Replaces the accent colour; the seeding state follows it.
+    /// Replaces the accent colour used by the chrome. The torrent state
+    /// colours stay put, so a grey accent cannot grey out the table.
     #[must_use]
     pub fn with_accent(mut self, accent: Color) -> Self {
         self.primary = accent;
-        self.seeding = accent;
         self
     }
 }
@@ -277,11 +277,12 @@ mod tests {
     }
 
     #[test]
-    fn the_accent_overrides_primary_and_seeding() {
+    fn the_accent_leaves_the_state_colours_alone() {
         let accent = Color::from_rgb(0.8, 0.2, 0.4);
         let palette = Palette::dark().with_accent(accent);
         assert_eq!(palette.primary, accent);
-        assert_eq!(palette.seeding, accent);
+        assert_eq!(palette.seeding, Palette::dark().seeding);
+        assert_eq!(palette.downloading, Palette::dark().downloading);
     }
 
     #[test]

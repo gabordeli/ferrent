@@ -406,6 +406,7 @@ struct App {
     page_request: u64,
     page_in_flight: bool,
     scroll: f32,
+    hscroll: f32,
     selected: BTreeSet<u64>,
     selected_torrents: BTreeMap<u64, Torrent>,
     active: Option<u64>,
@@ -517,6 +518,7 @@ impl Default for App {
             page_request: 0,
             page_in_flight: false,
             scroll: 0.0,
+            hscroll: 0.0,
             selected: BTreeSet::new(),
             selected_torrents: BTreeMap::new(),
             active: None,
@@ -946,6 +948,11 @@ impl App {
             }
             Message::Table(TableMessage::ResizeEnd) => {
                 self.column_resize = None;
+                Task::none()
+            }
+            Message::Table(TableMessage::HScroll(offset)) => {
+                let max = self.columns.max_hscroll(self.window_width - 232.0 - 14.0);
+                self.hscroll = offset.clamp(0.0, max);
                 Task::none()
             }
             Message::Table(TableMessage::RightPressed(point)) => self.table_right_pressed(point),
@@ -2014,6 +2021,7 @@ impl App {
     fn run_menu_action(&mut self, menu: ContextMenu, action: MenuAction) -> Task<Message> {
         self.context = None;
         match action {
+            MenuAction::Open => self.open_folder(menu.row),
             MenuAction::Pause => self.start_action(TorrentAction::Pause),
             MenuAction::Resume => self.start_action(TorrentAction::Resume),
             MenuAction::Label => self.open_set_label(),
@@ -2029,6 +2037,38 @@ impl App {
         }
     }
 
+    /// Opens the torrent's save path in the desktop's file manager. The path
+    /// belongs to the daemon host: when the GUI runs elsewhere the notice
+    /// tells the user where to look instead.
+    fn open_folder(&mut self, id: u64) -> Task<Message> {
+        let Some(torrent) = self
+            .selected_torrents
+            .get(&id)
+            .or_else(|| self.page.torrents.iter().find(|torrent| torrent.id == id))
+        else {
+            return Task::none();
+        };
+        let path = torrent.save_path.clone();
+        if path.is_empty() {
+            self.set_notice(i18n::t("No save path for this torrent"));
+            return Task::none();
+        }
+        if std::path::Path::new(&path).is_dir() {
+            match std::process::Command::new("xdg-open").arg(&path).spawn() {
+                Ok(_) => self.set_notice(i18n::t_fmt("Opening {}", &[&path])),
+                Err(error) => {
+                    self.set_notice(i18n::t_fmt(
+                        "Cannot open {}: {}",
+                        &[&path, &error.to_string()],
+                    ));
+                }
+            }
+        } else {
+            self.set_notice(i18n::t_fmt("{} (on the daemon host)", &[&path]));
+        }
+        Task::none()
+    }
+
     fn table_pressed(&mut self, point: Point) -> Task<Message> {
         if let Some(menu) = self.context {
             if let Some(action) = table::menu_action_at(&menu, point) {
@@ -2036,9 +2076,9 @@ impl App {
             }
         }
         if point.y < table::HEADER_HEIGHT {
-            if let Some(column) = self
-                .columns
-                .column_at(point.x, self.window_width - 232.0 - 14.0)
+            if let Some(column) =
+                self.columns
+                    .column_at(point.x, self.window_width - 232.0 - 14.0, self.hscroll)
             {
                 return self.sort_column(column);
             }
@@ -5420,6 +5460,7 @@ impl App {
             page_offset: self.page_offset.unwrap_or(0),
             total: self.page.total as usize,
             scroll: self.scroll,
+            hscroll: self.hscroll,
             selected: &self.selected,
             sort: self.sort,
             descending: self.descending,
@@ -5436,7 +5477,7 @@ impl App {
         let overlay: Option<Element<Message>> = if let Some(menu) = self.context {
             let items = table::menu_items(&menu)
                 .into_iter()
-                .map(|(label, action)| (label, Message::MenuPick(action)))
+                .map(|(icon, label, action)| (icon, label, Message::MenuPick(action)))
                 .collect();
             Some(floating_menu(
                 menu.x,
@@ -5449,7 +5490,18 @@ impl App {
             let rect = table::column_menu_rect(origin, self.window_width - 232.0 - 14.0);
             let items = table::column_menu_items(&self.columns)
                 .into_iter()
-                .map(|(label, column)| (label, Message::Table(TableMessage::ToggleColumn(column))))
+                .map(|(label, column)| {
+                    let icon = if self.columns.is_visible(column) {
+                        glyph::CHECK
+                    } else {
+                        ' '
+                    };
+                    (
+                        icon,
+                        label,
+                        Message::Table(TableMessage::ToggleColumn(column)),
+                    )
+                })
                 .collect();
             Some(floating_menu(
                 rect.x,
@@ -7079,10 +7131,11 @@ fn toolbar_icon(
         });
     let labeled = tooltip(
         content,
-        text(label).size(11),
+        text(label).size(11).color(theme::text()),
         iced::widget::tooltip::Position::Top,
     )
-    .gap(6);
+    .gap(6)
+    .style(tooltip_style);
     let mut control = button(labeled)
         .padding([7, 10])
         .style(move |_theme, _status| button::Style {
@@ -7115,12 +7168,22 @@ fn floating_menu<'a>(
     y: f32,
     width: f32,
     item_height: f32,
-    items: Vec<(String, Message)>,
+    items: Vec<(char, String, Message)>,
 ) -> Element<'a, Message> {
     let entries: Vec<Element<Message>> = items
         .into_iter()
-        .map(|(label, message)| {
-            button(text(label).size(12).font(theme::regular()))
+        .map(|(icon, label, message)| {
+            let content = row![
+                text(icon)
+                    .font(icons::solid())
+                    .size(11.0)
+                    .color(theme::text_muted())
+                    .width(Length::Fixed(16.0)),
+                text(label).size(12).font(theme::regular()),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+            button(content)
                 .on_press(message)
                 .padding([0, 8])
                 .width(Length::Fill)
@@ -7149,6 +7212,21 @@ fn floating_menu<'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+/// Tooltips need their own panel: the default style has no background on the
+/// light palette, which made the toolbar hints hard to read.
+fn tooltip_style(_theme: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(theme::bg_secondary().into()),
+        border: iced::Border {
+            color: theme::border(),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        text_color: Some(theme::text()),
+        ..container::Style::default()
+    }
 }
 
 fn menu_item_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
