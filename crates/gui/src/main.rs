@@ -5567,9 +5567,11 @@ impl App {
                 .align_y(iced::Alignment::Center)
                 .into()
         } else {
-            row![mark, toggle]
-                .spacing(6)
-                .align_y(iced::Alignment::Center)
+            // Collapsed: the wordmark would not fit, so the expand chevron
+            // stands alone as the way back out.
+            container(toggle)
+                .width(Length::Fill)
+                .center_x(Length::Fill)
                 .into()
         };
 
@@ -5635,13 +5637,6 @@ impl App {
                 theme::text_secondary(),
                 i18n::t("Servers"),
                 Message::OpenServers,
-            ),
-            icon_nav(
-                expanded,
-                glyph::POWER,
-                theme::text_muted(),
-                i18n::t("Disconnect"),
-                Message::Disconnect,
             ),
         ])
         .spacing(2)
@@ -5747,7 +5742,8 @@ impl App {
             } else {
                 Element::from(text("").size(1))
             },
-            horizontal_space(),
+            // Pushes Settings and Servers to the bottom of the bar.
+            vertical_space(),
             container(bottom).padding([10, 8]),
         ]
         .spacing(2)
@@ -7104,6 +7100,16 @@ fn nav_stat(
     container(content)
         .padding(nav_padding(expanded))
         .width(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            // The same row chrome as the clickable entries, so "Active" does
+            // not look like an orphaned label.
+            background: Some(theme::bg_secondary().into()),
+            border: iced::Border {
+                radius: 3.0.into(),
+                ..Default::default()
+            },
+            ..container::Style::default()
+        })
         .into()
 }
 
