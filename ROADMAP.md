@@ -850,6 +850,70 @@
 
 ---
 
+## M10 – Feature parity (v1.1)
+
+**Done when:** a Deluge-hoz képest hiányzó, fontos funkciók pótolva: proxy +
+titkosítás/UPnP felület, fájlonkénti prioritás, torrent készítés + default
+trackerek, beépített RSS-watcher. A teljes összevetés (Deluge core, bundled
+és 3rd-party pluginok, Ferrent extras): [docs/feature-matrix.md](docs/feature-matrix.md).
+
+**Non-goals (M11 jelölt):** IP blocklist, sequential download, stats/pieces
+nézet, streaming, prevent-suspend, feed-alapú *arr kiváltás.
+
+### M10-T1 – Proxy + titkosítás/UPnP config surface ⚠️
+
+**Scope:** `[network]` proxy (HTTP/SOCKS5, peer-proxy), `in/out_enc_policy`, UPnP/NAT-PMP kapcsolók; engine `settings_pack` → config → GUI.
+
+**Acceptance**
+
+- [ ] `[network]`: proxy_type/host/port/username/password/peer_connections, validációval.
+- [ ] `encryption` = enabled/forced/disabled; `upnp`/`natpmp` bool.
+- [ ] Új session-nel érvényesül; a `settings()` tükrözi.
+- [ ] GUI Settings → Network mezők, batch mentéssel.
+- [ ] Mérés proxyn át (vagy forced mellett csak titkosított peer) valódi torrenten.
+
+**Files:** `crates/engine/src/{types.rs,libtorrent/*}`, `crates/daemon/src/config/schema.rs`, `crates/gui/src/settings.rs`
+
+### M10-T2 – Per-file prioritás + szelektív letöltés 🤖
+
+**Scope:** `SetFilePriorities` RPC + engine `prioritize_files`, GUI Files fül, CLI; a prioritás restart után is megmarad.
+
+**Acceptance**
+
+- [ ] Proto + RPC + engine trait (Mock is); érvénytelen index → `InvalidArgument`.
+- [ ] Skip-elt fájl nem töltődik le (mérés), a többi 100%.
+- [ ] Restart/`kill -9` után a prioritás megmarad.
+- [ ] GUI soronkénti ciklus, CLI `files --set`.
+
+**Files:** proto, engine, daemon RPC, GUI, CLI
+
+### M10-T3 – Torrent készítés + default trackerek 🤖
+
+**Scope:** a meglévő bridge `make_torrent` termékké tétele + `[session] default_trackers`.
+
+**Acceptance**
+
+- [ ] `ferrent-cli create` (tracker, piece length, output), roundtrip add-del.
+- [ ] `default_trackers` a tracker nélküli addnál, a meglévőket nem írja felül.
+- [ ] GUI-ból is indítható; hibakezelés (üres mappa, piece length tartomány).
+
+**Files:** bridge, proto, CLI, daemon RPC, GUI
+
+### M10-T4 – RSS-watcher (feed → szűrő → add) ⚠️
+
+**Scope:** `[rss]` feedek, RSS/Atom parse, regex szűrő, tartós dedupe redb-ben, RPC + GUI status.
+
+**Acceptance**
+
+- [ ] `[rss]` config + validáció; feltételes GET (ETag/If-Modified-Since).
+- [ ] Egy feed 2 itemje → pontosan 2 add; restart után 0 duplikát.
+- [ ] Hiba az egyik feednél nem állítja meg a többit.
+- [ ] `GetRssStatus` + Settings → RSS fül.
+
+**Files:** `crates/daemon/src/rss.rs`, config schema, RPC, proto, GUI settings
+
+---
+
 ## Első lépés
 
 A plugin port kritikus útja: **M4-T1 → M4-T2 → M4-T3 → M4-T4 → M4-T5**, majd **M5-T1 → M5-T6**. Az M6 az M4-T2/T4 után, az M7 az M4-T4 után indulhat; az M3 csomagolás párhuzamosítható. A részletes elemzés: [docs/plugin-port-analysis.md](docs/plugin-port-analysis.md).
