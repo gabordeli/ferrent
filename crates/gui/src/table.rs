@@ -102,18 +102,18 @@ impl Column {
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
-            Self::Id => "ID",
-            Self::Name => "NAME",
-            Self::Label => "LABEL",
-            Self::Size => "SIZE",
-            Self::SavePath => "SAVE PATH",
-            Self::State => "STATUS",
-            Self::Progress => "PROGRESS",
-            Self::Download => "DOWN",
-            Self::Upload => "UP",
-            Self::Seeds => "SEEDS",
-            Self::Peers => "PEERS",
-            Self::Eta => "ETA",
+            Self::Id => crate::i18n::t("ID"),
+            Self::Name => crate::i18n::t("NAME"),
+            Self::Label => crate::i18n::t("LABEL"),
+            Self::Size => crate::i18n::t("SIZE"),
+            Self::SavePath => crate::i18n::t("SAVE PATH"),
+            Self::State => crate::i18n::t("STATUS"),
+            Self::Progress => crate::i18n::t("PROGRESS"),
+            Self::Download => crate::i18n::t("DOWN"),
+            Self::Upload => crate::i18n::t("UP"),
+            Self::Seeds => crate::i18n::t("SEEDS"),
+            Self::Peers => crate::i18n::t("PEERS"),
+            Self::Eta => crate::i18n::t("ETA"),
         }
     }
 

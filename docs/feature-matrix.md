@@ -156,7 +156,7 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ❌ | session + torrent szint |
 | **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben (M11-T2) |
-| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ❌ | ma csak magyar/angol kevert |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | 🟡 | magyar default + angol, a GUI chrome kész (M11-T3); állapotszavak/számlálók még angolul |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) |
 
 ## 8. Következő kör jelöltjei (M11/M12)

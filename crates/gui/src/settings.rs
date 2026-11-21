@@ -43,16 +43,16 @@ impl Tab {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Connection => "Connection",
-            Self::Session => "Session",
-            Self::AutoAdd => "AutoAdd",
-            Self::Hooks => "Hooks",
-            Self::Scheduler => "Scheduler",
-            Self::Notifications => "Notifications",
-            Self::Storage => "Storage",
-            Self::Labels => "Labels",
+            Self::Connection => crate::i18n::t("Connection"),
+            Self::Session => crate::i18n::t("Session"),
+            Self::AutoAdd => crate::i18n::t("AutoAdd"),
+            Self::Hooks => crate::i18n::t("Hooks"),
+            Self::Scheduler => crate::i18n::t("Scheduler"),
+            Self::Notifications => crate::i18n::t("Notifications"),
+            Self::Storage => crate::i18n::t("Storage"),
+            Self::Labels => crate::i18n::t("Labels"),
             Self::Rss => "RSS",
-            Self::Appearance => "Appearance",
+            Self::Appearance => crate::i18n::t("Appearance"),
         }
     }
 

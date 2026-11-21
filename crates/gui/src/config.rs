@@ -21,6 +21,9 @@ pub struct GuiConfig {
     /// Accent colour as `#RRGGBB`; the primary/seeding colour follows it.
     #[serde(default)]
     pub accent: Option<String>,
+    /// UI language: `hu` (default) or `en`.
+    #[serde(default)]
+    pub lang: Option<String>,
 }
 
 impl GuiConfig {
@@ -41,6 +44,20 @@ impl GuiConfig {
     pub fn set_appearance(&mut self, theme: &str, accent: Option<&str>) {
         self.theme = Some(theme.to_owned());
         self.accent = accent.map(str::to_owned);
+    }
+
+    /// The UI language: `FERRENT_LANG` wins, then the config, then Hungarian.
+    #[must_use]
+    pub fn language(&self) -> crate::i18n::Lang {
+        if let Ok(value) = std::env::var("FERRENT_LANG") {
+            if !value.trim().is_empty() {
+                return crate::i18n::Lang::parse(&value);
+            }
+        }
+        match self.lang.as_deref() {
+            Some(value) => crate::i18n::Lang::parse(value),
+            None => crate::i18n::Lang::default(),
+        }
     }
 }
 

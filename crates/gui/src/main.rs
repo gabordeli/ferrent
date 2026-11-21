@@ -13,6 +13,7 @@ use ferrent_gui::activity::{
 };
 use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile, parse_hex};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
+use ferrent_gui::i18n;
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
     self, ConfigField, DigestField, DiskRow, HookEvent, HookField, LabelField, SchedulerLevel,
@@ -306,11 +307,11 @@ enum DetailsTab {
 impl DetailsTab {
     fn label(self) -> &'static str {
         match self {
-            Self::General => "General",
-            Self::Files => "Files",
-            Self::Peers => "Peers",
-            Self::Trackers => "Trackers",
-            Self::Activity => "Activity",
+            Self::General => i18n::t("General"),
+            Self::Files => i18n::t("Files"),
+            Self::Peers => i18n::t("Peers"),
+            Self::Trackers => i18n::t("Trackers"),
+            Self::Activity => i18n::t("Activity"),
         }
     }
 }
@@ -425,6 +426,7 @@ impl Default for App {
             Err(error) => (GuiConfig::default(), format!("Config error: {error}")),
         };
         theme::install(config.palette());
+        i18n::install(config.language());
         let selected = if config.profiles.is_empty() {
             None
         } else {
@@ -2906,7 +2908,7 @@ impl App {
         let settings = &self.settings;
         let rail = container(
             column![
-                text("SETTINGS")
+                text(i18n::t("SETTINGS"))
                     .size(10)
                     .color(theme::text_muted())
                     .font(theme::semibold()),
@@ -2958,7 +2960,7 @@ impl App {
                 .color(theme::text_secondary())
                 .width(Length::Fill);
         } else if dirty {
-            summary = text("Unsaved changes; Reload discards them")
+            summary = text(i18n::t("Unsaved changes; Reload discards them"))
                 .size(11)
                 .color(theme::queued())
                 .width(Length::Fill);
@@ -3145,11 +3147,14 @@ impl App {
                         .size(10)
                         .color(theme::text_muted())
                         .into(),
-                    None if row.enabled => text("not scanned yet")
+                    None if row.enabled => text(i18n::t("not scanned yet"))
                         .size(10)
                         .color(theme::text_muted())
                         .into(),
-                    None => text("disabled").size(10).color(theme::text_muted()).into(),
+                    None => text(i18n::t("disabled"))
+                        .size(10)
+                        .color(theme::text_muted())
+                        .into(),
                 };
                 let path = if row.path.trim().is_empty() {
                     "(no path)".to_owned()
@@ -3215,7 +3220,9 @@ impl App {
 
         let list = column![
             row![
-                text("Watch directories").size(12).font(theme::semibold()),
+                text(i18n::t("Watch directories"))
+                    .size(12)
+                    .font(theme::semibold()),
                 horizontal_space(),
                 action_button("Add", Message::AutoAddAdd, !settings.loading),
                 action_button(
@@ -3239,7 +3246,7 @@ impl App {
             self.auto_add_editor_view()
         } else {
             column![
-                text("Select a watch directory, or add one.")
+                text(i18n::t("Select a watch directory, or add one."))
                     .size(12)
                     .color(theme::text_muted()),
             ]
@@ -3323,7 +3330,9 @@ impl App {
             ]
             .spacing(16),
             column![
-                text("After adding").size(11).color(theme::text_muted()),
+                text(i18n::t("After adding"))
+                    .size(11)
+                    .color(theme::text_muted()),
                 row![
                     watch_action(SuccessAction::Delete, row.on_success),
                     watch_action(SuccessAction::Keep, row.on_success),
@@ -3418,7 +3427,7 @@ impl App {
 
         let list = column![
             row![
-                text("Hooks").size(12).font(theme::semibold()),
+                text(i18n::t("Hooks")).size(12).font(theme::semibold()),
                 horizontal_space(),
                 action_button("Add", Message::HooksAdd, !settings.loading),
                 action_button(
@@ -3442,7 +3451,7 @@ impl App {
             self.hook_editor_view()
         } else {
             column![
-                text("Select a hook, or add one.")
+                text(i18n::t("Select a hook, or add one."))
                     .size(12)
                     .color(theme::text_muted()),
             ]
@@ -3471,7 +3480,9 @@ impl App {
             .collect();
         let runs_section = column![
             row![
-                text("Recent runs").size(12).font(theme::semibold()),
+                text(i18n::t("Recent runs"))
+                    .size(12)
+                    .font(theme::semibold()),
                 horizontal_space(),
                 text(format!("{} pending", settings.hook_pending))
                     .size(10)
@@ -3516,7 +3527,7 @@ impl App {
             hook_field_view(row, HookField::Command, "/usr/local/bin/notify"),
             hook_field_view(row, HookField::Args, "{id} {name} {path} {infohash} {label}"),
             column![
-                text("Event").size(11).color(theme::text_muted()),
+                text(i18n::t("Event")).size(11).color(theme::text_muted()),
                 row![
                     hook_event_toggle(HookEvent::Added, row.event),
                     hook_event_toggle(HookEvent::Finished, row.event),
@@ -3531,7 +3542,7 @@ impl App {
             row![
                 hook_field_view(row, HookField::Timeout, "60"),
                 column![
-                    text("Options").size(11).color(theme::text_muted()),
+                    text(i18n::t("Options")).size(11).color(theme::text_muted()),
                     row![
                         checkbox("Run through shell", row.shell)
                             .on_toggle(Message::HooksShell)
@@ -3722,7 +3733,7 @@ impl App {
 
         let list = column![
             row![
-                text("Webhooks").size(12).font(theme::semibold()),
+                text(i18n::t("Webhooks")).size(12).font(theme::semibold()),
                 horizontal_space(),
                 action_button("Add", Message::NotifyAdd, !settings.loading),
                 action_button(
@@ -3828,7 +3839,7 @@ impl App {
                 .into()
             } else {
                 column![
-                    text("Select a webhook or a Telegram chat, or add one.")
+                    text(i18n::t("Select a webhook or a Telegram chat, or add one."))
                         .size(12)
                         .color(theme::text_muted())
                 ]
@@ -3836,7 +3847,7 @@ impl App {
             };
 
         let digest = column![
-            text("Digest and quiet hours (Telegram only)")
+            text(i18n::t("Digest and quiet hours (Telegram only)"))
                 .size(11)
                 .color(theme::text_muted()),
             row![
@@ -3905,12 +3916,14 @@ impl App {
         let dim = theme::text_muted();
         if self.settings.rss_feeds.is_empty() {
             return column![
-                text("No RSS feeds configured (or the watcher is off).")
+                text(i18n::t("No RSS feeds configured (or the watcher is off)."))
                     .size(12)
                     .color(dim),
-                text("Add [[rss.feed]] entries in the configuration document.")
-                    .size(10)
-                    .color(dim),
+                text(i18n::t(
+                    "Add [[rss.feed]] entries in the configuration document."
+                ))
+                .size(10)
+                .color(dim),
             ]
             .spacing(6)
             .into();
@@ -3918,9 +3931,18 @@ impl App {
         let mut children: Vec<Element<Message>> = Vec::new();
         children.push(
             row![
-                text("FEED").size(10).color(dim).width(Length::Fill),
-                text("ADDED").size(10).color(dim).width(Length::Fixed(56.0)),
-                text("SEEN").size(10).color(dim).width(Length::Fixed(56.0)),
+                text(i18n::t("FEED"))
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fill),
+                text(i18n::t("ADDED"))
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(56.0)),
+                text(i18n::t("SEEN"))
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(56.0)),
                 text("LAST POLL")
                     .size(10)
                     .color(dim)
@@ -4027,13 +4049,15 @@ impl App {
                 .into()
         };
         column![
-            text("Theme").size(11).color(dim),
+            text(i18n::t("Theme")).size(11).color(dim),
             row![choice("Dark", "dark"), choice("Light", "light")].spacing(8),
-            text("Accent").size(11).color(dim),
+            text(i18n::t("Accent")).size(11).color(dim),
             row(picks).spacing(8),
-            text("Changes apply immediately and are saved to gui.toml.")
-                .size(10)
-                .color(dim),
+            text(i18n::t(
+                "Changes apply immediately and are saved to gui.toml."
+            ))
+            .size(10)
+            .color(dim),
         ]
         .spacing(10)
         .max_width(520.0)
@@ -4053,19 +4077,19 @@ impl App {
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
-            text("FREE / TOTAL")
+            text(i18n::t("FREE / TOTAL"))
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(3)),
-            text("TORRENTS")
+            text(i18n::t("TORRENTS"))
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
-            text("STATUS")
+            text(i18n::t("STATUS"))
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
-            text("ZONES")
+            text(i18n::t("ZONES"))
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
@@ -4073,7 +4097,7 @@ impl App {
         .spacing(4);
         if settings.storage_disks.is_empty() {
             disks = disks.push(
-                text("Connect and open this tab to see the filesystems.")
+                text(i18n::t("Connect and open this tab to see the filesystems."))
                     .size(11)
                     .color(theme::text_muted()),
             );
@@ -4151,7 +4175,7 @@ impl App {
         .spacing(10);
 
         let mut zones = column![row![
-            text("PATH")
+            text(i18n::t("PATH"))
                 .size(10)
                 .color(theme::text_muted())
                 .width(Length::FillPortion(6)),
@@ -4172,9 +4196,11 @@ impl App {
         .spacing(4);
         if storage.zones.is_empty() {
             zones = zones.push(
-                text("No zones yet: add the label folders and one staging folder per disk.")
-                    .size(11)
-                    .color(theme::text_muted()),
+                text(i18n::t(
+                    "No zones yet: add the label folders and one staging folder per disk.",
+                ))
+                .size(11)
+                .color(theme::text_muted()),
             );
         }
         for (index, zone) in storage.zones.iter().enumerate() {
@@ -4227,7 +4253,7 @@ impl App {
         }
 
         let body = column![
-            text("Filesystems").size(12).font(theme::medium()),
+            text(i18n::t("Filesystems")).size(12).font(theme::medium()),
             disks,
             text("Guard").size(12).font(theme::medium()),
             flags,
@@ -4237,7 +4263,7 @@ impl App {
                     .size(10)
                     .color(theme::text_muted()),
             ],
-            text("Zones").size(12).font(theme::medium()),
+            text(i18n::t("Zones")).size(12).font(theme::medium()),
             zones,
             row![action_button("Add zone", Message::ZoneAdd, true)].spacing(8),
         ]
@@ -4315,7 +4341,7 @@ impl App {
 
         let list = column![
             row![
-                text("Labels").size(12).font(theme::semibold()),
+                text(i18n::t("Labels")).size(12).font(theme::semibold()),
                 horizontal_space(),
                 action_button("New", Message::LabelNew, !settings.loading),
             ]
@@ -4334,7 +4360,7 @@ impl App {
             self.label_editor_view()
         } else {
             column![
-                text("Select a label to edit, or create a new one.")
+                text(i18n::t("Select a label to edit, or create a new one."))
                     .size(12)
                     .color(theme::text_muted()),
             ]
@@ -4479,7 +4505,12 @@ impl App {
                 .size(12)
                 .color(theme::text_secondary()),
             if self.settings.labels.is_empty() {
-                Element::from(text("No labels yet; create them under Settings → Labels.").size(12))
+                Element::from(
+                    text(i18n::t(
+                        "No labels yet; create them under Settings → Labels.",
+                    ))
+                    .size(12),
+                )
             } else {
                 Element::from(
                     scrollable(WidgetColumn::with_children(rows).spacing(2)).height(Length::Fill),
@@ -4509,10 +4540,12 @@ impl App {
             )
         }));
         let warning: Element<Message> = if self.add_label.trim().is_empty() {
-            text("No label: the payload goes to the global download directory.")
-                .size(10)
-                .color(theme::queued())
-                .into()
+            text(i18n::t(
+                "No label: the payload goes to the global download directory.",
+            ))
+            .size(10)
+            .color(theme::queued())
+            .into()
         } else if self.staging_for(&self.add_label).is_some() {
             text(format!(
                 "Staging folder of the label's filesystem: {}",
@@ -4522,10 +4555,12 @@ impl App {
             .color(theme::text_muted())
             .into()
         } else {
-            text("This label has no storage zone yet; the path stays editable.")
-                .size(10)
-                .color(theme::queued())
-                .into()
+            text(i18n::t(
+                "This label has no storage zone yet; the path stays editable.",
+            ))
+            .size(10)
+            .color(theme::queued())
+            .into()
         };
         let body = column![
             row![
@@ -4548,7 +4583,9 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fixed(120.0)),
             warning,
-            text("Save path").size(11).color(theme::text_muted()),
+            text(i18n::t("Save path"))
+                .size(11)
+                .color(theme::text_muted()),
             text_input("Save path (daemon default)", &self.add_save_path)
                 .on_input(Message::AddSavePathChanged)
                 .width(Length::Fill),
@@ -4686,7 +4723,9 @@ impl App {
 
         let form = container(
             column![
-                text("Add / edit server").size(13).font(theme::semibold()),
+                text(i18n::t("Add / edit server"))
+                    .size(13)
+                    .font(theme::semibold()),
                 row![
                     text_input("Name", &self.fields.name)
                         .on_input(|value| Message::Field(Field::Name, value))
@@ -4750,7 +4789,7 @@ impl App {
 
     fn connect_view(&self) -> Element<'_, Message> {
         let profiles: Element<Message> = if self.config.profiles.is_empty() {
-            text("No profiles yet").into()
+            text(i18n::t("No profiles yet")).into()
         } else {
             WidgetColumn::with_children(
                 self.config
@@ -4770,19 +4809,19 @@ impl App {
         };
 
         let fields = column![
-            text("Server profile").size(18),
+            text(i18n::t("Server profile")).size(18),
             text_input("Name", &self.fields.name)
                 .on_input(|value| Message::Field(Field::Name, value))
                 .width(Length::Fill),
-            text("Server URL").size(12),
+            text(i18n::t("Server URL")).size(12),
             text_input("https://host:50051", &self.fields.server)
                 .on_input(|value| Message::Field(Field::Server, value))
                 .width(Length::Fill),
-            text("CA certificate (PEM path)").size(12),
+            text(i18n::t("CA certificate (PEM path)")).size(12),
             text_input("/path/to/tls-cert.pem", &self.fields.ca)
                 .on_input(|value| Message::Field(Field::Ca, value))
                 .width(Length::Fill),
-            text("API token").size(12),
+            text(i18n::t("API token")).size(12),
             text_input("token", &self.fields.token)
                 .secure(true)
                 .on_input(|value| Message::Field(Field::Token, value))
@@ -4826,7 +4865,7 @@ impl App {
         };
         let pinned: Element<Message> = match &pending.expected {
             Some(expected) => column![
-                text("Pinned fingerprint").size(12),
+                text(i18n::t("Pinned fingerprint")).size(12),
                 text(fingerprint_display(expected))
                     .size(12)
                     .font(iced::Font::MONOSPACE),
@@ -4840,9 +4879,9 @@ impl App {
             column![
                 text(title).size(22),
                 text(warning),
-                text("Server").size(12),
+                text(i18n::t("Server")).size(12),
                 text(&pending.config.server),
-                text("Presented SHA-256 fingerprint").size(12),
+                text(i18n::t("Presented SHA-256 fingerprint")).size(12),
                 text(fingerprint_display(&pending.fingerprint))
                     .size(12)
                     .font(iced::Font::MONOSPACE),
@@ -4962,7 +5001,7 @@ impl App {
             expanded,
             glyph::LIST,
             theme::text_secondary(),
-            "All torrents",
+            i18n::t("All torrents"),
             status.torrent_count,
             None,
             active,
@@ -5011,21 +5050,21 @@ impl App {
                 expanded,
                 glyph::SETTINGS,
                 theme::text_secondary(),
-                "Settings",
+                i18n::t("Settings"),
                 Message::OpenSettings,
             ),
             icon_nav(
                 expanded,
                 glyph::SERVER,
                 theme::text_secondary(),
-                "Servers",
+                i18n::t("Servers"),
                 Message::OpenServers,
             ),
             icon_nav(
                 expanded,
                 glyph::POWER,
                 theme::text_muted(),
-                "Disconnect",
+                i18n::t("Disconnect"),
                 Message::Disconnect,
             ),
         ])
@@ -5043,7 +5082,7 @@ impl App {
                 expanded,
                 glyph::DOWNLOAD,
                 table::state_color(downloading),
-                "Downloading",
+                i18n::t("Downloading"),
                 status.downloading,
                 Some(downloading),
                 active,
@@ -5052,7 +5091,7 @@ impl App {
                 expanded,
                 glyph::DOWNLOAD,
                 table::state_color(moving),
-                "Moving",
+                i18n::t("Moving"),
                 status.moving,
                 Some(moving),
                 active,
@@ -5061,7 +5100,7 @@ impl App {
                 expanded,
                 glyph::UPLOAD,
                 table::state_color(seeding),
-                "Seeding",
+                i18n::t("Seeding"),
                 status.seeding,
                 Some(seeding),
                 active,
@@ -5070,7 +5109,7 @@ impl App {
                 expanded,
                 glyph::QUEUED,
                 table::state_color(queued),
-                "Queued",
+                i18n::t("Queued"),
                 status.queued,
                 Some(queued),
                 active,
@@ -5079,7 +5118,7 @@ impl App {
                 expanded,
                 glyph::PAUSED,
                 table::state_color(paused),
-                "Paused",
+                i18n::t("Paused"),
                 status.paused,
                 Some(paused),
                 active,
@@ -5088,14 +5127,14 @@ impl App {
                 expanded,
                 glyph::ACTIVE,
                 theme::connecting(),
-                "Active",
+                i18n::t("Active"),
                 status.active,
             ),
             nav_button(
                 expanded,
                 glyph::ERROR,
                 table::state_color(error),
-                "Error",
+                i18n::t("Error"),
                 status.error,
                 Some(error),
                 active,
@@ -5104,7 +5143,7 @@ impl App {
                 Element::from(
                     column![
                         container(
-                            text("LABELS")
+                            text(i18n::t("LABELS"))
                                 .size(10)
                                 .color(theme::text_muted())
                                 .font(theme::semibold())
@@ -5351,10 +5390,12 @@ impl App {
                 return self.activity_body();
             }
             return column![
-                text("Nothing selected").size(12).color(dim),
-                text("Click a row to inspect it. Space pause/resume · Delete remove")
-                    .size(11)
-                    .color(theme::text_muted()),
+                text(i18n::t("Nothing selected")).size(12).color(dim),
+                text(i18n::t(
+                    "Click a row to inspect it. Space pause/resume · Delete remove"
+                ))
+                .size(11)
+                .color(theme::text_muted()),
             ]
             .spacing(4)
             .into();
@@ -5464,7 +5505,7 @@ impl App {
                     .collect::<Vec<Element<Message>>>();
                 let mut children: Vec<Element<Message>> = Vec::with_capacity(rows.len() + 1);
                 children.push(
-                    text("Click a file to cycle skipped / normal / high")
+                    text(i18n::t("Click a file to cycle skipped / normal / high"))
                         .size(10)
                         .color(theme::text_muted())
                         .into(),
@@ -5474,7 +5515,10 @@ impl App {
                     .height(Length::Fill)
                     .into()
             }
-            Some(_) => text("No files reported.").size(12).color(dim).into(),
+            Some(_) => text(i18n::t("No files reported."))
+                .size(12)
+                .color(dim)
+                .into(),
             None => self.pending_details(dim),
         }
     }
@@ -5507,7 +5551,10 @@ impl App {
                     .height(Length::Fill)
                     .into()
             }
-            Some(_) => text("No connected peers.").size(12).color(dim).into(),
+            Some(_) => text(i18n::t("No connected peers."))
+                .size(12)
+                .color(dim)
+                .into(),
             None => self.pending_details(dim),
         }
     }
@@ -5517,15 +5564,15 @@ impl App {
         match &self.details_payload {
             Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
                 let header = row![
-                    text("TRACKER")
+                    text(i18n::t("TRACKER"))
                         .size(10)
                         .color(theme::text_muted())
                         .width(Length::Fill),
-                    text("SEEDS / LEECHERS")
+                    text(i18n::t("SEEDS / LEECHERS"))
                         .size(10)
                         .color(theme::text_muted())
                         .width(Length::Fixed(100.0)),
-                    text("STATUS")
+                    text(i18n::t("STATUS"))
                         .size(10)
                         .color(theme::text_muted())
                         .width(Length::Fixed(96.0)),
@@ -5578,7 +5625,10 @@ impl App {
                     .height(Length::Fill)
                     .into()
             }
-            Some(_) => text("No trackers reported.").size(12).color(dim).into(),
+            Some(_) => text(i18n::t("No trackers reported."))
+                .size(12)
+                .color(dim)
+                .into(),
             None => self.pending_details(dim),
         }
     }
@@ -5896,7 +5946,10 @@ fn settings_field<'a>(
 ) -> Element<'a, Message> {
     let locked = settings.locked(field);
     let hint: Element<Message> = if locked {
-        text("env-locked").size(10).color(theme::queued()).into()
+        text(i18n::t("env-locked"))
+            .size(10)
+            .color(theme::queued())
+            .into()
     } else {
         text("").size(1).into()
     };
