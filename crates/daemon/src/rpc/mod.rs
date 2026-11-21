@@ -27,10 +27,11 @@ use ferrent_protocol::v1::{
     PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
     RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse,
     ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
-    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetTorrentLabelRequest,
-    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField,
-    StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
-    UpdateLabelRequest, WatchRequest, WatchResponse,
+    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
+    SetFilePrioritiesResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
+    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
+    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
+    WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -992,6 +993,54 @@ impl Ferrent for FerrentService {
         let id = request.into_inner().id;
         let files = self.with_engine(move |engine| engine.files(id)).await?;
         Ok(Response::new(GetTorrentFilesResponse {
+            files: files
+                .into_iter()
+                .map(|file| TorrentFile {
+                    path: file.path,
+                    size: file.size,
+                    progress: file.progress,
+                    priority: file.priority,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn set_file_priorities(
+        &self,
+        request: Request<SetFilePrioritiesRequest>,
+    ) -> Result<Response<SetFilePrioritiesResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let id = request.id;
+        let priorities = request.priorities;
+        let files = self
+            .with_engine(move |engine| {
+                let current = engine.files(id)?;
+                if current.len() != priorities.len() {
+                    return Err(EngineError::Rejected {
+                        reason: format!(
+                            "torrent {id} has {} files, got {} priorities",
+                            current.len(),
+                            priorities.len()
+                        ),
+                    });
+                }
+                engine.set_file_priorities(id, &priorities)?;
+                // libtorrent applies priorities asynchronously, so an immediate
+                // read may still show the old values; report what we asked for.
+                let files = engine.files(id)?;
+                let files: Vec<ferrent_engine::TorrentFileInfo> = files
+                    .into_iter()
+                    .zip(priorities)
+                    .map(|(mut file, priority)| {
+                        file.priority = priority.clamp(0, 7);
+                        file
+                    })
+                    .collect();
+                Ok(files)
+            })
+            .await?;
+        Ok(Response::new(SetFilePrioritiesResponse {
             files: files
                 .into_iter()
                 .map(|file| TorrentFile {

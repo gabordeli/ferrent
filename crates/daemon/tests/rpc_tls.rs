@@ -16,8 +16,8 @@ use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, DeleteLabelRequest, GetConfigRequest, GetTorrentRequest,
     Label as ProtoLabel, ListLabelsRequest, ListTorrentsRequest, PauseTorrentRequest,
-    RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SetTorrentLabelRequest,
-    SetTorrentLimitsRequest, SortField, TorrentState, WatchRequest,
+    RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    SetTorrentLabelRequest, SetTorrentLimitsRequest, SortField, TorrentState, WatchRequest,
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -493,6 +493,50 @@ async fn watch_streams_config_changes() {
         Some(WatchEvent::ConfigChanged(change)) => assert_eq!(change.revision, 1),
         other => panic!("unexpected watch event: {other:?}"),
     }
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn file_priorities_are_validated_against_the_file_count() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    let added = client
+        .add_torrent(AddTorrentRequest {
+            name: "prio".to_owned(),
+            metainfo: Vec::new(),
+            save_path: "/tmp".to_owned(),
+            total_bytes: 10,
+            label: String::new(),
+            magnet: String::new(),
+        })
+        .await
+        .expect("add")
+        .into_inner();
+
+    // The mock engine reports no files, so any priority entry is a mismatch.
+    let error = client
+        .set_file_priorities(SetFilePrioritiesRequest {
+            id: added.id,
+            priorities: vec![4],
+        })
+        .await
+        .expect_err("a mismatched list must be rejected");
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+
+    let files = client
+        .set_file_priorities(SetFilePrioritiesRequest {
+            id: added.id,
+            priorities: Vec::new(),
+        })
+        .await
+        .expect("an empty list matches zero files")
+        .into_inner()
+        .files;
+    assert!(files.is_empty());
 
     server.shutdown();
 }

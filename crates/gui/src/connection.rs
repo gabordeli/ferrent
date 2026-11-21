@@ -10,8 +10,8 @@ use ferrent_protocol::v1::{
     GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest, GetStatusRequest,
     GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry,
     ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest, SendTestNotificationRequest,
-    SetConfigRequest, SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer,
-    TorrentTracker, UpdateLabelRequest,
+    SetConfigRequest, SetFilePrioritiesRequest, SetTorrentLabelRequest, SortField, Torrent,
+    TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -187,6 +187,21 @@ pub async fn trackers(client: &AuthClient, id: u64) -> Result<Vec<TorrentTracker
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.trackers)
+}
+
+/// Replaces the per-file priorities and returns the refreshed file list.
+pub async fn set_file_priorities(
+    client: &AuthClient,
+    id: u64,
+    priorities: Vec<i32>,
+) -> Result<Vec<TorrentFile>, String> {
+    let mut client = client.clone();
+    let response = client
+        .set_file_priorities(SetFilePrioritiesRequest { id, priorities })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response.files)
 }
 
 /// The daemon configuration document and its revision.

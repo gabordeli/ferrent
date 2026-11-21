@@ -80,6 +80,18 @@ pub trait TorrentEngine: Send + 'static {
         Ok(Vec::new())
     }
 
+    /// Replaces the per-file priorities (0 skip, 1 low, 4 normal, 7 high).
+    ///
+    /// The slice holds one entry per file, in the order of [`Self::files`].
+    fn set_file_priorities(
+        &mut self,
+        id: TorrentId,
+        priorities: &[i32],
+    ) -> Result<(), EngineError> {
+        let _ = (id, priorities);
+        Ok(())
+    }
+
     /// Returns the connected peers of one torrent.
     fn peers(&mut self, id: TorrentId) -> Result<Vec<TorrentPeerInfo>, EngineError> {
         let _ = id;

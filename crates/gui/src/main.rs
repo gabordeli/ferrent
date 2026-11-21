@@ -134,6 +134,7 @@ enum Message {
     Resized(f32, f32),
     DetailsLoaded(Box<DetailsPayload>),
     DetailsFailed(String),
+    CycleFilePriority(usize),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -610,6 +611,34 @@ impl App {
                 self.details_error = Some(error);
                 self.details_payload = None;
                 Task::none()
+            }
+            Message::CycleFilePriority(index) => {
+                let Some(id) = self.details_for else {
+                    return Task::none();
+                };
+                let Some(DetailsPayload::Files(files)) = &self.details_payload else {
+                    return Task::none();
+                };
+                let mut priorities: Vec<i32> = files.iter().map(|file| file.priority).collect();
+                if let Some(slot) = priorities.get_mut(index) {
+                    *slot = match *slot {
+                        0 => 4,
+                        5..=7 => 0,
+                        _ => 7,
+                    };
+                } else {
+                    return Task::none();
+                }
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { connection::set_file_priorities(&client, id, priorities).await },
+                    |result| match result {
+                        Ok(files) => Message::DetailsLoaded(Box::new(DetailsPayload::Files(files))),
+                        Err(error) => Message::DetailsFailed(error),
+                    },
+                )
             }
             Message::PageLoaded {
                 request,
@@ -5079,20 +5108,38 @@ impl App {
             Some(DetailsPayload::Files(files)) if !files.is_empty() => {
                 let rows = files
                     .iter()
-                    .map(|file| {
-                        row![
-                            text(&file.path).size(11).width(Length::Fill),
-                            text(format_size(file.size)).size(11).color(dim),
-                            text(format!("{:.0}%", file.progress * 100.0))
-                                .size(11)
-                                .color(dim),
-                            text(format!("prio {}", file.priority)).size(11).color(dim),
-                        ]
-                        .spacing(16)
+                    .enumerate()
+                    .map(|(index, file)| {
+                        let (label, color) = match file.priority {
+                            0 => ("skipped", theme::TEXT_MUTED),
+                            5..=7 => ("high", theme::SUCCESS),
+                            _ => ("normal", dim),
+                        };
+                        mouse_area(
+                            row![
+                                text(&file.path).size(11).width(Length::Fill).color(color),
+                                text(format_size(file.size)).size(11).color(dim),
+                                text(format!("{:.0}%", file.progress * 100.0))
+                                    .size(11)
+                                    .color(dim),
+                                text(label).size(11).color(color).width(Length::Fixed(64.0)),
+                            ]
+                            .spacing(16)
+                            .padding([3, 0]),
+                        )
+                        .on_press(Message::CycleFilePriority(index))
                         .into()
                     })
                     .collect::<Vec<Element<Message>>>();
-                scrollable(WidgetColumn::with_children(rows).spacing(2))
+                let mut children: Vec<Element<Message>> = Vec::with_capacity(rows.len() + 1);
+                children.push(
+                    text("Click a file to cycle skipped / normal / high")
+                        .size(10)
+                        .color(theme::TEXT_MUTED)
+                        .into(),
+                );
+                children.extend(rows);
+                scrollable(WidgetColumn::with_children(children).spacing(2))
                     .height(Length::Fill)
                     .into()
             }

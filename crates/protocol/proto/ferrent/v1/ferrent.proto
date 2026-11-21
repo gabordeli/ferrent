@@ -20,6 +20,10 @@ service Ferrent {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   // Returns the file list of one torrent.
   rpc GetTorrentFiles(GetTorrentFilesRequest) returns (GetTorrentFilesResponse);
+
+  // Replaces the per-file priorities of one torrent (0 skip, 1 low, 4 normal,
+  // 7 high). The list must have one entry per file, in file order.
+  rpc SetFilePriorities(SetFilePrioritiesRequest) returns (SetFilePrioritiesResponse);
   // Returns the connected peers of one torrent.
   rpc GetTorrentPeers(GetTorrentPeersRequest) returns (GetTorrentPeersResponse);
   // Returns the trackers of one torrent.
@@ -580,6 +584,16 @@ message GetTorrentFilesRequest {
 }
 
 message GetTorrentFilesResponse {
+  repeated TorrentFile files = 1;
+}
+
+message SetFilePrioritiesRequest {
+  uint64 id = 1;
+  // One entry per file, in the order returned by GetTorrentFiles.
+  repeated int32 priorities = 2;
+}
+
+message SetFilePrioritiesResponse {
   repeated TorrentFile files = 1;
 }
 

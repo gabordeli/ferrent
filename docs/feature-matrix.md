@@ -64,7 +64,7 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Copy Completed | 🔌 | label `move_completed_path` / DiskGuard zóna |
 | NetWatcher | 🔌 | netbind |
 | ltConfig | 🟡 | a config TOML néhány libtorrent-kapcsolót ad (limit, aktív, interfész) |
-| Pieces (darab-prioritás) | ❌ | nincs darab-nézet |
+| Pieces (darab-prioritás) | 🟡 | fájlonkénti prioritás ✅ (M10-T2, RPC + GUI + CLI); darab-nézet még nincs |
 | SequentialDownload | ❌ | nincs sequential flag |
 | PreventSuspend | ❌ | desktop-only, alacsony prioritás |
 | Streaming | ❌ | nincs HTTP stream a letöltés közben |
@@ -98,9 +98,9 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 
 ## 5. A tényleges hiányosságok, fontosság szerint
 
-1. **Per-file prioritás + szelektív letöltés** – a Deluge GTK alapja; nálunk a
-   Files fül csak olvas. Nagy haszon, kicsi költség (az engine már ismeri a
-   prioritást).
+1. ~~**Per-file prioritás + szelektív letöltés**~~ – **kész (M10-T2)**: RPC +
+   GUI Files (kattintható sorok) + CLI; a skip-elt fájl nem töltődik le, a
+   prioritás restart után is megmarad (`docs/measurements/m10-file-priorities.md`).
 2. **Proxy támogatás** (HTTP/SOCKS5 + peer-proxy) – privacy/VPN felhasználóknál
    alapelvárás, a config és az engine-kapcsolat megvan hozzá.
 3. **RSS-watcher** – a Deluge-ban is csak plugin (YaRSS2, a TRaSH szerint

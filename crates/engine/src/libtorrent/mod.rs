@@ -79,6 +79,11 @@ enum Command {
         id: TorrentId,
         reply: Sender<Result<Vec<crate::TorrentFileInfo>, EngineError>>,
     },
+    SetFilePriorities {
+        id: TorrentId,
+        priorities: Vec<i32>,
+        reply: Sender<Result<(), EngineError>>,
+    },
     Peers {
         id: TorrentId,
         reply: Sender<Result<Vec<crate::TorrentPeerInfo>, EngineError>>,
@@ -239,6 +244,20 @@ impl TorrentEngine for LibtorrentEngine {
     fn files(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentFileInfo>, EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Files { id, reply })?;
+        Self::recv(response)
+    }
+
+    fn set_file_priorities(
+        &mut self,
+        id: TorrentId,
+        priorities: &[i32],
+    ) -> Result<(), EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::SetFilePriorities {
+            id,
+            priorities: priorities.to_vec(),
+            reply,
+        })?;
         Self::recv(response)
     }
 
@@ -459,6 +478,18 @@ fn run_worker(
                     .collect();
                 let _ = reply.send(Ok(files));
             }
+            Ok(Command::SetFilePriorities {
+                id,
+                priorities,
+                reply,
+            }) => {
+                let result = if session.pin_mut().set_file_priorities(id, &priorities) {
+                    Ok(())
+                } else {
+                    Err(EngineError::NotFound { id })
+                };
+                let _ = reply.send(result);
+            }
             Ok(Command::Peers { id, reply }) => {
                 let peers = session
                     .peers(id)
@@ -627,6 +658,52 @@ mod tests {
 
     fn payload() -> Vec<u8> {
         "hello ferrent\n".repeat(1024).into_bytes()
+    }
+
+    #[test]
+    fn file_priorities_round_trip_through_the_bridge() {
+        let dir = temp_dir("libtorrent-priorities");
+        let data = payload();
+        fs::write(dir.join("payload.bin"), &data).expect("write payload");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let spec = AddTorrent {
+            name: "payload.bin".to_owned(),
+            total_bytes: data.len() as u64,
+            source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+            save_path: dir.clone(),
+            resume_data: None,
+        };
+        let id = engine.add_torrent(spec).expect("add torrent");
+        assert_eq!(engine.files(id).expect("files").len(), 1);
+
+        engine.set_file_priorities(id, &[0]).expect("skip");
+        assert_eq!(
+            wait_for_priority(&mut engine, id, 0),
+            0,
+            "the skipped priority reaches libtorrent"
+        );
+
+        engine.set_file_priorities(id, &[7]).expect("high");
+        assert_eq!(wait_for_priority(&mut engine, id, 7), 7, "high priority");
+
+        assert!(
+            engine.set_file_priorities(999, &[4]).is_err(),
+            "an unknown torrent id is an error, not a silent no-op"
+        );
+        engine.remove(id, true).expect("remove");
+    }
+
+    /// libtorrent applies file priorities asynchronously, so poll briefly.
+    fn wait_for_priority(engine: &mut LibtorrentEngine, id: TorrentId, wanted: i32) -> i32 {
+        for _ in 0..100 {
+            let priority = engine.files(id).expect("files")[0].priority;
+            if priority == wanted {
+                return priority;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        engine.files(id).expect("files")[0].priority
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use ferrent_protocol::v1::watch_response::Event;
-use ferrent_protocol::v1::{Torrent, TorrentState, WatchResponse};
+use ferrent_protocol::v1::{Torrent, TorrentFile, TorrentState, WatchResponse};
 use serde_json::{Value, json};
 
 use crate::error::CliError;
@@ -42,6 +42,32 @@ pub fn print_json(value: &Value) {
         "{}",
         serde_json::to_string_pretty(value).expect("serialize JSON value")
     );
+}
+
+pub fn files_json(files: &[TorrentFile]) -> Value {
+    json!(
+        files
+            .iter()
+            .map(|file| json!({
+                "path": file.path,
+                "size": file.size,
+                "progress": file.progress,
+                "priority": file.priority,
+            }))
+            .collect::<Vec<_>>()
+    )
+}
+
+pub fn print_files(files: &[TorrentFile]) {
+    for file in files {
+        outln!(
+            "{:>3}  {:>12}  {:>6.1}%  {}",
+            file.priority,
+            format_bytes(file.size),
+            file.progress * 100.0,
+            file.path
+        );
+    }
 }
 
 pub fn print_torrents(torrents: &[Torrent]) {

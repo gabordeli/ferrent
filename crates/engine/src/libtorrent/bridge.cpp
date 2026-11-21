@@ -381,7 +381,7 @@ rust::Vec<FfiFile> Session::files(uint64_t id) const {
         return out;
     }
     auto const &storage = info->files();
-    auto priorities = it->second.file_priorities();
+    auto priorities = it->second.get_file_priorities();
     auto progress = it->second.file_progress();
     for (lt::file_index_t index{0}; index < storage.end_file(); ++index) {
         auto const slot = static_cast<std::size_t>(static_cast<int>(index));
@@ -390,8 +390,7 @@ rust::Vec<FfiFile> Session::files(uint64_t id) const {
         file.size = static_cast<uint64_t>(storage.file_size(index));
         file.priority = slot < priorities.size()
                              ? static_cast<int32_t>(priorities[slot])
-                             : 0;
-        auto done = slot < progress.size() ? progress[slot] : 0;
+                             : 0;        auto done = slot < progress.size() ? progress[slot] : 0;
         file.progress = storage.file_size(index) > 0
                              ? static_cast<float>(done) / static_cast<float>(storage.file_size(index))
                              : 0.0f;
@@ -477,6 +476,25 @@ rust::Vec<FfiTracker> Session::trackers(uint64_t id) const {
         out.push_back(std::move(item));
     }
     return out;
+}
+
+bool Session::set_file_priorities(uint64_t id, rust::Slice<const int32_t> priorities) {
+    auto it = impl_->handles.find(id);
+    if (it == impl_->handles.end()) {
+        return false;
+    }
+    auto info = it->second.torrent_file();
+    if (!info) {
+        return false;
+    }
+    std::vector<lt::download_priority_t> values;
+    values.reserve(priorities.size());
+    for (auto value : priorities) {
+        auto clamped = value < 0 ? 0 : (value > 7 ? 7 : value);
+        values.push_back(static_cast<lt::download_priority_t>(clamped));
+    }
+    it->second.prioritize_files(values);
+    return true;
 }
 
 FfiStatus Session::status(uint64_t id) const {

@@ -12,9 +12,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, GetConfigRequest, GetDisksRequest,
-    GetNotificationStatusRequest, GetTorrentRequest, Label as ProtoLabel, ListTorrentsRequest,
-    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RemoveTorrentRequest,
-    ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest, SortField, WatchRequest,
+    GetNotificationStatusRequest, GetTorrentFilesRequest, GetTorrentRequest, Label as ProtoLabel,
+    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, QueueDirection,
+    RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
+    SetFilePrioritiesRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -112,6 +113,15 @@ enum Command {
     Show {
         /// Torrent id.
         id: u64,
+    },
+    /// List the files of one torrent; `--set` changes their priorities.
+    Files {
+        /// Torrent id.
+        id: u64,
+        /// Comma-separated index=level pairs, e.g. `0=skip,2=high`
+        /// (skip | low | normal | high, or 0-7).
+        #[arg(long)]
+        set: Option<String>,
     },
     /// Pause a torrent.
     Pause {
@@ -216,6 +226,46 @@ impl Action {
             Self::Remove { .. } => "removed",
         }
     }
+}
+
+/// Parses `0=skip,2=high` into one priority per file.
+///
+/// Unlisted files keep libtorrent's normal priority, so a single skip does not
+/// silently reset the rest of the torrent.
+fn parse_file_priorities(spec: &str, file_count: usize) -> Result<Vec<i32>, CliError> {
+    let mut priorities = vec![4_i32; file_count];
+    for part in spec.split(',').filter(|part| !part.trim().is_empty()) {
+        let (index, level) = part
+            .split_once('=')
+            .ok_or_else(|| CliError::Config(format!("expected index=level, got {part:?}")))?;
+        let index: usize = index
+            .trim()
+            .parse()
+            .map_err(|_| CliError::Config(format!("invalid file index {index:?}")))?;
+        let level = level.trim();
+        let value = match level {
+            "skip" => 0,
+            "low" => 1,
+            "normal" => 4,
+            "high" => 7,
+            other => other
+                .parse::<i32>()
+                .ok()
+                .filter(|value| (0..=7).contains(value))
+                .ok_or_else(|| {
+                    CliError::Config(format!(
+                        "unknown priority {other:?} (skip | low | normal | high, or 0-7)"
+                    ))
+                })?,
+        };
+        if index >= file_count {
+            return Err(CliError::Config(format!(
+                "file index {index} is out of range (0..{file_count})"
+            )));
+        }
+        priorities[index] = value;
+    }
+    Ok(priorities)
 }
 
 #[tokio::main]
@@ -432,6 +482,35 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_json(&output::torrent_json(&torrent));
             } else {
                 output::print_torrent(&torrent);
+            }
+        }
+        Command::Files { id, set } => {
+            let files = match set {
+                Some(spec) => {
+                    let current = client
+                        .get_torrent_files(GetTorrentFilesRequest { id })
+                        .await?
+                        .into_inner()
+                        .files;
+                    let priorities = parse_file_priorities(&spec, current.len())?;
+                    client
+                        .set_file_priorities(SetFilePrioritiesRequest { id, priorities })
+                        .await?
+                        .into_inner()
+                        .files
+                }
+                None => {
+                    client
+                        .get_torrent_files(GetTorrentFilesRequest { id })
+                        .await?
+                        .into_inner()
+                        .files
+                }
+            };
+            if json {
+                output::print_json(&output::files_json(&files));
+            } else {
+                output::print_files(&files);
             }
         }
         Command::Pause { id } => {
@@ -694,5 +773,30 @@ fn import_deluge_report(
 fn print_import_warnings(warnings: &[String]) {
     for warning in warnings {
         eprintln!("warning: {warning}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_priority_spec_keeps_unlisted_files_normal() {
+        assert_eq!(
+            parse_file_priorities("1=skip", 3).expect("parse"),
+            vec![4, 0, 4]
+        );
+        assert_eq!(
+            parse_file_priorities("0=high,2=1", 3).expect("parse"),
+            vec![7, 4, 1]
+        );
+    }
+
+    #[test]
+    fn file_priority_spec_rejects_bad_input() {
+        assert!(parse_file_priorities("3=skip", 3).is_err(), "index range");
+        assert!(parse_file_priorities("0=urgent", 1).is_err(), "level name");
+        assert!(parse_file_priorities("nope", 1).is_err(), "missing '='");
+        assert!(parse_file_priorities("0=9", 1).is_err(), "level range");
     }
 }
