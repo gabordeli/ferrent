@@ -27,3 +27,8 @@ unsafe_code = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# A panic in the field must come back with a readable stacktrace (Bugsink
+# showed symbol-less frames); line tables cost binary size, not speed.
+[profile.release]
+debug = 1

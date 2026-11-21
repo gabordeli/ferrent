@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
-use redb::{Database, Durability, ReadableTable, TableDefinition};
+use redb::{Database, DatabaseError, Durability, ReadableTable, TableDefinition};
 
 use super::{SCHEMA_VERSION, StateStore, StoreError, StoreOp, TABLE_NAME};
 
 const TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new(TABLE_NAME);
 const SCHEMA_KEY: &str = "meta:schema_version";
+
+/// Startup waits up to ten seconds for a previous daemon to release the lock.
+const LOCK_RETRIES: u32 = 40;
+const LOCK_BACKOFF: Duration = Duration::from_millis(250);
 
 /// redb-backed [`StateStore`].
 pub struct RedbStore {
@@ -17,8 +22,35 @@ pub struct RedbStore {
 
 impl RedbStore {
     /// Opens (or creates) the database and ensures the schema table/version.
+    ///
+    /// redb keeps an exclusive file lock, so a restart that starts before the
+    /// previous daemon has fully exited used to abort with "Database already
+    /// open"; wait a few seconds instead.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let db = Database::create(path).map_err(backend)?;
+        Self::open_with(path, LOCK_RETRIES, LOCK_BACKOFF)
+    }
+
+    /// [`Self::open`] with an explicit retry budget (tests use a short one).
+    pub fn open_with(
+        path: impl AsRef<Path>,
+        retries: u32,
+        backoff: Duration,
+    ) -> Result<Self, StoreError> {
+        let path = path.as_ref();
+        let mut attempt = 0;
+        let db = loop {
+            match Database::create(path) {
+                Ok(db) => break db,
+                Err(error)
+                    if matches!(error, DatabaseError::DatabaseAlreadyOpen) && attempt < retries =>
+                {
+                    attempt += 1;
+                    eprintln!("waiting for the state lock ({attempt}/{retries}): {error}");
+                    std::thread::sleep(backoff);
+                }
+                Err(error) => return Err(backend(error)),
+            }
+        };
         let mut store = Self {
             db,
             pending: BTreeMap::new(),
@@ -210,6 +242,25 @@ mod tests {
             std::env::temp_dir().join(format!("ferrent-store-{name}-{}.redb", std::process::id()));
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    #[test]
+    fn a_locked_state_waits_for_the_previous_owner() {
+        let path = temp_db("lock");
+        let first = RedbStore::open(&path).expect("first open");
+
+        // The lock is held: a short budget gives up...
+        let error = RedbStore::open_with(&path, 2, Duration::from_millis(10))
+            .err()
+            .expect("the lock must be reported");
+        assert!(matches!(error, StoreError::Backend(_)), "{error:?}");
+
+        // ...and a patient open succeeds once the first store is gone.
+        drop(first);
+        let second =
+            RedbStore::open_with(&path, 100, Duration::from_millis(10)).expect("after the release");
+        drop(second);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

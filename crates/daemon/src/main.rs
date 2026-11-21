@@ -28,7 +28,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _telemetry = ferrent_telemetry::init("ferrentd");
     let result = run().await;
     if let Err(error) = &result {
-        ferrent_telemetry::capture_error(error.as_ref());
+        // A daemon that lost the state lock to a previous instance is an
+        // operational event, not a defect.
+        if !ferrent_telemetry::is_expected(error.as_ref()) {
+            ferrent_telemetry::capture_error(error.as_ref());
+        }
     }
     result
 }

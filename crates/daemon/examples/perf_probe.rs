@@ -24,10 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut client = ferrent_protocol::client::connect(&uri, &ca, &token).await?;
 
     // Warm the connection and the state mirror before timing.
-    let first = client
-        .list_torrents(request())
-        .await?
-        .into_inner();
+    let first = client.list_torrents(request()).await?.into_inner();
     let total = first.total;
 
     let mut samples = Vec::with_capacity(calls);

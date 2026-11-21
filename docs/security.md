@@ -85,6 +85,26 @@ A `lru` „unsound” jelzései a GUI folyamatban élnek (nem a daemonban), és
 
 Reprodukálás: `cargo audit` (a `~/.cargo/advisory-db`-t magától frissíti).
 
+## Hibajelentés (Bugsink)
+
+- A `ferrentd`, `ferrent-cli` és `ferrent-gui` a Sentry SDK-val küld a
+  Bugsink `ferrent` projektbe (id 5); a CLI csak a **nem várt** hibákat
+  jelenti (`CliError::reportable`), a GUI és a daemon a futás végi hibát.
+- **Várt feltételek** (`ferrent_telemetry::is_expected`, 2026-11-21):
+  `Connection refused`, `transport error`, `connection reset`,
+  `Broken pipe`, `Database already open`, `tcp connect error` — a
+  forrásláncot bejárva; ezek nem lesznek issue-k.
+- **redb lock:** a `RedbStore::open` 40×250 ms-ig vár a korábbi példányra
+  (`waiting for the state lock (n/40): …`), nem abortál.
+- **Release `debug = 1`:** a terepen bekövetkező panic szimbólumos
+  stacktrace-szel jön vissza (a korábbi `FERRENT-11` szimbólumok nélkül jött).
+- **`unwrap`/`expect` audit:** a daemonban ~412 találat, többségük
+  `Mutex`-poison `.expect`; a felhasználói bemenetre `Err`-t adunk. A
+  `FERRENT-11` (`Option::unwrap`) forrása a következő előfordulásnál
+  azonosítható lesz a szimbólumokkal.
+- Várt, lezárandó tételek: `FERRENT-10` (config hiba), `FERRENT-13`
+  (`Unimplemented` — új CLI a régi daemonon).
+
 ## Nyitott pontok (M9-T2 folytatás)
 
 - Nightly perf harness a baseline-hoz (a `ci/` mérési szkriptekre építve).

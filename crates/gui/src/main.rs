@@ -6389,7 +6389,10 @@ fn main() -> iced::Result {
             app.run()
         };
     if let Err(error) = &result {
-        ferrent_telemetry::capture_error(error);
+        let error: &(dyn std::error::Error + 'static) = error;
+        if !ferrent_telemetry::is_expected(error) {
+            ferrent_telemetry::capture_error(error);
+        }
     }
     result
 }
