@@ -214,8 +214,9 @@ async fn hook_runs_appear_in_the_status() {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let status = connection::hook_status(&client, 10).await.expect("status");
-        if status.runs.iter().any(|run| run.event == "added") {
-            assert_eq!(status.pending, 0, "the event is acknowledged");
+        // A run is recorded *before* the event is acknowledged, so the two
+        // are one poll apart by design; wait for both instead of racing.
+        if status.pending == 0 && status.runs.iter().any(|run| run.event == "added") {
             assert!(status.runs[0].succeeded, "{:?}", status.runs[0]);
             assert_eq!(status.runs[0].torrent_name, "hook.mkv");
             break;

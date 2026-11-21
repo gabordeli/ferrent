@@ -225,7 +225,9 @@ async fn watch_receives_added_event() {
         .spawn()
         .expect("spawn watch");
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The CLI installs its Ctrl-C handler after connecting; on a loaded
+    // machine 300 ms is not enough for that, and SIGINT would kill it.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     let torrent = server.torrent_path();
     let add = run_cli(
         &server,
@@ -308,7 +310,9 @@ async fn watch_ctrl_c_exits_zero() {
         .spawn()
         .expect("spawn watch");
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The CLI installs its Ctrl-C handler after connecting; on a loaded
+    // machine 300 ms is not enough for that, and SIGINT would kill it.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     let pid = child.id().expect("watch pid") as i32;
     let result = unsafe { libc::kill(pid, libc::SIGINT) };
     assert_eq!(result, 0, "SIGINT delivery failed");
