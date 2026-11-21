@@ -49,6 +49,7 @@ ferrent-cli config set <file> [--revision N]
 ferrent-cli trackers <id> [--add <url>] [--remove <url>]
 ferrent-cli webseeds <id> [--set <url,url>]
 ferrent-cli blocklist [--refresh]
+ferrent-cli stats [--json]
 ferrent-cli import-deluge --state-dir <dir> [--config-dir <dir>] [--dry-run]
 ```
 
@@ -62,6 +63,7 @@ ferrent-cli import-deluge --state-dir <dir> [--config-dir <dir>] [--dry-run]
   ír a listába (http/https/udp/ws, host kötelező), majd kiírja a friss listát.
 - `webseeds <id>`: a web seed (HTTP tükör) lista; `--set` a teljes listát
   cseréli (üres érték töröl). A végrehajtott listát írja vissza.
+- `stats`: session-totálok (letöltött/feltöltött bájt, arány, torrentek, peer-ek, uptime); a számlálók a daemon indulásától élnek.
 - `blocklist`: az IP-blokklista állapota (tartomány-szám, utolsó betöltés);
   `--refresh` újratölti a `[network] blocklist` forrásait (path vagy http(s)
   URL, eMule/PeerGuardian vagy CIDR sorok).

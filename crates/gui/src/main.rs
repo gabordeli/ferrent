@@ -152,6 +152,7 @@ enum Message {
     WebSeedsLoaded(Result<Vec<String>, String>),
     WebSeedsSaved(Result<Vec<String>, String>),
     TrackersEdited(Result<(), String>),
+    StatsLoaded(Result<connection::StatsSnapshot, String>),
     PageLoaded {
         request: u64,
         offset: usize,
@@ -320,6 +321,7 @@ enum DetailsTab {
     Files,
     Peers,
     Trackers,
+    Stats,
     Activity,
 }
 
@@ -330,6 +332,7 @@ impl DetailsTab {
             Self::Files => i18n::t("Files"),
             Self::Peers => i18n::t("Peers"),
             Self::Trackers => i18n::t("Trackers"),
+            Self::Stats => i18n::t("Stats"),
             Self::Activity => i18n::t("Activity"),
         }
     }
@@ -449,6 +452,9 @@ struct App {
     tracker_draft: String,
     webseed_draft: String,
     web_seeds: Vec<String>,
+    stats: Option<connection::StatsSnapshot>,
+    /// Download/upload pairs from the last five minutes, one per poll.
+    rate_history: std::collections::VecDeque<(f32, f32)>,
     activity: ActivityLog,
 
     modifiers: Modifiers,
@@ -554,6 +560,8 @@ impl Default for App {
             tracker_draft: String::new(),
             webseed_draft: String::new(),
             web_seeds: Vec::new(),
+            stats: None,
+            rate_history: std::collections::VecDeque::new(),
             activity: ActivityLog::new(),
             modifiers: Modifiers::empty(),
             measure: std::env::args().any(|arg| arg == "--measure" || arg == "--auto"),
@@ -865,6 +873,13 @@ impl App {
                     self.set_notice(error);
                 }
                 self.load_details()
+            }
+            Message::StatsLoaded(result) => {
+                match result {
+                    Ok(stats) => self.stats = Some(stats),
+                    Err(error) => self.set_notice(error),
+                }
+                Task::none()
             }
             Message::PageLoaded {
                 request,
@@ -1792,6 +1807,17 @@ impl App {
             self.refresh_page()
         };
         self.poll_tick = self.poll_tick.wrapping_add(1);
+        // One sample every five seconds keeps the sparkline at five minutes
+        // without holding every poll.
+        if self.poll_tick % 5 == 0 {
+            if let Some(status) = &self.server_status {
+                self.rate_history
+                    .push_back((status.download_rate as f32, status.upload_rate as f32));
+                while self.rate_history.len() > 60 {
+                    self.rate_history.pop_front();
+                }
+            }
+        }
         let status = match (&self.client, self.poll_tick % 5) {
             (Some(client), 0) => {
                 let client = client.clone();
@@ -5711,6 +5737,7 @@ impl App {
             DetailsTab::Files,
             DetailsTab::Peers,
             DetailsTab::Trackers,
+            DetailsTab::Stats,
             DetailsTab::Activity,
         ]
         .into_iter()
@@ -5822,6 +5849,10 @@ impl App {
                     ),
                 ])
             }
+            DetailsTab::Stats => Task::perform(
+                async move { connection::stats(&client).await },
+                Message::StatsLoaded,
+            ),
             DetailsTab::General | DetailsTab::Activity => Task::none(),
         }
     }
@@ -5941,6 +5972,7 @@ impl App {
             DetailsTab::Files => self.files_body(),
             DetailsTab::Peers => self.peers_body(),
             DetailsTab::Trackers => self.trackers_body(),
+            DetailsTab::Stats => self.stats_body(),
             DetailsTab::Activity => self.activity_body(),
         }
     }
@@ -6168,6 +6200,42 @@ impl App {
         .into()
     }
 
+    fn stats_body(&self) -> Element<'_, Message> {
+        let dim = theme::text_secondary();
+        let Some(stats) = &self.stats else {
+            return self.pending_details(dim);
+        };
+        let samples: Vec<(f32, f32)> = self.rate_history.iter().copied().collect();
+        column![
+            row![
+                stat_cell(
+                    i18n::t("Downloaded"),
+                    table::format_size(stats.downloaded_bytes)
+                ),
+                stat_cell(
+                    i18n::t("Uploaded"),
+                    table::format_size(stats.uploaded_bytes)
+                ),
+                stat_cell(i18n::t("Ratio"), format!("{:.2}", stats.ratio)),
+            ]
+            .spacing(28),
+            row![
+                stat_cell(i18n::t("Torrents"), stats.torrent_count.to_string()),
+                stat_cell(i18n::t("Peers"), stats.peers.to_string()),
+                stat_cell(i18n::t("Uptime"), format_uptime(stats.uptime_secs)),
+            ]
+            .spacing(28),
+            text(i18n::t("Last 5 minutes"))
+                .size(10)
+                .color(theme::text_muted()),
+            iced::widget::canvas::Canvas::new(Sparkline { samples })
+                .width(Length::Fill)
+                .height(Length::Fixed(90.0)),
+        ]
+        .spacing(10)
+        .into()
+    }
+
     fn activity_body(&self) -> Element<'_, Message> {
         let dim = theme::text_secondary();
         // With a torrent selected the tab is its history; without one it is
@@ -6297,6 +6365,79 @@ impl App {
             ..container::Style::default()
         })
         .into()
+    }
+}
+
+fn stat_cell<'a>(label: &'a str, value: String) -> Element<'a, Message> {
+    column![
+        text(label).size(10).color(theme::text_muted()),
+        text(value).size(16).font(theme::medium()),
+    ]
+    .spacing(2)
+    .into()
+}
+
+fn format_uptime(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
+/// Two-line sparkline of the session rates (download first, upload second).
+struct Sparkline {
+    samples: Vec<(f32, f32)>,
+}
+
+impl iced::widget::canvas::Program<Message> for Sparkline {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::widget::canvas;
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        frame.fill_rectangle(iced::Point::ORIGIN, bounds.size(), theme::bg_secondary());
+        if self.samples.len() < 2 {
+            return vec![frame.into_geometry()];
+        }
+        let peak = self
+            .samples
+            .iter()
+            .flat_map(|(down, up)| [*down, *up])
+            .fold(1.0_f32, f32::max);
+        let width = bounds.width.max(1.0);
+        let height = bounds.height.max(1.0);
+        let draw = |frame: &mut canvas::Frame, pick: fn(&(f32, f32)) -> f32, color: iced::Color| {
+            let path = canvas::Path::new(|builder| {
+                let last = self.samples.len() - 1;
+                for (index, sample) in self.samples.iter().enumerate() {
+                    let x = index as f32 / last as f32 * width;
+                    let y = height - 2.0 - (pick(sample) / peak) * (height - 4.0);
+                    if index == 0 {
+                        builder.move_to(iced::Point::new(x, y));
+                    } else {
+                        builder.line_to(iced::Point::new(x, y));
+                    }
+                }
+            });
+            frame.stroke(
+                &path,
+                canvas::Stroke::default().with_color(color).with_width(1.5),
+            );
+        };
+        draw(&mut frame, |(down, _)| *down, theme::success());
+        draw(&mut frame, |(_, up)| *up, theme::cyan());
+        vec![frame.into_geometry()]
     }
 }
 

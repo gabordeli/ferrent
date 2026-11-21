@@ -44,6 +44,8 @@ service Ferrent {
   rpc SetWebSeeds(SetWebSeedsRequest) returns (SetWebSeedsResponse);
   // Reloads the configured IP blocklist sources.
   rpc RefreshBlocklist(RefreshBlocklistRequest) returns (RefreshBlocklistResponse);
+  // Session totals and counters for the stats view.
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
 
   // Renames one file inside a torrent (index from GetTorrentFiles).
   rpc RenameTorrentFile(RenameTorrentFileRequest) returns (RenameTorrentFileResponse);
@@ -729,6 +731,32 @@ message SetWebSeedsResponse {
 }
 
 message RefreshBlocklistRequest {}
+
+message GetStatsRequest {}
+
+message GetStatsResponse {
+  // Payload bytes downloaded since each torrent was added, summed.
+  uint64 downloaded_bytes = 1;
+  // Payload bytes uploaded since each torrent was added, summed.
+  uint64 uploaded_bytes = 2;
+  // uploaded / downloaded; `0` when nothing was downloaded yet.
+  float ratio = 3;
+  // Torrents per lifecycle state.
+  uint32 torrent_count = 4;
+  uint32 downloading_count = 5;
+  uint32 seeding_count = 6;
+  uint32 queued_count = 7;
+  uint32 paused_count = 8;
+  uint32 checking_count = 9;
+  uint32 error_count = 10;
+  uint32 moving_count = 11;
+  // Swarm peers reported by the engine, summed over the torrents.
+  uint64 peers = 12;
+  // Seconds since the daemon started; the session totals restart with it.
+  int64 uptime_secs = 13;
+  uint64 download_rate = 14;
+  uint64 upload_rate = 15;
+}
 
 message RefreshBlocklistResponse {
   // Ranges installed after the reload.

@@ -13,12 +13,12 @@ use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest,
     GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest, GetRssStatusRequest,
-    GetStatusRequest, GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest,
-    GetWebSeedsRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
-    PauseTorrentRequest, QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest,
-    RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetWebSeedsRequest,
-    SortField, WatchRequest,
+    GetStatsRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
+    GetTorrentTrackersRequest, GetWebSeedsRequest, Label as ProtoLabel, ListTorrentsRequest,
+    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RecheckTorrentRequest,
+    RefreshBlocklistRequest, RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest,
+    ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    SetWebSeedsRequest, SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -176,6 +176,8 @@ enum Command {
         #[arg(long)]
         refresh: bool,
     },
+    /// Session totals: bytes, ratio, peer count and uptime.
+    Stats,
     /// List the files of one torrent; `--set` changes their priorities.
     Files {
         /// Torrent id.
@@ -748,6 +750,31 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 for error in &errors {
                     println!("warning: {error}");
                 }
+            }
+        }
+        Command::Stats => {
+            let stats = client.get_stats(GetStatsRequest {}).await?.into_inner();
+            if json {
+                output::print_json(&json!({
+                    "downloaded_bytes": stats.downloaded_bytes,
+                    "uploaded_bytes": stats.uploaded_bytes,
+                    "ratio": stats.ratio,
+                    "torrents": stats.torrent_count,
+                    "peers": stats.peers,
+                    "uptime_secs": stats.uptime_secs,
+                    "download_rate": stats.download_rate,
+                    "upload_rate": stats.upload_rate,
+                }));
+            } else {
+                println!(
+                    "downloaded: {}",
+                    output::format_bytes(stats.downloaded_bytes)
+                );
+                println!("uploaded:   {}", output::format_bytes(stats.uploaded_bytes));
+                println!("ratio:      {:.3}", stats.ratio);
+                println!("torrents:   {}", stats.torrent_count);
+                println!("peers:      {}", stats.peers);
+                println!("uptime:     {}s", stats.uptime_secs);
             }
         }
         Command::Files { id, set } => {

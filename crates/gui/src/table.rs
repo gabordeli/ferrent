@@ -628,14 +628,21 @@ impl canvas::Program<TableMessage> for Table<'_> {
         }
 
         self.draw_scrollbar(&mut frame, bounds);
-        if let Some(menu) = self.context {
-            self.draw_menu(&mut frame, menu);
+        let mut geometries = vec![frame.into_geometry()];
+        if self.context.is_some() || self.column_menu.is_some() {
+            // Text is rendered after the fills of the same frame, so an
+            // overlay menu in the main frame would have the row text drawn
+            // over its background; a second geometry keeps it on top.
+            let mut overlay = Frame::new(renderer, bounds.size());
+            if let Some(menu) = self.context {
+                self.draw_menu(&mut overlay, menu);
+            }
+            if let Some(origin) = self.column_menu {
+                self.draw_column_menu(&mut overlay, origin, bounds);
+            }
+            geometries.push(overlay.into_geometry());
         }
-        if let Some(origin) = self.column_menu {
-            self.draw_column_menu(&mut frame, origin, bounds);
-        }
-
-        vec![frame.into_geometry()]
+        geometries
     }
 }
 
@@ -907,7 +914,7 @@ fn format_eta(seconds: u32) -> String {
     }
 }
 
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {

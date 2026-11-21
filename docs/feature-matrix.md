@@ -47,7 +47,7 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Label – címkék + műveletek | 🔌 | label CRUD, auto-match, szín, limit, move-on-complete |
 | Notification – email/popup/blink/sound | 🔌 | webhook + Telegram, digest + quiet hours (headless is!) |
 | Scheduler – sávszélesség időhöz | 🔌 | `[scheduler]` |
-| Stats – grafikonok | ❌ | nincs statisztika-nézet |
+| Stats – grafikonok | ✅ | Statisztika fül: számok + 5 perces sparkline (M12-T4) |
 | WebUI | 🔌 | beépített `ferrent-web` (külön bináris) |
 | Toggle – session paused/resumed | ✅ | bulk pause/resume a kiválasztottakon |
 
@@ -154,7 +154,7 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ✅ | `[network] blocklist` + `ip_filter`; CLI `blocklist`, GUI Network fül (M12-T3) |
 | **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
-| **Statisztika/grafikonok** | ✅ | ✅ | plugin | ❌ | session + torrent szint |
+| **Statisztika/grafikonok** | ✅ | ✅ | plugin | ✅ | Statisztika fül + `stats` CLI; session-totál (M12-T4) |
 | **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben (M11-T2) |
 | **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | 🟡 | magyar default + angol, a GUI chrome kész (M11-T3); állapotszavak/számlálók még angolul |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) |

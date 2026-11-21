@@ -20,23 +20,23 @@ use ferrent_protocol::v1::{
     GetAutoAddStatusRequest, GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse,
     GetDisksRequest, GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse,
     GetNotificationStatusRequest, GetNotificationStatusResponse, GetRssStatusRequest,
-    GetRssStatusResponse, GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest,
-    GetTorrentFilesResponse, GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest,
-    GetTorrentResponse, GetTorrentTrackersRequest, GetTorrentTrackersResponse, GetWebSeedsRequest,
-    GetWebSeedsResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry, LabelResponse,
-    ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse,
-    MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
-    QueueDirection as ProtoQueueDirection, RecheckTorrentRequest, RecheckTorrentResponse,
-    RefreshBlocklistRequest, RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse,
-    RemoveTrackerRequest, RemoveTrackerResponse, Removed, RenameTorrentFileRequest,
-    RenameTorrentFileResponse, ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest,
-    ScanAutoAddResponse, SendTestNotificationRequest, SendTestNotificationResponse,
-    SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest, SetFilePrioritiesResponse,
-    SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest, SetSuperSeedingResponse,
-    SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
-    SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse, SortField, StateChanged,
-    Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
-    UpdateLabelRequest, WatchRequest, WatchResponse,
+    GetRssStatusResponse, GetStatsRequest, GetStatsResponse, GetStatusRequest, GetStatusResponse,
+    GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
+    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
+    GetTorrentTrackersResponse, GetWebSeedsRequest, GetWebSeedsResponse, HookRun as ProtoHookRun,
+    Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest, ListLabelsResponse,
+    ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse,
+    PauseTorrentRequest, PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection,
+    RecheckTorrentRequest, RecheckTorrentResponse, RefreshBlocklistRequest,
+    RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse, RemoveTrackerRequest,
+    RemoveTrackerResponse, Removed, RenameTorrentFileRequest, RenameTorrentFileResponse,
+    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
+    SendTestNotificationRequest, SendTestNotificationResponse, SetConfigRequest, SetConfigResponse,
+    SetFilePrioritiesRequest, SetFilePrioritiesResponse, SetSequentialRequest,
+    SetSequentialResponse, SetSuperSeedingRequest, SetSuperSeedingResponse, SetTorrentLabelRequest,
+    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest,
+    SetWebSeedsResponse, SortField, StateChanged, Torrent, TorrentFile, TorrentFinished,
+    TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -131,6 +131,8 @@ pub struct AppState {
     pub ratio_status: Mutex<crate::automation::ratio::RatioStatus>,
     /// Installed IP blocklist summary, shared with `GetStatus`.
     pub(crate) blocklist: Mutex<BlocklistStatus>,
+    /// Unix seconds of the daemon start; session totals restart with it.
+    pub(crate) started_unix: i64,
 }
 
 /// What the last blocklist load produced, for the status RPC.
@@ -175,6 +177,7 @@ impl AppState {
             ratio: Mutex::new(crate::automation::ratio::RatioState::default()),
             ratio_status: Mutex::new(crate::automation::ratio::RatioStatus::default()),
             blocklist: Mutex::new(BlocklistStatus::default()),
+            started_unix: chrono::Utc::now().timestamp(),
         }
     }
 
@@ -1201,6 +1204,45 @@ impl Ferrent for FerrentService {
             })
             .await?;
         Ok(Response::new(SetWebSeedsResponse { urls: applied }))
+    }
+
+    async fn get_stats(
+        &self,
+        request: Request<GetStatsRequest>,
+    ) -> Result<Response<GetStatsResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let status = self.state.aggregate_status();
+        let mut downloaded = 0_u64;
+        let mut uploaded = 0_u64;
+        let mut peers = 0_u64;
+        for torrent in &self.state.mirror.all() {
+            downloaded = downloaded.saturating_add(torrent.downloaded_bytes);
+            uploaded = uploaded.saturating_add(torrent.uploaded_bytes);
+            peers = peers.saturating_add(u64::from(torrent.peers));
+        }
+        let ratio = if downloaded > 0 {
+            uploaded as f32 / downloaded as f32
+        } else {
+            0.0
+        };
+        let uptime = (chrono::Utc::now().timestamp() - self.state.started_unix).max(0);
+        Ok(Response::new(GetStatsResponse {
+            downloaded_bytes: downloaded,
+            uploaded_bytes: uploaded,
+            ratio,
+            torrent_count: status.torrent_count,
+            downloading_count: status.downloading,
+            seeding_count: status.seeding,
+            queued_count: status.queued,
+            paused_count: status.paused,
+            checking_count: status.checking,
+            error_count: status.error,
+            moving_count: status.moving,
+            peers,
+            uptime_secs: uptime,
+            download_rate: status.download_rate,
+            upload_rate: status.upload_rate,
+        }))
     }
 
     async fn refresh_blocklist(

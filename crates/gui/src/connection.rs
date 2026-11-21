@@ -8,10 +8,10 @@ use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
     AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest, DeleteLabelRequest,
     GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest, GetHookStatusRequest,
-    GetNotificationStatusRequest, GetRssStatusRequest, GetStatusRequest, GetTorrentFilesRequest,
-    GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest, Label, LabelEntry,
-    ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest, RefreshBlocklistRequest,
-    RemoveTrackerRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
+    GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest, GetStatusRequest,
+    GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
+    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, RecheckTorrentRequest,
+    RefreshBlocklistRequest, RemoveTrackerRequest, RenameTorrentFileRequest, ScanAutoAddRequest,
     SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
     SetSuperSeedingRequest, SetTorrentLabelRequest, SetWebSeedsRequest, SortField, Torrent,
     TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
@@ -269,6 +269,39 @@ pub async fn remove_tracker(client: &AuthClient, id: u64, url: &str) -> Result<(
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?;
     Ok(())
+}
+
+/// Session totals for the stats view.
+#[derive(Debug, Clone, Default)]
+pub struct StatsSnapshot {
+    pub downloaded_bytes: u64,
+    pub uploaded_bytes: u64,
+    pub ratio: f32,
+    pub torrent_count: u32,
+    pub peers: u64,
+    pub uptime_secs: i64,
+    pub download_rate: u64,
+    pub upload_rate: u64,
+}
+
+/// Fetches the session totals.
+pub async fn stats(client: &AuthClient) -> Result<StatsSnapshot, String> {
+    let mut client = client.clone();
+    let response = client
+        .get_stats(GetStatsRequest {})
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(StatsSnapshot {
+        downloaded_bytes: response.downloaded_bytes,
+        uploaded_bytes: response.uploaded_bytes,
+        ratio: response.ratio,
+        torrent_count: response.torrent_count,
+        peers: response.peers,
+        uptime_secs: response.uptime_secs,
+        download_rate: response.download_rate,
+        upload_rate: response.upload_rate,
+    })
 }
 
 /// Reloads the daemon's IP blocklist and returns the installed range count.
