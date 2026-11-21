@@ -95,6 +95,16 @@ DSN-jére inicializálja a Sentry klienst; a `FERRENT_BUGSINK_DSN` env var
 felülírhatja. A panelek `service` taget kapnak, a kezeletlen hibák és a
 Rust panics figyelmeztetés nélkül mennek a Bugsinkbe.
 
+## Fejlesztés és GitHub-tükör
+
+A fejlesztés a saját GitLabon folyik; a `gabordeli/ferrent` GitHub repó
+**egyirányú, read-only tükör** (GitLab push-mirror). A GitHub issue/PR
+portolása a maintainer dolga. A CI-k, a tükör jogosultságai és az APT
+repó (GitHub Pages) beállítása: [docs/ci.md](docs/ci.md).
+
+A repó a `v0.1.0` kiadásig **privát** marad: a kiadási kapu hónapokig tartó
+éles torrentes futás, közben a Bugsinkben látszó hibák javításával.
+
 ## Ismert korlátok (MVP)
 
 - Nincs `.deb`/APT/Docker csomagolás, Deluge-import és `*arr` API (v1.0).

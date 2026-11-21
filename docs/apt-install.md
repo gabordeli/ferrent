@@ -1,14 +1,18 @@
 # Telepítés APT repóból
 
 A `ferrentd` csomag egy aláírt APT repóból telepíthető Debian 12/13-on és
-Ubuntu 24.04-on (amd64 és arm64). A repó a `gh-pages` ágon él; az alábbi
-példában `OWNER` a GitHub-fiók neve.
+Ubuntu 24.04-on (amd64 és arm64). A repó a `gh-pages` ágon él, a Pages URL-je
+`https://gabordeli.github.io/ferrent/`.
+
+> A GitHub repó a `v0.1.0` kiadásig **privát**, ezért a Pages URL addig
+> kívülről nem érhető el. A lenti lépések a repó publikálása után működnek
+> változatlanul.
 
 ## 1. Kulcs
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://OWNER.github.io/ferrent/ferrent.gpg \
+curl -fsSL https://gabordeli.github.io/ferrent/ferrent.gpg \
   | sudo tee /etc/apt/keyrings/ferrent.gpg >/dev/null
 ```
 
@@ -24,7 +28,7 @@ gpg --show-keys --with-fingerprint /etc/apt/keyrings/ferrent.gpg
 ```bash
 sudo tee /etc/apt/sources.list.d/ferrent.sources >/dev/null <<'EOF'
 Types: deb
-URIs: https://OWNER.github.io/ferrent/
+URIs: https://gabordeli.github.io/ferrent/
 Suites: stable
 Components: main
 Architectures: amd64 arm64
