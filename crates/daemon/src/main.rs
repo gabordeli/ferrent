@@ -85,6 +85,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
         active_downloads: resolved.session.active_downloads,
         active_seeds: resolved.session.active_seeds,
         active_limit: resolved.session.active_limit,
+        listen_interfaces: resolved.network.listen_interfaces.clone(),
+        outgoing_interfaces: resolved.network.outgoing_interfaces.clone(),
     };
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;
@@ -94,6 +96,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     order_for_restore(&mut persisted, &queue_order);
     let labels = LabelState::load(&store, &persisted)?;
     let restored_count = persisted.len();
+    println!(
+        "engine={}",
+        if cfg!(feature = "libtorrent") {
+            "libtorrent"
+        } else {
+            "mock"
+        }
+    );
 
     #[cfg(feature = "libtorrent")]
     let mut engine: Box<dyn TorrentEngine> = Box::new(LibtorrentEngine::new(settings));

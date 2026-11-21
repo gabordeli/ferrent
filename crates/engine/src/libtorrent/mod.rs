@@ -116,9 +116,10 @@ impl LibtorrentEngine {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (commands, command_rx) = mpsc::channel();
         let worker_events = events.clone();
+        let worker_settings = settings.clone();
         let worker = thread::Builder::new()
             .name("ferrent-libtorrent".to_owned())
-            .spawn(move || run_worker(command_rx, worker_events, settings))
+            .spawn(move || run_worker(command_rx, worker_events, worker_settings))
             .expect("spawn libtorrent worker thread");
 
         Self {
@@ -254,12 +255,18 @@ impl TorrentEngine for LibtorrentEngine {
     }
 
     fn settings(&self) -> EngineSettings {
-        self.settings
+        self.settings.clone()
     }
 
     fn set_settings(&mut self, settings: EngineSettings) {
         let (reply, response) = mpsc::channel();
-        if self.send(Command::SetSettings { settings, reply }).is_ok() {
+        if self
+            .send(Command::SetSettings {
+                settings: settings.clone(),
+                reply,
+            })
+            .is_ok()
+        {
             let _ = response.recv();
             self.settings = settings;
         }
@@ -291,6 +298,8 @@ fn run_worker(
         settings.active_downloads,
         settings.active_seeds,
         settings.active_limit,
+        &settings.listen_interfaces,
+        &settings.outgoing_interfaces,
     );
     let mut last_progress = Instant::now();
     let mut finished = std::collections::BTreeSet::new();

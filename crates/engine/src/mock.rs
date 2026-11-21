@@ -325,7 +325,7 @@ impl TorrentEngine for MockEngine {
     }
 
     fn settings(&self) -> EngineSettings {
-        self.settings
+        self.settings.clone()
     }
 
     fn set_settings(&mut self, settings: EngineSettings) {

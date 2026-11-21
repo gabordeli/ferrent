@@ -12,7 +12,10 @@ description = "Headless Ferrent BitTorrent daemon"
 workspace = true
 
 [features]
-default = []
+# The real engine is the default, so a plain `cargo build -p ferrent-daemon`
+# cannot ship the mock by accident (it did, and its shutdown rewrote the state
+# with synthetic records). CI builds the mock with `--no-default-features`.
+default = ["libtorrent"]
 libtorrent = ["ferrent-engine/libtorrent"]
 
 [[bin]]

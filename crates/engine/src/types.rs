@@ -91,7 +91,7 @@ pub struct AddTorrent {
 }
 
 /// Engine-wide rate limits. A value of `0` means unlimited.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EngineSettings {
     /// Download limit in bytes per second.
     pub download_rate_limit: u64,
@@ -108,6 +108,12 @@ pub struct EngineSettings {
     /// Maximum number of active torrents; `0` uses the engine's 20 000 soak
     /// head-room.
     pub active_limit: u32,
+    /// libtorrent `listen_interfaces` (e.g. `0.0.0.0:6881`); empty leaves the
+    /// engine default.
+    pub listen_interfaces: String,
+    /// libtorrent `outgoing_interfaces` (e.g. `wg0/10.8.0.2`); empty means
+    /// "any".
+    pub outgoing_interfaces: String,
 }
 
 /// Per-torrent limits. A value of `0` means unlimited.

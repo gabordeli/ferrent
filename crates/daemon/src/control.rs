@@ -19,6 +19,8 @@ pub enum PauseReason {
     DiskGuard,
     /// A ratio/time policy.
     Ratio,
+    /// The watched network interface is down.
+    Network,
 }
 
 impl PauseReason {
@@ -28,6 +30,7 @@ impl PauseReason {
             Self::Scheduler => 2,
             Self::DiskGuard => 4,
             Self::Ratio => 8,
+            Self::Network => 16,
         }
     }
 }

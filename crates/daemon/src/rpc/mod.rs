@@ -1217,6 +1217,8 @@ impl Ferrent for FerrentService {
             active_downloads: resolved.session.active_downloads,
             active_seeds: resolved.session.active_seeds,
             active_limit: resolved.session.active_limit,
+            listen_interfaces: resolved.network.listen_interfaces.clone(),
+            outgoing_interfaces: resolved.network.outgoing_interfaces.clone(),
         };
         self.with_engine(move |engine| {
             engine.set_settings(settings);
@@ -1262,6 +1264,14 @@ pub async fn serve(
     crate::hooks::spawn_hook_runner(Arc::clone(&state));
     crate::scheduler::spawn_scheduler(Arc::clone(&state));
     crate::automation::ratio::spawn_ratio(Arc::clone(&state));
+    crate::netbind::spawn_netbind(Arc::clone(&state));
+    if let Ok(config) = state.config.resolved() {
+        if config.metrics.enabled {
+            let listen = config.metrics.listen.clone();
+            let token = (!config.metrics.token.is_empty()).then(|| config.metrics.token.clone());
+            tokio::spawn(crate::metrics::serve(listen, token, Arc::clone(&state)));
+        }
+    }
     crate::notify::spawn_notifier(Arc::clone(&state));
     crate::diskguard::moves::spawn_move_retry(Arc::clone(&state));
     crate::diskguard::guard::spawn_disk_guard(Arc::clone(&state));

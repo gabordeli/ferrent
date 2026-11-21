@@ -47,6 +47,80 @@ pub struct FileConfig {
     pub diskguard: DiskGuardConfig,
     /// Ratio and seed-time policy (M8-T3).
     pub ratio: RatioConfig,
+    /// Interface binding and link watching (M8-T4).
+    pub network: NetworkConfig,
+    /// Optional Prometheus endpoint (M8-T4).
+    pub metrics: MetricsConfig,
+}
+
+/// Interface binding (M8-T4).
+///
+/// Empty values keep libtorrent's defaults, so an untouched config behaves
+/// exactly like before.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NetworkConfig {
+    /// libtorrent `listen_interfaces`, e.g. `0.0.0.0:6881` or `wg0:6881`.
+    pub listen_interfaces: String,
+    /// libtorrent `outgoing_interfaces`, e.g. `wg0` or `wg0/10.8.0.2`.
+    pub outgoing_interfaces: String,
+    /// Interface whose loss pauses every torrent, e.g. `wg0`.
+    pub watch_interface: String,
+    /// How long the interface must be back before torrents resume.
+    pub grace_secs: u64,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            listen_interfaces: String::new(),
+            outgoing_interfaces: String::new(),
+            watch_interface: String::new(),
+            grace_secs: 60,
+        }
+    }
+}
+
+impl NetworkConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.grace_secs > 3_600 {
+            return Err("network.grace_secs must be at most 3600".to_owned());
+        }
+        if !self.watch_interface.is_empty() && self.watch_interface.contains(['/', ':', ' ']) {
+            return Err("network.watch_interface must be a plain interface name".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Prometheus endpoint (M8-T4). Off by default; a token makes it
+/// scrapeable from outside loopback without exposing it to the LAN.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsConfig {
+    pub enabled: bool,
+    pub listen: String,
+    /// When set, the scrape needs `Authorization: Bearer <token>`.
+    pub token: String,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: "127.0.0.1:9898".to_owned(),
+            token: String::new(),
+        }
+    }
+}
+
+impl MetricsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && !self.listen.contains(':') {
+            return Err("metrics.listen must be host:port".to_owned());
+        }
+        Ok(())
+    }
 }
 
 /// Ratio / seed-time auto-remove (M8-T3).
@@ -431,6 +505,8 @@ impl FileConfig {
             notify: self.notify.clone(),
             diskguard: self.diskguard.clone(),
             ratio: self.ratio.clone(),
+            network: self.network.clone(),
+            metrics: self.metrics.clone(),
             env_locked: locked,
         };
         resolved.validate()?;
@@ -453,6 +529,8 @@ pub struct ResolvedConfig {
     pub notify: NotifyConfig,
     pub diskguard: DiskGuardConfig,
     pub ratio: RatioConfig,
+    pub network: NetworkConfig,
+    pub metrics: MetricsConfig,
     /// Keys whose value came from the environment and cannot be changed by
     /// `SetConfig` until the daemon restarts.
     pub env_locked: BTreeSet<String>,
@@ -474,6 +552,8 @@ impl ResolvedConfig {
         validate_bind(&self.bind)?;
         self.diskguard.validate().map_err(ConfigError::invalid)?;
         self.ratio.validate().map_err(ConfigError::invalid)?;
+        self.network.validate().map_err(ConfigError::invalid)?;
+        self.metrics.validate().map_err(ConfigError::invalid)?;
         Ok(())
     }
 }

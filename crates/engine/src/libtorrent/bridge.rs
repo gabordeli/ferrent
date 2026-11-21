@@ -64,6 +64,9 @@ pub(crate) mod ffi {
 
         type Session;
 
+        // The bridge is a flat mirror of the C++ constructor; grouping the
+        // scalars into a struct would only add conversion code.
+        #[allow(clippy::too_many_arguments)]
         fn new_session(
             download_rate_limit: u64,
             upload_rate_limit: u64,
@@ -71,6 +74,8 @@ pub(crate) mod ffi {
             active_downloads: u32,
             active_seeds: u32,
             active_limit: u32,
+            listen_interfaces: &str,
+            outgoing_interfaces: &str,
         ) -> UniquePtr<Session>;
         fn add_torrent(
             self: Pin<&mut Session>,

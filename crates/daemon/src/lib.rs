@@ -8,6 +8,8 @@ pub mod diskguard;
 pub mod events;
 pub mod hooks;
 pub mod labels;
+pub mod metrics;
+pub mod netbind;
 pub mod notify;
 pub mod persist;
 pub mod rpc;

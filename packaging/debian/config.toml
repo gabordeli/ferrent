@@ -16,3 +16,20 @@ token_file = "/etc/ferrent/token"
 # [[ratio.label]]
 # name = "music"
 # stop_at_ratio = 3.0
+
+# Interface binding and link watching (M8-T4). Empty values keep libtorrent's
+# defaults. Setting watch_interface pauses every torrent while that interface
+# is gone (e.g. a VPN tunnel), and resumes them once it has been back for
+# grace_secs.
+# [network]
+# listen_interfaces = "0.0.0.0:6881"
+# outgoing_interfaces = "wg0"
+# watch_interface = "wg0"
+# grace_secs = 60
+
+# Optional Prometheus endpoint (M8-T4). Off by default; a token requires
+# `Authorization: Bearer <token>` on every scrape.
+# [metrics]
+# enabled = true
+# listen = "127.0.0.1:9898"
+# token = ""

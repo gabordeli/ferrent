@@ -111,3 +111,28 @@ a daemon oldala csak a configot, a mirrort és a műveleteket adja.
 Teszt: 6 integációs eset (`crates/daemon/tests/ratio.rs`) — stop, küszöb
 alatt marad, remove, dry-run, label-felülírás, letöltő torrent kihagyása —
 mind zöld.
+
+## M8-T4 – Interfész-kötés, link-figyelő, /metrics
+
+Mérve 2026-11-21.
+
+- **Kötés:** a `[network] listen_interfaces` / `outgoing_interfaces` a
+  libtorrent session settingsbe megy (`listen_interfaces`, `outgoing_interfaces`);
+  üres érték = a korábbi (libtorrent default) viselkedés, tehát a csomagolt
+  daemon nem változik, ha nem állítják.
+- **Link-figyelő:** 5 s-onként mintázza `/sys/class/net/<watch_interface>`
+  létét. Eltűnéskor **azonnal** `Network` pause-reasonnel pause-ol (a user/
+  scheduler/guard/ratio okokat nem bántja), visszatéréskor a `grace_secs`
+  letelte után oldja fel. Mért élő jel: `netbind: ferrent0 -> Pause`
+  (nem létező interfész), a state viselkedését a 4 unit teszt fedi
+  (pause egyszer, grace alatt nincs resume, újabb kiesés újraindítja a grace-t,
+  loopback létezik / kamu név nem).
+- **/metrics:** opcionális, csak `GET /metrics`, `text/plain; version=0.0.4`.
+  Metrikák: `ferrent_torrents{,_seeding,_downloading,_paused}`,
+  `ferrent_download_rate_bytes_per_second`, `ferrent_upload_rate_bytes_per_second`,
+  `ferrent_peers`, `ferrent_process_resident_memory_bytes` (VmRSS),
+  `ferrent_process_open_fds` (/proc/self/fd). Token nélkül bárki olvassa,
+  tokennel `Authorization: Bearer` kell.
+- **Mért endpoint:** token nélkül **401**, tokennel **200**, a törzs a
+  fenti sorokkal (`ferrent_torrents 0` üres daemonon); a `render()` két
+  unit tesztje a formátumra és az üres esetre.

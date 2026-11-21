@@ -93,15 +93,19 @@ struct Session::Impl {
     std::string last_error;
 
     Impl(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode,
-         uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit)
+         uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit,
+         std::string const &listen_interfaces, std::string const &outgoing_interfaces)
         : session(make_settings(download_rate_limit, upload_rate_limit, active_downloads,
-                               active_seeds, active_limit)),
+                               active_seeds, active_limit, listen_interfaces,
+                               outgoing_interfaces)),
           seed_mode(seed_mode) {}
 
     static lt::settings_pack make_settings(uint64_t download_rate_limit,
                                            uint64_t upload_rate_limit,
                                            uint32_t active_downloads, uint32_t active_seeds,
-                                           uint32_t active_limit) {
+                                           uint32_t active_limit,
+                                           std::string const &listen_interfaces,
+                                           std::string const &outgoing_interfaces) {
         lt::settings_pack pack;
         pack.set_int(
             lt::settings_pack::alert_mask,
@@ -119,6 +123,14 @@ struct Session::Impl {
         pack.set_int(lt::settings_pack::active_seeds, active_or_default(active_seeds));
         pack.set_int(lt::settings_pack::active_downloads, active_or_default(active_downloads));
         pack.set_int(lt::settings_pack::active_checking, 20000);
+        // An empty value keeps libtorrent's default, so the packaged daemon
+        // behaves as before unless the operator binds an interface.
+        if (!listen_interfaces.empty()) {
+            pack.set_str(lt::settings_pack::listen_interfaces, listen_interfaces);
+        }
+        if (!outgoing_interfaces.empty()) {
+            pack.set_str(lt::settings_pack::outgoing_interfaces, outgoing_interfaces);
+        }
         return pack;
     }
 
@@ -164,9 +176,12 @@ struct Session::Impl {
 };
 
 Session::Session(uint64_t download_rate_limit, uint64_t upload_rate_limit, bool seed_mode,
-                 uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit)
+                 uint32_t active_downloads, uint32_t active_seeds, uint32_t active_limit,
+                 std::string const &listen_interfaces,
+                 std::string const &outgoing_interfaces)
     : impl_(std::make_unique<Impl>(download_rate_limit, upload_rate_limit, seed_mode,
-                                   active_downloads, active_seeds, active_limit)) {}
+                                   active_downloads, active_seeds, active_limit,
+                                   listen_interfaces, outgoing_interfaces)) {}
 
 Session::~Session() = default;
 
@@ -194,13 +209,16 @@ FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
     lt::add_torrent_params params;
     if (resume_data.size() > 0) {
         lt::error_code resume_ec;
-        params = lt::read_resume_data(
+        auto restored = lt::read_resume_data(
             {reinterpret_cast<char const *>(resume_data.data()),
              static_cast<int>(resume_data.size())},
             resume_ec);
-        if (resume_ec) {
+        // Unreadable resume data must not cost the torrent: fall back to a
+        // plain add, which rechecks the files instead of failing the restore.
+        if (!resume_ec) {
+            params = std::move(restored);
+        } else {
             impl_->last_error = resume_ec.message();
-            return FfiAddResult{false, false, 0, rust::String(impl_->last_error)};
         }
     }
     params.ti = std::move(info);
@@ -552,9 +570,12 @@ rust::String Session::last_error() const {
 std::unique_ptr<Session> new_session(uint64_t download_rate_limit,
                                      uint64_t upload_rate_limit, bool seed_mode,
                                      uint32_t active_downloads, uint32_t active_seeds,
-                                     uint32_t active_limit) {
+                                     uint32_t active_limit, rust::Str listen_interfaces,
+                                     rust::Str outgoing_interfaces) {
     return std::make_unique<Session>(download_rate_limit, upload_rate_limit, seed_mode,
-                                     active_downloads, active_seeds, active_limit);
+                                     active_downloads, active_seeds, active_limit,
+                                     static_cast<std::string>(listen_interfaces),
+                                     static_cast<std::string>(outgoing_interfaces));
 }
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload) {

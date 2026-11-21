@@ -357,6 +357,8 @@ fn session_settings(
         active_downloads: config.session.active_downloads,
         active_seeds: config.session.active_seeds,
         active_limit: config.session.active_limit,
+        listen_interfaces: config.network.listen_interfaces.clone(),
+        outgoing_interfaces: config.network.outgoing_interfaces.clone(),
     }
 }
 
