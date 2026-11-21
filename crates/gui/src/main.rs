@@ -11,7 +11,7 @@ use ferrent_gui::actions::{self, TorrentAction};
 use ferrent_gui::activity::{
     ActivityLog, Change, Event as ActivityEvent, Source as ActivitySource,
 };
-use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile};
+use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile, parse_hex};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::icons::{self, glyph};
 use ferrent_gui::settings::{
@@ -174,6 +174,8 @@ enum Message {
     OpenSettings,
     OpenStorage,
     SettingsTab(Tab),
+    ThemeChosen(String),
+    AccentChosen(String),
     RssLoaded(Result<Vec<ferrent_protocol::v1::RssFeed>, String>),
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
@@ -422,6 +424,7 @@ impl Default for App {
             Ok(config) => (config, "Not connected".to_owned()),
             Err(error) => (GuiConfig::default(), format!("Config error: {error}")),
         };
+        theme::install(config.palette());
         let selected = if config.profiles.is_empty() {
             None
         } else {
@@ -800,6 +803,28 @@ impl App {
             Message::OpenStorage => {
                 self.settings.tab = Tab::Storage;
                 Task::batch([self.open_settings(), self.load_disks()])
+            }
+            Message::ThemeChosen(name) => {
+                let accent = self.config.accent.clone();
+                self.config.set_appearance(&name, accent.as_deref());
+                theme::install(self.config.palette());
+                if let Err(error) = self.config.save(&self.config_path) {
+                    self.status = format!("Cannot save appearance: {error}");
+                }
+                Task::none()
+            }
+            Message::AccentChosen(hex) => {
+                let mode = self
+                    .config
+                    .theme
+                    .clone()
+                    .unwrap_or_else(|| "dark".to_owned());
+                self.config.set_appearance(&mode, Some(&hex));
+                theme::install(self.config.palette());
+                if let Err(error) = self.config.save(&self.config_path) {
+                    self.status = format!("Cannot save appearance: {error}");
+                }
+                Task::none()
             }
             Message::SettingsTab(tab) => {
                 self.settings.tab = tab;
@@ -2883,7 +2908,7 @@ impl App {
             column![
                 text("SETTINGS")
                     .size(10)
-                    .color(theme::TEXT_MUTED)
+                    .color(theme::text_muted())
                     .font(theme::semibold()),
                 WidgetColumn::with_children(
                     Tab::ALL
@@ -2894,7 +2919,7 @@ impl App {
                 .spacing(2),
                 vertical_space(),
                 if settings.loading {
-                    Element::from(text("loading…").size(11).color(theme::TEXT_MUTED))
+                    Element::from(text("loading…").size(11).color(theme::text_muted()))
                 } else {
                     Element::from(text("").size(1))
                 },
@@ -2914,27 +2939,28 @@ impl App {
             Tab::Storage => self.settings_storage_view(),
             Tab::Labels => self.settings_labels_view(),
             Tab::Rss => self.settings_rss_view(),
+            Tab::Appearance => self.settings_appearance_view(),
         };
         let dirty = settings.dirty_tab(settings.tab);
 
         let mut summary = text("")
             .size(11)
-            .color(theme::TEXT_MUTED)
+            .color(theme::text_muted())
             .width(Length::Fill);
         if let Some(error) = &settings.error {
             summary = text(error.clone())
                 .size(11)
-                .color(theme::ERROR)
+                .color(theme::error())
                 .width(Length::Fill);
         } else if !settings.message.is_empty() {
             summary = text(settings.message.clone())
                 .size(11)
-                .color(theme::TEXT_SECONDARY)
+                .color(theme::text_secondary())
                 .width(Length::Fill);
         } else if dirty {
             summary = text("Unsaved changes; Reload discards them")
                 .size(11)
-                .color(theme::QUEUED)
+                .color(theme::queued())
                 .width(Length::Fill);
         }
 
@@ -2948,6 +2974,7 @@ impl App {
             | Tab::Notifications
             | Tab::Storage => Message::SettingsSave,
             Tab::Rss => Message::SettingsSave,
+            Tab::Appearance => Message::SettingsSave,
         };
         let can_save = !settings.loading
             && match settings.tab {
@@ -2960,6 +2987,7 @@ impl App {
                 | Tab::Notifications
                 | Tab::Storage => true,
                 Tab::Rss => false,
+                Tab::Appearance => false,
             };
         let footer = row![
             summary,
@@ -2971,7 +2999,9 @@ impl App {
 
         let content = column![
             text(settings.tab.label()).size(16).font(theme::semibold()),
-            text(settings.tab.hint()).size(11).color(theme::TEXT_MUTED),
+            text(settings.tab.hint())
+                .size(11)
+                .color(theme::text_muted()),
             container(body).height(Length::Fill).padding([6, 0]),
             footer,
         ]
@@ -3010,7 +3040,7 @@ impl App {
             field(ConfigField::DownloadDir),
             field(ConfigField::Bind),
             field(ConfigField::TokenFile),
-            text("Network").size(12).color(theme::TEXT),
+            text("Network").size(12).color(theme::text()),
             field(ConfigField::ProxyType),
             row![field(ConfigField::ProxyHost), field(ConfigField::ProxyPort),].spacing(10),
             row![
@@ -3046,12 +3076,12 @@ impl App {
             detail_row(
                 "Profile",
                 self.config.active.clone().unwrap_or_else(|| "—".to_owned()),
-                theme::TEXT_MUTED
+                theme::text_muted()
             ),
             detail_row(
                 "Client config",
                 self.config_path.display().to_string(),
-                theme::TEXT_MUTED
+                theme::text_muted()
             ),
         ]
         .spacing(10)
@@ -3108,18 +3138,18 @@ impl App {
                     Some(status) if !status.last_error.is_empty() => {
                         text(status.last_error.clone())
                             .size(10)
-                            .color(theme::ERROR)
+                            .color(theme::error())
                             .into()
                     }
                     Some(status) => text(status.summary())
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .into(),
                     None if row.enabled => text("not scanned yet")
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .into(),
-                    None => text("disabled").size(10).color(theme::TEXT_MUTED).into(),
+                    None => text("disabled").size(10).color(theme::text_muted()).into(),
                 };
                 let path = if row.path.trim().is_empty() {
                     "(no path)".to_owned()
@@ -3136,14 +3166,14 @@ impl App {
                         row![
                             text(glyph::TAG).font(icons::solid()).size(11.0).color(
                                 if row.enabled {
-                                    theme::PRIMARY
+                                    theme::primary()
                                 } else {
-                                    theme::TEXT_MUTED
+                                    theme::text_muted()
                                 }
                             ),
                             text(path).size(12),
                             horizontal_space(),
-                            text(label).size(10).color(theme::TEXT_MUTED),
+                            text(label).size(10).color(theme::text_muted()),
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
@@ -3157,22 +3187,22 @@ impl App {
                 .style(move |_theme: &iced::Theme, _status| button::Style {
                     background: Some(
                         if selected {
-                            theme::SURFACE
+                            theme::surface()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         }
                         .into(),
                     ),
                     text_color: if selected {
-                        theme::TEXT
+                        theme::text()
                     } else {
-                        theme::TEXT_SECONDARY
+                        theme::text_secondary()
                     },
                     border: iced::Border {
                         color: if selected {
-                            theme::PRIMARY
+                            theme::primary()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         },
                         width: 0.0,
                         radius: 4.0.into(),
@@ -3211,7 +3241,7 @@ impl App {
             column![
                 text("Select a watch directory, or add one.")
                     .size(12)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             ]
             .into()
         };
@@ -3240,7 +3270,7 @@ impl App {
             "{added} added · {pending} pending · {invalid} invalid · {deferred} deferred"
         ))
         .size(11)
-        .color(theme::TEXT_MUTED);
+        .color(theme::text_muted());
 
         row![
             list,
@@ -3293,7 +3323,7 @@ impl App {
             ]
             .spacing(16),
             column![
-                text("After adding").size(11).color(theme::TEXT_MUTED),
+                text("After adding").size(11).color(theme::text_muted()),
                 row![
                     watch_action(SuccessAction::Delete, row.on_success),
                     watch_action(SuccessAction::Keep, row.on_success),
@@ -3341,16 +3371,16 @@ impl App {
                         row![
                             text(glyph::PLAY).font(icons::solid()).size(10.0).color(
                                 if row.enabled {
-                                    theme::PRIMARY
+                                    theme::primary()
                                 } else {
-                                    theme::TEXT_MUTED
+                                    theme::text_muted()
                                 }
                             ),
                             text(command).size(12),
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
-                        text(detail).size(10).color(theme::TEXT_MUTED),
+                        text(detail).size(10).color(theme::text_muted()),
                     ]
                     .spacing(2),
                 )
@@ -3360,22 +3390,22 @@ impl App {
                 .style(move |_theme: &iced::Theme, _status| button::Style {
                     background: Some(
                         if selected {
-                            theme::SURFACE
+                            theme::surface()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         }
                         .into(),
                     ),
                     text_color: if selected {
-                        theme::TEXT
+                        theme::text()
                     } else {
-                        theme::TEXT_SECONDARY
+                        theme::text_secondary()
                     },
                     border: iced::Border {
                         color: if selected {
-                            theme::PRIMARY
+                            theme::primary()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         },
                         width: 0.0,
                         radius: 4.0.into(),
@@ -3414,7 +3444,7 @@ impl App {
             column![
                 text("Select a hook, or add one.")
                     .size(12)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             ]
             .into()
         };
@@ -3424,16 +3454,16 @@ impl App {
             .iter()
             .map(|run| {
                 let color = if run.timed_out || !run.succeeded {
-                    theme::ERROR
+                    theme::error()
                 } else {
-                    theme::PRIMARY
+                    theme::primary()
                 };
                 let mut entry = column![text(run.summary()).size(11).color(color)].spacing(1);
                 if let Some(detail) = run.detail() {
                     entry = entry.push(
                         text(detail.lines().next().unwrap_or_default().to_owned())
                             .size(10)
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                 }
                 entry.into()
@@ -3445,7 +3475,7 @@ impl App {
                 horizontal_space(),
                 text(format!("{} pending", settings.hook_pending))
                     .size(10)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
                 container(action_button(
                     "Refresh",
                     Message::HooksRefresh,
@@ -3486,7 +3516,7 @@ impl App {
             hook_field_view(row, HookField::Command, "/usr/local/bin/notify"),
             hook_field_view(row, HookField::Args, "{id} {name} {path} {infohash} {label}"),
             column![
-                text("Event").size(11).color(theme::TEXT_MUTED),
+                text("Event").size(11).color(theme::text_muted()),
                 row![
                     hook_event_toggle(HookEvent::Added, row.event),
                     hook_event_toggle(HookEvent::Finished, row.event),
@@ -3501,7 +3531,7 @@ impl App {
             row![
                 hook_field_view(row, HookField::Timeout, "60"),
                 column![
-                    text("Options").size(11).color(theme::TEXT_MUTED),
+                    text("Options").size(11).color(theme::text_muted()),
                     row![
                         checkbox("Run through shell", row.shell)
                             .on_toggle(Message::HooksShell)
@@ -3520,7 +3550,7 @@ impl App {
             .spacing(8),
             text("Hooks are at-least-once: a crash replays the event, so make the command idempotent. The event is acknowledged after every matching hook finished.")
                 .size(10)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         ]
         .spacing(10)
         .max_width(560.0)
@@ -3540,7 +3570,7 @@ impl App {
                 row![
                     text(*label)
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .width(Length::Fixed(32.0)),
                     WidgetRow::with_children(cells).spacing(1),
                 ]
@@ -3551,15 +3581,15 @@ impl App {
         }
         let header = row![
             text("").width(Length::Fixed(36.0)),
-            text("00").size(9).color(theme::TEXT_MUTED),
+            text("00").size(9).color(theme::text_muted()),
             horizontal_space(),
-            text("06").size(9).color(theme::TEXT_MUTED),
+            text("06").size(9).color(theme::text_muted()),
             horizontal_space(),
-            text("12").size(9).color(theme::TEXT_MUTED),
+            text("12").size(9).color(theme::text_muted()),
             horizontal_space(),
-            text("18").size(9).color(theme::TEXT_MUTED),
+            text("18").size(9).color(theme::text_muted()),
             horizontal_space(),
-            text("23").size(9).color(theme::TEXT_MUTED),
+            text("23").size(9).color(theme::text_muted()),
         ];
 
         let field = |field: SchedulerField, placeholder: &'static str| {
@@ -3575,7 +3605,7 @@ impl App {
                     SchedulerField::UploadLimit => "Yellow upload limit (B/s)",
                 })
                 .size(11)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
                 text_input(placeholder, &value)
                     .style(muted_input_style)
                     .padding([4, 8])
@@ -3606,7 +3636,7 @@ impl App {
             .spacing(8),
             text("Monday first. Click a cell to cycle green → yellow → red.")
                 .size(10)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
             header,
             WidgetColumn::with_children(rows).spacing(1),
             text(format!(
@@ -3614,7 +3644,7 @@ impl App {
                 form.marked_cells()
             ))
             .size(10)
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         ]
         .spacing(8)
         .into()
@@ -3734,7 +3764,7 @@ impl App {
             if let Some(row) = notify.selected(settings.notify_selected) {
                 let field = |field: WebhookField, placeholder: &'static str| {
                     column![
-                        text(field.label()).size(11).color(theme::TEXT_MUTED),
+                        text(field.label()).size(11).color(theme::text_muted()),
                         text_input(placeholder, row.text(field))
                             .style(muted_input_style)
                             .padding([4, 8])
@@ -3762,7 +3792,7 @@ impl App {
             } else if let Some(row) = notify.selected_telegram(settings.notify_telegram) {
                 let field = |field: settings::TelegramField, placeholder: &'static str| {
                     column![
-                        text(field.label()).size(11).color(theme::TEXT_MUTED),
+                        text(field.label()).size(11).color(theme::text_muted()),
                         text_input(placeholder, row.text(field))
                             .style(muted_input_style)
                             .padding([4, 8])
@@ -3800,7 +3830,7 @@ impl App {
                 column![
                     text("Select a webhook or a Telegram chat, or add one.")
                         .size(12)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                 ]
                 .into()
             };
@@ -3808,7 +3838,7 @@ impl App {
         let digest = column![
             text("Digest and quiet hours (Telegram only)")
                 .size(11)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
             row![
                 digest_field(DigestField::Events, "10", notify),
                 digest_field(DigestField::Window, "30", notify),
@@ -3848,7 +3878,7 @@ impl App {
                     row![
                         text(status)
                             .size(10)
-                            .color(theme::TEXT_MUTED)
+                            .color(theme::text_muted())
                             .width(Length::Fill),
                         container(action_button(
                             "Test",
@@ -3872,7 +3902,7 @@ impl App {
     }
 
     fn settings_rss_view(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_MUTED;
+        let dim = theme::text_muted();
         if self.settings.rss_feeds.is_empty() {
             return column![
                 text("No RSS feeds configured (or the watcher is off).")
@@ -3926,7 +3956,7 @@ impl App {
                         .color(if feed.error.is_empty() {
                             dim
                         } else {
-                            theme::ERROR
+                            theme::error()
                         })
                         .width(Length::Fixed(220.0)),
                 ]
@@ -3939,6 +3969,77 @@ impl App {
             .into()
     }
 
+    fn settings_appearance_view(&self) -> Element<'_, Message> {
+        let dim = theme::text_muted();
+        let active = self.config.theme.as_deref().unwrap_or("dark");
+        let swatches = [
+            "#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0090ff", "#8e4ec6", "#6e7681",
+        ];
+        let mut picks: Vec<Element<Message>> = Vec::with_capacity(swatches.len());
+        for hex in swatches {
+            let color = parse_hex(hex).unwrap_or(theme::primary());
+            let selected = self.config.accent.as_deref() == Some(hex);
+            picks.push(
+                button(text("").size(1))
+                    .on_press(Message::AccentChosen(hex.to_owned()))
+                    .width(Length::Fixed(30.0))
+                    .height(Length::Fixed(30.0))
+                    .padding(0)
+                    .style(move |_theme: &iced::Theme, _status| button::Style {
+                        background: Some(color.into()),
+                        text_color: theme::text(),
+                        border: iced::Border {
+                            color: if selected {
+                                theme::text()
+                            } else {
+                                theme::border()
+                            },
+                            width: if selected { 2.0 } else { 1.0 },
+                            radius: 5.0.into(),
+                        },
+                        ..button::Style::default()
+                    })
+                    .into(),
+            );
+        }
+        let choice = |label: &'static str, name: &'static str| -> Element<'_, Message> {
+            let selected = active == name;
+            button(text(label).size(12))
+                .on_press(Message::ThemeChosen(name.to_owned()))
+                .padding([6, 14])
+                .style(move |_theme: &iced::Theme, _status| button::Style {
+                    background: Some(
+                        if selected {
+                            theme::primary()
+                        } else {
+                            theme::surface()
+                        }
+                        .into(),
+                    ),
+                    text_color: if selected { theme::bg() } else { theme::text() },
+                    border: iced::Border {
+                        color: theme::border(),
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    ..button::Style::default()
+                })
+                .into()
+        };
+        column![
+            text("Theme").size(11).color(dim),
+            row![choice("Dark", "dark"), choice("Light", "light")].spacing(8),
+            text("Accent").size(11).color(dim),
+            row(picks).spacing(8),
+            text("Changes apply immediately and are saved to gui.toml.")
+                .size(10)
+                .color(dim),
+        ]
+        .spacing(10)
+        .max_width(520.0)
+        .into()
+    }
+
     fn settings_storage_view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let storage = &settings.storage;
@@ -3946,27 +4047,27 @@ impl App {
         let mut disks = column![row![
             text("MOUNT")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(4)),
             text("FS")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
             text("FREE / TOTAL")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(3)),
             text("TORRENTS")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
             text("STATUS")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
             text("ZONES")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
         ]]
         .spacing(4);
@@ -3974,7 +4075,7 @@ impl App {
             disks = disks.push(
                 text("Connect and open this tab to see the filesystems.")
                     .size(11)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         }
         for disk in &settings.storage_disks {
@@ -3985,7 +4086,7 @@ impl App {
                         .width(Length::FillPortion(4)),
                     text(disk.fs.clone())
                         .size(11)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .width(Length::FillPortion(2)),
                     text(format!(
                         "{} / {}",
@@ -4000,9 +4101,9 @@ impl App {
                     text(if disk.low { "LOW" } else { "ok" })
                         .size(11)
                         .color(if disk.low {
-                            theme::ERROR
+                            theme::error()
                         } else {
-                            theme::TEXT_MUTED
+                            theme::text_muted()
                         })
                         .width(Length::FillPortion(2)),
                     text(disk.zones.len().to_string())
@@ -4032,7 +4133,7 @@ impl App {
 
         let number = |caption: &'static str, field: StorageField, width: f32| {
             column![
-                text(caption).size(10).color(theme::TEXT_MUTED),
+                text(caption).size(10).color(theme::text_muted()),
                 text_input("0", storage.text(field))
                     .style(muted_input_style)
                     .padding([4, 8])
@@ -4052,19 +4153,19 @@ impl App {
         let mut zones = column![row![
             text("PATH")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(6)),
             text("LABEL")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(3)),
             text("STAGING")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(2)),
             text("ON")
                 .size(10)
-                .color(theme::TEXT_MUTED)
+                .color(theme::text_muted())
                 .width(Length::FillPortion(1)),
             text("").width(Length::FillPortion(1)),
         ]]
@@ -4073,7 +4174,7 @@ impl App {
             zones = zones.push(
                 text("No zones yet: add the label folders and one staging folder per disk.")
                     .size(11)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         }
         for (index, zone) in storage.zones.iter().enumerate() {
@@ -4087,7 +4188,7 @@ impl App {
             let label: Element<Message> = if zone.staging {
                 text("staging")
                     .size(11)
-                    .color(theme::TEXT_MUTED)
+                    .color(theme::text_muted())
                     .width(Length::FillPortion(3))
                     .into()
             } else {
@@ -4134,7 +4235,7 @@ impl App {
             row![
                 text("Minimum free and margin apply per filesystem; the guard pauses writers only, never seeds.")
                     .size(10)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             ],
             text("Zones").size(12).font(theme::medium()),
             zones,
@@ -4158,11 +4259,11 @@ impl App {
                     .style(move |_theme: &iced::Theme| container::Style {
                         background: Some(
                             settings::color_from_hex(&row.label.color)
-                                .unwrap_or(theme::TEXT_MUTED)
+                                .unwrap_or(theme::text_muted())
                                 .into(),
                         ),
                         border: iced::Border {
-                            color: theme::BORDER,
+                            color: theme::border(),
                             width: 0.0,
                             radius: 4.0.into(),
                         },
@@ -4175,7 +4276,7 @@ impl App {
                         horizontal_space(),
                         text(row.torrent_count.to_string())
                             .size(11)
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     ]
                     .spacing(8)
                     .align_y(iced::Alignment::Center),
@@ -4186,22 +4287,22 @@ impl App {
                 .style(move |_theme: &iced::Theme, _status| button::Style {
                     background: Some(
                         if selected {
-                            theme::SURFACE
+                            theme::surface()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         }
                         .into(),
                     ),
                     text_color: if selected {
-                        theme::TEXT
+                        theme::text()
                     } else {
-                        theme::TEXT_SECONDARY
+                        theme::text_secondary()
                     },
                     border: iced::Border {
                         color: if selected {
-                            theme::PRIMARY
+                            theme::primary()
                         } else {
-                            theme::BG_SECONDARY
+                            theme::bg_secondary()
                         },
                         width: 0.0,
                         radius: 4.0.into(),
@@ -4235,7 +4336,7 @@ impl App {
             column![
                 text("Select a label to edit, or create a new one.")
                     .size(12)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             ]
             .spacing(6)
             .into()
@@ -4257,17 +4358,17 @@ impl App {
                 row![
                     text(LabelField::Name.label())
                         .size(11)
-                        .color(theme::TEXT_MUTED),
-                    text("fixed").size(10).color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
+                    text("fixed").size(10).color(theme::text_muted()),
                 ]
                 .spacing(6),
                 container(text(form.name.clone()).size(13))
                     .padding([6, 8])
                     .width(Length::Fill)
                     .style(|_theme: &iced::Theme| container::Style {
-                        background: Some(theme::BG_SECONDARY.into()),
+                        background: Some(theme::bg_secondary().into()),
                         border: iced::Border {
-                            color: theme::BORDER,
+                            color: theme::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -4283,7 +4384,7 @@ impl App {
         ];
         let mut swatches = row![].spacing(4);
         for hex in palette {
-            let color = settings::color_from_hex(hex).unwrap_or(theme::TEXT_MUTED);
+            let color = settings::color_from_hex(hex).unwrap_or(theme::text_muted());
             swatches = swatches.push(
                 button("")
                     .on_press(Message::LabelField(LabelField::Color, hex.to_owned()))
@@ -4332,7 +4433,7 @@ impl App {
             row![
                 text(format!("Delete and clear {count} assignment(s)?"))
                     .size(11)
-                    .color(theme::QUEUED)
+                    .color(theme::queued())
                     .width(Length::Fill),
                 action_button("Cancel", Message::LabelDeleteCancelled, true),
                 danger_button("Delete", Message::LabelDeleteConfirmed, !settings.loading),
@@ -4376,7 +4477,7 @@ impl App {
         let body = column![
             text(format!("{} torrent(s) selected", self.selected.len()))
                 .size(12)
-                .color(theme::TEXT_SECONDARY),
+                .color(theme::text_secondary()),
             if self.settings.labels.is_empty() {
                 Element::from(text("No labels yet; create them under Settings → Labels.").size(12))
             } else {
@@ -4410,7 +4511,7 @@ impl App {
         let warning: Element<Message> = if self.add_label.trim().is_empty() {
             text("No label: the payload goes to the global download directory.")
                 .size(10)
-                .color(theme::QUEUED)
+                .color(theme::queued())
                 .into()
         } else if self.staging_for(&self.add_label).is_some() {
             text(format!(
@@ -4418,32 +4519,36 @@ impl App {
                 self.staging_for(&self.add_label).unwrap_or_default()
             ))
             .size(10)
-            .color(theme::TEXT_MUTED)
+            .color(theme::text_muted())
             .into()
         } else {
             text("This label has no storage zone yet; the path stays editable.")
                 .size(10)
-                .color(theme::QUEUED)
+                .color(theme::queued())
                 .into()
         };
         let body = column![
             row![
-                container(detail_row("File", self.add_path.clone(), theme::TEXT_MUTED))
-                    .width(Length::Fill),
+                container(detail_row(
+                    "File",
+                    self.add_path.clone(),
+                    theme::text_muted()
+                ))
+                .width(Length::Fill),
                 action_button("Create from folder…", Message::AddCreateFolder, false),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
-            text("Name").size(11).color(theme::TEXT_MUTED),
+            text("Name").size(11).color(theme::text_muted()),
             text_input("Torrent name", &self.add_name)
                 .on_input(Message::AddNameChanged)
                 .width(Length::Fill),
-            text("Label").size(11).color(theme::TEXT_MUTED),
+            text("Label").size(11).color(theme::text_muted()),
             scrollable(column(labels).spacing(2).width(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fixed(120.0)),
             warning,
-            text("Save path").size(11).color(theme::TEXT_MUTED),
+            text("Save path").size(11).color(theme::text_muted()),
             text_input("Save path (daemon default)", &self.add_save_path)
                 .on_input(Message::AddSavePathChanged)
                 .width(Length::Fill),
@@ -4477,7 +4582,7 @@ impl App {
                 format_size(bytes)
             ))
             .size(11)
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
             checkbox("Include downloaded files", self.remove_delete_files)
                 .on_toggle(Message::ToggleRemoveFiles),
             row![
@@ -4502,7 +4607,7 @@ impl App {
                 let (icon, color, state, detail) = match (&row.status, &row.error) {
                     (Some(status), _) => (
                         glyph::CHECK,
-                        theme::DOWNLOADING,
+                        theme::downloading(),
                         "available",
                         format!(
                             "{} torrents · ↓ {} · ↑ {} · {} free",
@@ -4512,24 +4617,24 @@ impl App {
                             format_size(status.free_space_bytes)
                         ),
                     ),
-                    (None, Some(error)) => (glyph::ERROR, theme::ERROR, "error", error.clone()),
+                    (None, Some(error)) => (glyph::ERROR, theme::error(), "error", error.clone()),
                     (None, None) => (
                         glyph::HOURGLASS,
-                        theme::QUEUED,
+                        theme::queued(),
                         "checking",
                         "querying the daemon…".to_owned(),
                     ),
                 };
                 let is_active = active.as_deref() == Some(row.name.as_str());
                 let background = if is_active {
-                    theme::SURFACE
+                    theme::surface()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 };
                 let border = if is_active {
-                    theme::PRIMARY
+                    theme::primary()
                 } else {
-                    theme::BORDER
+                    theme::border()
                 };
                 container(
                     row![
@@ -4537,13 +4642,13 @@ impl App {
                         column![
                             row![
                                 text(row.name.clone()).size(13).font(theme::medium()),
-                                text(row.server.clone()).size(11).color(theme::TEXT_MUTED),
+                                text(row.server.clone()).size(11).color(theme::text_muted()),
                             ]
                             .spacing(8)
                             .align_y(iced::Alignment::Center),
                             row![
                                 text(state).size(11).color(color),
-                                text(detail).size(11).color(theme::TEXT_SECONDARY),
+                                text(detail).size(11).color(theme::text_secondary()),
                             ]
                             .spacing(8),
                         ]
@@ -4613,9 +4718,9 @@ impl App {
         .padding(10)
         .width(Length::Fill)
         .style(|_theme: &iced::Theme| container::Style {
-            background: Some(theme::BG_SECONDARY.into()),
+            background: Some(theme::bg_secondary().into()),
             border: iced::Border {
-                color: theme::BORDER,
+                color: theme::border(),
                 width: 1.0,
                 radius: 5.0.into(),
             },
@@ -4623,7 +4728,9 @@ impl App {
         });
 
         let footer = row![
-            text(&self.server_message).size(11).color(theme::TEXT_MUTED),
+            text(&self.server_message)
+                .size(11)
+                .color(theme::text_muted()),
             horizontal_space(),
             button("Close").on_press(Message::CloseModal),
         ]
@@ -4824,7 +4931,23 @@ impl App {
         );
 
         let header: Element<Message> = if expanded {
-            row![logo, horizontal_space(), toggle]
+            // The bundled lockup is white; on a light palette the word is
+            // drawn as text next to the mark instead.
+            let title: Element<Message> = if theme::is_light() {
+                row![
+                    mark,
+                    text("Ferrent")
+                        .size(20)
+                        .font(theme::semibold())
+                        .color(theme::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                logo.into()
+            };
+            row![title, horizontal_space(), toggle]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)
                 .into()
@@ -4838,7 +4961,7 @@ impl App {
         let nav: Element<Message> = nav_button(
             expanded,
             glyph::LIST,
-            theme::TEXT_SECONDARY,
+            theme::text_secondary(),
             "All torrents",
             status.torrent_count,
             None,
@@ -4863,13 +4986,13 @@ impl App {
                         format!("{zoned_count} disks")
                     })
                     .size(10)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
                     text(format!("{} free", format_size(zoned_free)))
                         .size(10)
                         .color(if zoned_low {
-                            theme::ERROR
+                            theme::error()
                         } else {
-                            theme::TEXT_MUTED
+                            theme::text_muted()
                         }),
                 ]
                 .spacing(1),
@@ -4887,21 +5010,21 @@ impl App {
             icon_nav(
                 expanded,
                 glyph::SETTINGS,
-                theme::TEXT_SECONDARY,
+                theme::text_secondary(),
                 "Settings",
                 Message::OpenSettings,
             ),
             icon_nav(
                 expanded,
                 glyph::SERVER,
-                theme::TEXT_SECONDARY,
+                theme::text_secondary(),
                 "Servers",
                 Message::OpenServers,
             ),
             icon_nav(
                 expanded,
                 glyph::POWER,
-                theme::TEXT_MUTED,
+                theme::text_muted(),
                 "Disconnect",
                 Message::Disconnect,
             ),
@@ -4964,7 +5087,7 @@ impl App {
             nav_stat(
                 expanded,
                 glyph::ACTIVE,
-                theme::CONNECTING,
+                theme::connecting(),
                 "Active",
                 status.active,
             ),
@@ -4983,7 +5106,7 @@ impl App {
                         container(
                             text("LABELS")
                                 .size(10)
-                                .color(theme::TEXT_MUTED)
+                                .color(theme::text_muted())
                                 .font(theme::semibold())
                         )
                         .padding([8, 12]),
@@ -5082,7 +5205,7 @@ impl App {
             .padding([8, 12])
             .width(Length::Fill)
             .style(|_theme: &iced::Theme| container::Style {
-                background: Some(theme::BG_SECONDARY.into()),
+                background: Some(theme::bg_secondary().into()),
                 ..container::Style::default()
             })
             .into()
@@ -5104,14 +5227,25 @@ impl App {
                 .on_press(Message::SelectTab(tab))
                 .padding([4, 10])
                 .style(move |_theme: &iced::Theme, _status| button::Style {
-                    background: Some(if active { theme::SURFACE } else { theme::BG }.into()),
+                    background: Some(
+                        if active {
+                            theme::surface()
+                        } else {
+                            theme::bg()
+                        }
+                        .into(),
+                    ),
                     text_color: if active {
-                        theme::BRIGHT
+                        theme::bright()
                     } else {
-                        theme::TEXT_SECONDARY
+                        theme::text_secondary()
                     },
                     border: iced::Border {
-                        color: if active { theme::PRIMARY } else { theme::BG },
+                        color: if active {
+                            theme::primary()
+                        } else {
+                            theme::bg()
+                        },
                         width: 0.0,
                         radius: 4.0.into(),
                     },
@@ -5126,9 +5260,9 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fixed(220.0))
             .style(|_theme: &iced::Theme| container::Style {
-                background: Some(theme::BG_SECONDARY.into()),
+                background: Some(theme::bg_secondary().into()),
                 border: iced::Border {
-                    color: theme::BORDER,
+                    color: theme::border(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -5191,7 +5325,7 @@ impl App {
     }
 
     fn details_body(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         if self.selected.len() > 1 {
             let names = self
                 .selected_torrents
@@ -5220,7 +5354,7 @@ impl App {
                 text("Nothing selected").size(12).color(dim),
                 text("Click a row to inspect it. Space pause/resume · Delete remove")
                     .size(11)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             ]
             .spacing(4)
             .into();
@@ -5277,7 +5411,7 @@ impl App {
                             pause_reason_label(torrent.pause_reasons)
                         ))
                         .size(11)
-                        .color(theme::TEXT_SECONDARY),
+                        .color(theme::text_secondary()),
                     )
                 },
                 if torrent.error.is_empty() {
@@ -5286,7 +5420,7 @@ impl App {
                     Element::<Message>::from(
                         text(format!("Error: {}", torrent.error))
                             .size(12)
-                            .color(theme::ERROR),
+                            .color(theme::error()),
                     )
                 },
             ]
@@ -5300,7 +5434,7 @@ impl App {
     }
 
     fn files_body(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         match &self.details_payload {
             Some(DetailsPayload::Files(files)) if !files.is_empty() => {
                 let rows = files
@@ -5308,8 +5442,8 @@ impl App {
                     .enumerate()
                     .map(|(index, file)| {
                         let (label, color) = match file.priority {
-                            0 => ("skipped", theme::TEXT_MUTED),
-                            5..=7 => ("high", theme::SUCCESS),
+                            0 => ("skipped", theme::text_muted()),
+                            5..=7 => ("high", theme::success()),
                             _ => ("normal", dim),
                         };
                         mouse_area(
@@ -5332,7 +5466,7 @@ impl App {
                 children.push(
                     text("Click a file to cycle skipped / normal / high")
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .into(),
                 );
                 children.extend(rows);
@@ -5346,7 +5480,7 @@ impl App {
     }
 
     fn peers_body(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         match &self.details_payload {
             Some(DetailsPayload::Peers(peers)) if !peers.is_empty() => {
                 let rows = peers
@@ -5379,21 +5513,21 @@ impl App {
     }
 
     fn trackers_body(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         match &self.details_payload {
             Some(DetailsPayload::Trackers(trackers)) if !trackers.is_empty() => {
                 let header = row![
                     text("TRACKER")
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .width(Length::Fill),
                     text("SEEDS / LEECHERS")
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .width(Length::Fixed(100.0)),
                     text("STATUS")
                         .size(10)
-                        .color(theme::TEXT_MUTED)
+                        .color(theme::text_muted())
                         .width(Length::Fixed(96.0)),
                 ]
                 .spacing(16);
@@ -5412,9 +5546,9 @@ impl App {
                             tracker.fails,
                         );
                         let status_color = if tracker.status == "error" {
-                            theme::ERROR
+                            theme::error()
                         } else if tracker.status == "working" {
-                            theme::SUCCESS
+                            theme::success()
                         } else {
                             dim
                         };
@@ -5431,7 +5565,7 @@ impl App {
                             ]
                             .spacing(16)
                             .into(),
-                            text(detail).size(10).color(theme::TEXT_MUTED).into(),
+                            text(detail).size(10).color(theme::text_muted()).into(),
                         ])
                         .spacing(2)
                         .into()
@@ -5450,7 +5584,7 @@ impl App {
     }
 
     fn activity_body(&self) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         // With a torrent selected the tab is its history; without one it is
         // the whole session, newest first.
         let only = self.active;
@@ -5473,18 +5607,18 @@ impl App {
     }
 
     fn activity_row(&self, event: &ActivityEvent) -> Element<'_, Message> {
-        let dim = theme::TEXT_SECONDARY;
+        let dim = theme::text_secondary();
         let (change, color) = match &event.change {
             Change::State(state) => {
                 let label = table::state_label(*state);
                 let color = if *state == TorrentState::Error as i32 {
-                    theme::ERROR
+                    theme::error()
                 } else {
                     dim
                 };
                 (label.to_owned(), color)
             }
-            Change::Removed => ("removed".to_owned(), theme::ERROR),
+            Change::Removed => ("removed".to_owned(), theme::error()),
         };
         let from = event.from.map_or_else(
             || "—".to_owned(),
@@ -5519,7 +5653,7 @@ impl App {
         if let Some(error) = &self.details_error {
             text(format!("Load failed: {error}"))
                 .size(12)
-                .color(theme::ERROR)
+                .color(theme::error())
                 .into()
         } else {
             text("Loading…").size(12).color(dim).into()
@@ -5541,16 +5675,16 @@ impl App {
             row![
                 text("●").size(9).color(color),
                 text(label).size(11).color(color),
-                text(server).size(11).color(theme::TEXT_SECONDARY),
+                text(server).size(11).color(theme::text_secondary()),
                 horizontal_space(),
                 text(format!("↓ {}", table::format_rate(down))).size(11),
                 text(format!("↑ {}", table::format_rate(up))).size(11),
                 text(format!("{active} active"))
                     .size(11)
-                    .color(theme::TEXT_SECONDARY),
+                    .color(theme::text_secondary()),
                 text(format!("{total} torrents"))
                     .size(11)
-                    .color(theme::TEXT_SECONDARY),
+                    .color(theme::text_secondary()),
             ]
             .spacing(14)
             .align_y(iced::Alignment::Center),
@@ -5558,9 +5692,9 @@ impl App {
         .padding([5, 12])
         .width(Length::Fill)
         .style(|_theme: &iced::Theme| container::Style {
-            background: Some(theme::BG_SECONDARY.into()),
+            background: Some(theme::bg_secondary().into()),
             border: iced::Border {
-                color: theme::BORDER,
+                color: theme::border(),
                 width: 1.0,
                 radius: 0.0.into(),
             },
@@ -5576,7 +5710,7 @@ fn watch_field_view<'a>(
     placeholder: &'a str,
 ) -> Element<'a, Message> {
     column![
-        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text(field.label()).size(11).color(theme::text_muted()),
         text_input(placeholder, row.text(field))
             .style(muted_input_style)
             .padding([4, 8])
@@ -5594,7 +5728,7 @@ fn hook_field_view<'a>(
     placeholder: &'a str,
 ) -> Element<'a, Message> {
     column![
-        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text(field.label()).size(11).color(theme::text_muted()),
         text_input(placeholder, row.text(field))
             .style(muted_input_style)
             .padding([4, 8])
@@ -5621,22 +5755,22 @@ fn toggle_button(
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(
                 if selected {
-                    theme::SURFACE
+                    theme::surface()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 }
                 .into(),
             ),
             text_color: if selected {
-                theme::BRIGHT
+                theme::bright()
             } else {
-                theme::TEXT_SECONDARY
+                theme::text_secondary()
             },
             border: iced::Border {
                 color: if selected {
-                    theme::PRIMARY
+                    theme::primary()
                 } else {
-                    theme::BORDER
+                    theme::border()
                 },
                 width: if selected { 1.0 } else { 0.0 },
                 radius: 4.0.into(),
@@ -5667,7 +5801,7 @@ fn notification_row(
     button(
         column![
             text(title).size(12),
-            text(detail).size(10).color(theme::TEXT_MUTED),
+            text(detail).size(10).color(theme::text_muted()),
         ]
         .spacing(2),
     )
@@ -5677,22 +5811,22 @@ fn notification_row(
     .style(move |_theme: &iced::Theme, _status| button::Style {
         background: Some(
             if selected {
-                theme::SURFACE
+                theme::surface()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             }
             .into(),
         ),
         text_color: if selected {
-            theme::TEXT
+            theme::text()
         } else {
-            theme::TEXT_SECONDARY
+            theme::text_secondary()
         },
         border: iced::Border {
             color: if selected {
-                theme::PRIMARY
+                theme::primary()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             },
             width: 0.0,
             radius: 4.0.into(),
@@ -5709,7 +5843,7 @@ fn digest_field<'a>(
     notify: &'a settings::NotifyForm,
 ) -> Element<'a, Message> {
     column![
-        text(field.label()).size(11).color(theme::TEXT_MUTED),
+        text(field.label()).size(11).color(theme::text_muted()),
         text_input(placeholder, notify.digest_text(field))
             .style(muted_input_style)
             .padding([4, 8])
@@ -5729,22 +5863,22 @@ fn settings_tab(tab: Tab, active: bool) -> Element<'static, Message> {
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(
                 if active {
-                    theme::SURFACE
+                    theme::surface()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 }
                 .into(),
             ),
             text_color: if active {
-                theme::BRIGHT
+                theme::bright()
             } else {
-                theme::TEXT_SECONDARY
+                theme::text_secondary()
             },
             border: iced::Border {
                 color: if active {
-                    theme::PRIMARY
+                    theme::primary()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 },
                 width: 0.0,
                 radius: 4.0.into(),
@@ -5762,12 +5896,16 @@ fn settings_field<'a>(
 ) -> Element<'a, Message> {
     let locked = settings.locked(field);
     let hint: Element<Message> = if locked {
-        text("env-locked").size(10).color(theme::QUEUED).into()
+        text("env-locked").size(10).color(theme::queued()).into()
     } else {
         text("").size(1).into()
     };
     column![
-        row![text(field.label()).size(11).color(theme::TEXT_MUTED), hint,].spacing(6),
+        row![
+            text(field.label()).size(11).color(theme::text_muted()),
+            hint,
+        ]
+        .spacing(6),
         text_input(placeholder, form.text(field))
             .style(muted_input_style)
             .padding([4, 8])
@@ -5799,9 +5937,9 @@ fn scheduler_cell(day: usize, hour: usize, level: SchedulerLevel) -> Element<'st
                 }
                 .into(),
             ),
-            text_color: theme::BG,
+            text_color: theme::bg(),
             border: iced::Border {
-                color: theme::BORDER,
+                color: theme::border(),
                 width: 0.0,
                 radius: 2.0.into(),
             },
@@ -5831,7 +5969,7 @@ fn fingerprint_display(fingerprint: &str) -> String {
 
 fn muted_input_style(theme_: &iced::Theme, status: text_input::Status) -> text_input::Style {
     let mut style = text_input::default(theme_, status);
-    style.placeholder = theme::TEXT_MUTED;
+    style.placeholder = theme::text_muted();
     style
 }
 
@@ -5851,9 +5989,12 @@ fn label_field_view<'a>(
     } else {
         input.on_input(move |value| Message::LabelField(field, value))
     };
-    column![text(field.label()).size(11).color(theme::TEXT_MUTED), input,]
-        .spacing(3)
-        .into()
+    column![
+        text(field.label()).size(11).color(theme::text_muted()),
+        input,
+    ]
+    .spacing(3)
+    .into()
 }
 
 fn label_choice(name: String, selected: bool, message: Message) -> Element<'static, Message> {
@@ -5862,7 +6003,7 @@ fn label_choice(name: String, selected: bool, message: Message) -> Element<'stat
             text(if selected { glyph::CHECK } else { ' ' })
                 .font(icons::solid())
                 .size(10.0)
-                .color(theme::PRIMARY)
+                .color(theme::primary())
                 .width(Length::Fixed(14.0)),
             text(name).size(12),
             horizontal_space(),
@@ -5876,22 +6017,22 @@ fn label_choice(name: String, selected: bool, message: Message) -> Element<'stat
     .style(move |_theme: &iced::Theme, _status| button::Style {
         background: Some(
             if selected {
-                theme::SURFACE
+                theme::surface()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             }
             .into(),
         ),
         text_color: if selected {
-            theme::TEXT
+            theme::text()
         } else {
-            theme::TEXT_SECONDARY
+            theme::text_secondary()
         },
         border: iced::Border {
             color: if selected {
-                theme::PRIMARY
+                theme::primary()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             },
             width: 0.0,
             radius: 4.0.into(),
@@ -5907,14 +6048,14 @@ fn modal_panel<'a>(modal: Modal, body: Element<'a, Message>) -> Element<'a, Mess
         text(glyph::CLOSE)
             .font(icons::solid())
             .size(12.0)
-            .color(theme::TEXT_SECONDARY),
+            .color(theme::text_secondary()),
     )
     .on_press(Message::CloseModal)
     .padding([4, 7])
     .style(|_theme: &iced::Theme, _status| button::Style {
-        background: Some(theme::BG.into()),
+        background: Some(theme::bg().into()),
         border: iced::Border {
-            color: theme::BORDER,
+            color: theme::border(),
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -5933,9 +6074,9 @@ fn modal_panel<'a>(modal: Modal, body: Element<'a, Message>) -> Element<'a, Mess
         .padding([8, 12])
         .width(Length::Fill)
         .style(|_theme: &iced::Theme| container::Style {
-            background: Some(theme::BG_SECONDARY.into()),
+            background: Some(theme::bg_secondary().into()),
             border: iced::Border {
-                color: theme::BORDER,
+                color: theme::border(),
                 width: 0.0,
                 radius: iced::border::Radius {
                     top_left: 8.0,
@@ -5957,9 +6098,9 @@ fn modal_panel<'a>(modal: Modal, body: Element<'a, Message>) -> Element<'a, Mess
     .width(Length::Fixed(width))
     .height(Length::Fixed(height))
     .style(|_theme: &iced::Theme| container::Style {
-        background: Some(theme::BG.into()),
+        background: Some(theme::bg().into()),
         border: iced::Border {
-            color: theme::BORDER,
+            color: theme::border(),
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -5974,8 +6115,8 @@ fn small_action(icon: char, label: &'static str, message: Message) -> Element<'s
             text(icon)
                 .font(icons::solid())
                 .size(10.0)
-                .color(theme::TEXT_SECONDARY),
-            text(label).size(11).color(theme::TEXT_SECONDARY),
+                .color(theme::text_secondary()),
+            text(label).size(11).color(theme::text_secondary()),
         ]
         .spacing(5)
         .align_y(iced::Alignment::Center),
@@ -5983,9 +6124,9 @@ fn small_action(icon: char, label: &'static str, message: Message) -> Element<'s
     .on_press(message)
     .padding([4, 8])
     .style(|_theme: &iced::Theme, _status| button::Style {
-        background: Some(theme::BG.into()),
+        background: Some(theme::bg().into()),
         border: iced::Border {
-            color: theme::BORDER,
+            color: theme::border(),
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -5995,7 +6136,7 @@ fn small_action(icon: char, label: &'static str, message: Message) -> Element<'s
 }
 
 fn label_nav(row: &settings::LabelRow, selected: bool) -> Element<'static, Message> {
-    let color = settings::color_from_hex(&row.label.color).unwrap_or(theme::TEXT_MUTED);
+    let color = settings::color_from_hex(&row.label.color).unwrap_or(theme::text_muted());
     let name = row.label.name.clone();
     button(
         row![
@@ -6007,7 +6148,7 @@ fn label_nav(row: &settings::LabelRow, selected: bool) -> Element<'static, Messa
             horizontal_space(),
             text(row.torrent_count.to_string())
                 .size(11)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         ]
         .spacing(9)
         .align_y(iced::Alignment::Center),
@@ -6018,22 +6159,22 @@ fn label_nav(row: &settings::LabelRow, selected: bool) -> Element<'static, Messa
     .style(move |_theme: &iced::Theme, _status| button::Style {
         background: Some(
             if selected {
-                theme::SURFACE
+                theme::surface()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             }
             .into(),
         ),
         text_color: if selected {
-            theme::TEXT
+            theme::text()
         } else {
-            theme::TEXT_SECONDARY
+            theme::text_secondary()
         },
         border: iced::Border {
             color: if selected {
-                theme::PRIMARY
+                theme::primary()
             } else {
-                theme::BG_SECONDARY
+                theme::bg_secondary()
             },
             width: 0.0,
             radius: 3.0.into(),
@@ -6058,7 +6199,7 @@ fn nav_button(
             text(icon).font(icons::solid()).size(13.0).color(icon_color),
             text(label).size(13),
             horizontal_space(),
-            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
+            text(count.to_string()).size(11).color(theme::text_muted()),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center)
@@ -6076,22 +6217,22 @@ fn nav_button(
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(
                 if selected {
-                    theme::SURFACE
+                    theme::surface()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 }
                 .into(),
             ),
             text_color: if selected {
-                theme::TEXT
+                theme::text()
             } else {
-                theme::TEXT_SECONDARY
+                theme::text_secondary()
             },
             border: iced::Border {
                 color: if selected {
-                    theme::PRIMARY
+                    theme::primary()
                 } else {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 },
                 width: 0.0,
                 radius: 3.0.into(),
@@ -6111,9 +6252,9 @@ fn nav_stat(
     let content: Element<Message> = if expanded {
         row![
             text(icon).font(icons::solid()).size(13.0).color(icon_color),
-            text(label).size(13).color(theme::TEXT_SECONDARY),
+            text(label).size(13).color(theme::text_secondary()),
             horizontal_space(),
-            text(count.to_string()).size(11).color(theme::TEXT_MUTED),
+            text(count.to_string()).size(11).color(theme::text_muted()),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center)
@@ -6148,9 +6289,9 @@ fn toolbar_icon(
         .font(icons::solid())
         .size(13.0)
         .color(if enabled {
-            theme::TEXT_SECONDARY
+            theme::text_secondary()
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted()
         });
     let labeled = tooltip(
         content,
@@ -6163,14 +6304,14 @@ fn toolbar_icon(
         .style(move |_theme, _status| button::Style {
             background: Some(
                 if enabled {
-                    theme::BG_SECONDARY
+                    theme::bg_secondary()
                 } else {
-                    theme::BG
+                    theme::bg()
                 }
                 .into(),
             ),
             border: iced::Border {
-                color: theme::BORDER,
+                color: theme::border(),
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -6187,14 +6328,14 @@ fn icon_button(icon: char, message: Message) -> Element<'static, Message> {
         text(icon)
             .font(icons::solid())
             .size(11.0)
-            .color(theme::TEXT_SECONDARY),
+            .color(theme::text_secondary()),
     )
     .on_press(message)
     .padding([4, 6])
     .style(|_theme: &iced::Theme, _status| button::Style {
-        background: Some(theme::BG_SECONDARY.into()),
+        background: Some(theme::bg_secondary().into()),
         border: iced::Border {
-            color: theme::BORDER,
+            color: theme::border(),
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -6213,7 +6354,7 @@ fn icon_nav(
     let content: Element<Message> = if expanded {
         row![
             text(icon).font(icons::solid()).size(13.0).color(icon_color),
-            text(label).size(13).color(theme::TEXT_SECONDARY),
+            text(label).size(13).color(theme::text_secondary()),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center)
@@ -6229,9 +6370,9 @@ fn icon_nav(
         .width(Length::Fill)
         .padding(nav_padding(expanded))
         .style(|_theme: &iced::Theme, _status| button::Style {
-            background: Some(theme::BG_SECONDARY.into()),
+            background: Some(theme::bg_secondary().into()),
             border: iced::Border {
-                color: theme::BG_SECONDARY,
+                color: theme::bg_secondary(),
                 width: 0.0,
                 radius: 3.0.into(),
             },
@@ -6259,11 +6400,11 @@ fn status_numbers(
 
 fn state_style(state: ConnectionState) -> (&'static str, Color) {
     match state {
-        ConnectionState::Idle => ("idle", theme::TEXT_MUTED),
-        ConnectionState::Connecting => ("connecting", theme::CONNECTING),
-        ConnectionState::Connected => ("connected", theme::DOWNLOADING),
-        ConnectionState::Reconnecting => ("reconnecting", theme::CONNECTING),
-        ConnectionState::Offline => ("offline", theme::TEXT_MUTED),
+        ConnectionState::Idle => ("idle", theme::text_muted()),
+        ConnectionState::Connecting => ("connecting", theme::connecting()),
+        ConnectionState::Connected => ("connected", theme::downloading()),
+        ConnectionState::Reconnecting => ("reconnecting", theme::connecting()),
+        ConnectionState::Offline => ("offline", theme::text_muted()),
     }
 }
 

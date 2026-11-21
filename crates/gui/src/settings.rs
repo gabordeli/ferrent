@@ -23,10 +23,11 @@ pub enum Tab {
     Storage,
     Labels,
     Rss,
+    Appearance,
 }
 
 impl Tab {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
@@ -36,6 +37,7 @@ impl Tab {
         Self::Storage,
         Self::Labels,
         Self::Rss,
+        Self::Appearance,
     ];
 
     #[must_use]
@@ -50,6 +52,7 @@ impl Tab {
             Self::Storage => "Storage",
             Self::Labels => "Labels",
             Self::Rss => "RSS",
+            Self::Appearance => "Appearance",
         }
     }
 
@@ -73,6 +76,7 @@ impl Tab {
             }
             Self::Labels => "Definitions, limits and auto-assignment rules.",
             Self::Rss => "Feeds the daemon polls; configure them in the config document.",
+            Self::Appearance => "Dark or light, with an accent colour; saved to gui.toml.",
         }
     }
 }
@@ -2453,6 +2457,7 @@ impl Settings {
             Tab::Labels => self.label_dirty(),
             Tab::Connection | Tab::Session => self.dirty(),
             Tab::Rss => false,
+            Tab::Appearance => false,
         }
     }
 

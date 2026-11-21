@@ -22,19 +22,46 @@ const MENU_ITEM_HEIGHT: f32 = 26.0;
 const MENU_PADDING: f32 = 4.0;
 const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 3.0;
 
-const BG_HEADER: Color = crate::theme::BG_SECONDARY;
-const BG_ROW: Color = crate::theme::BG;
-const BG_ROW_ALT: Color = Color::from_rgb(0.055, 0.090, 0.153);
-const BG_SELECTED: Color = crate::theme::DEEP;
-const BG_HOVER: Color = crate::theme::SURFACE;
-const TEXT: Color = crate::theme::TEXT;
-const TEXT_DIM: Color = crate::theme::TEXT_SECONDARY;
-const TEXT_HEADER: Color = crate::theme::TEXT_MUTED;
-const BAR_TRACK: Color = crate::theme::SURFACE;
-const TRACK: Color = crate::theme::SURFACE;
-const THUMB: Color = crate::theme::BORDER;
-const MENU_BG: Color = crate::theme::SURFACE;
-const MENU_BORDER: Color = crate::theme::BORDER;
+fn bg_header() -> Color {
+    crate::theme::bg_secondary()
+}
+fn bg_row() -> Color {
+    crate::theme::bg()
+}
+fn bg_row_alt() -> Color {
+    let palette = crate::theme::current();
+    crate::theme::mix(palette.bg, palette.surface, 0.35)
+}
+fn bg_selected() -> Color {
+    crate::theme::deep()
+}
+fn bg_hover() -> Color {
+    crate::theme::surface()
+}
+fn text_main() -> Color {
+    crate::theme::text()
+}
+fn text_dim() -> Color {
+    crate::theme::text_secondary()
+}
+fn text_header() -> Color {
+    crate::theme::text_muted()
+}
+fn bar_track() -> Color {
+    crate::theme::surface()
+}
+fn track() -> Color {
+    crate::theme::surface()
+}
+fn thumb() -> Color {
+    crate::theme::border()
+}
+fn menu_bg() -> Color {
+    crate::theme::surface()
+}
+fn menu_border() -> Color {
+    crate::theme::border()
+}
 
 const BAR_HEIGHT: f32 = 8.0;
 
@@ -306,14 +333,14 @@ pub fn column_menu_item(origin: Point, bounds_width: f32, point: Point) -> Optio
 pub fn state_color(state: i32) -> Color {
     use crate::theme;
     match TorrentState::try_from(state).unwrap_or(TorrentState::Unspecified) {
-        TorrentState::Downloading => theme::DOWNLOADING,
-        TorrentState::Seeding => theme::SEEDING,
-        TorrentState::Queued => theme::QUEUED,
-        TorrentState::Checking => theme::CHECKING,
-        TorrentState::Paused => theme::PAUSED,
-        TorrentState::Moving => theme::MOVING,
-        TorrentState::Error => theme::ERROR,
-        TorrentState::Unspecified => theme::TEXT_MUTED,
+        TorrentState::Downloading => theme::downloading(),
+        TorrentState::Seeding => theme::seeding(),
+        TorrentState::Queued => theme::queued(),
+        TorrentState::Checking => theme::checking(),
+        TorrentState::Paused => theme::paused(),
+        TorrentState::Moving => theme::moving(),
+        TorrentState::Error => theme::error(),
+        TorrentState::Unspecified => theme::text_muted(),
     }
 }
 
@@ -522,7 +549,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
         frame.fill_rectangle(
             Point::new(0.0, 0.0),
             Size::new(bounds.width, HEADER_HEIGHT),
-            BG_HEADER,
+            bg_header(),
         );
         // Leave room for the scrollbar: with a column layout the last
         // column would otherwise sit under it.
@@ -537,13 +564,13 @@ impl canvas::Program<TableMessage> for Table<'_> {
                 .then(|| &self.rows[index - self.page_offset]);
             let selected = torrent.is_some_and(|torrent| self.selected.contains(&torrent.id));
             let background = if selected {
-                BG_SELECTED
+                bg_selected()
             } else if hovered == Some(index) {
-                BG_HOVER
+                bg_hover()
             } else if index % 2 == 0 {
-                BG_ROW
+                bg_row()
             } else {
-                BG_ROW_ALT
+                bg_row_alt()
             };
             frame.fill_rectangle(
                 Point::new(0.0, y),
@@ -564,7 +591,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
                     frame.fill_text(Text {
                         content: "loading…".to_owned(),
                         position: Point::new(64.0, y + 4.0),
-                        color: TEXT_DIM,
+                        color: text_dim(),
                         size: Pixels(13.0),
                         line_height: LineHeight::default(),
                         font: Font::MONOSPACE,
@@ -580,7 +607,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             frame.fill_text(Text {
                 content: "No torrents yet; add a .torrent from the toolbar".to_owned(),
                 position: Point::new(bounds.width / 2.0, 80.0),
-                color: TEXT_DIM,
+                color: text_dim(),
                 size: Pixels(14.0),
                 line_height: LineHeight::default(),
                 font: Font::default(),
@@ -624,7 +651,7 @@ impl Table<'_> {
             frame.fill_text(Text {
                 content,
                 position: Point::new(x, 8.0),
-                color: TEXT_HEADER,
+                color: text_header(),
                 size: Pixels(11.0),
                 line_height: LineHeight::default(),
                 font: crate::theme::semibold(),
@@ -637,8 +664,8 @@ impl Table<'_> {
 
     fn draw_column_menu(&self, frame: &mut Frame, origin: Point, bounds: Rectangle) {
         let rect = column_menu_rect(origin, bounds.width);
-        frame.fill_rectangle(rect.position(), rect.size(), MENU_BG);
-        frame.fill_rectangle(rect.position(), Size::new(1.0, rect.height), MENU_BORDER);
+        frame.fill_rectangle(rect.position(), rect.size(), menu_bg());
+        frame.fill_rectangle(rect.position(), Size::new(1.0, rect.height), menu_border());
         for (index, column) in Column::ALL.iter().enumerate() {
             let y = rect.y + COLUMN_MENU_PAD + index as f32 * COLUMN_MENU_ROW;
             let check = if self.layout.is_visible(*column) {
@@ -650,9 +677,9 @@ impl Table<'_> {
                 content: format!("[{check}] {}", column.title()),
                 position: Point::new(rect.x + 10.0, y + 3.0),
                 color: if self.layout.is_visible(*column) {
-                    TEXT
+                    text_main()
                 } else {
-                    TEXT_HEADER
+                    text_header()
                 },
                 size: Pixels(11.0),
                 line_height: LineHeight::default(),
@@ -675,7 +702,7 @@ impl Table<'_> {
         frame.fill_rectangle(
             Point::new(bounds.width - 9.0, HEADER_HEIGHT),
             Size::new(6.0, track_height),
-            TRACK,
+            track(),
         );
         let visible = VISIBLE_ROWS.min(self.total) as f32;
         let thumb_height = (track_height * visible / self.total as f32)
@@ -691,18 +718,18 @@ impl Table<'_> {
         frame.fill_rectangle(
             Point::new(bounds.width - 9.0, thumb_y),
             Size::new(6.0, thumb_height),
-            THUMB,
+            thumb(),
         );
     }
 
     fn draw_menu(&self, frame: &mut Frame, menu: ContextMenu) {
         let rect = menu_rect(&menu);
-        frame.fill_rectangle(rect.position(), rect.size(), MENU_BG);
+        frame.fill_rectangle(rect.position(), rect.size(), menu_bg());
         frame.stroke_rectangle(
             rect.position(),
             rect.size(),
             canvas::Stroke::default()
-                .with_color(MENU_BORDER)
+                .with_color(menu_border())
                 .with_width(1.0),
         );
         let labels = if menu.paused {
@@ -717,7 +744,7 @@ impl Table<'_> {
                     menu.x + 10.0,
                     menu.y + MENU_PADDING + index as f32 * MENU_ITEM_HEIGHT + 5.0,
                 ),
-                color: TEXT,
+                color: text_main(),
                 size: Pixels(13.0),
                 line_height: LineHeight::default(),
                 font: Font::default(),
@@ -744,27 +771,27 @@ fn draw_row(
 
     for slot in layout.slots(width) {
         let (content, color, size, font) = match slot.column {
-            Column::Id => (torrent.id.to_string(), TEXT_DIM, 11.0, mono),
-            Column::Name => (short_name(&torrent.name, 42), TEXT, 12.0, regular),
+            Column::Id => (torrent.id.to_string(), text_dim(), 11.0, mono),
+            Column::Name => (short_name(&torrent.name, 42), text_main(), 12.0, regular),
             Column::Label => {
                 if torrent.label.is_empty() {
-                    ("—".to_owned(), TEXT_DIM, 11.0, regular)
+                    ("—".to_owned(), text_dim(), 11.0, regular)
                 } else {
                     (
                         short_name(&torrent.label, 14),
                         label_colors
                             .get(&torrent.label)
                             .copied()
-                            .unwrap_or(TEXT_DIM),
+                            .unwrap_or(text_dim()),
                         11.0,
                         regular,
                     )
                 }
             }
-            Column::Size => (format_size(torrent.total_bytes), TEXT_DIM, 11.0, mono),
+            Column::Size => (format_size(torrent.total_bytes), text_dim(), 11.0, mono),
             Column::SavePath => (
                 short_name(&folder_label(&torrent.save_path), 30),
-                TEXT_DIM,
+                text_dim(),
                 11.0,
                 regular,
             ),
@@ -779,7 +806,7 @@ fn draw_row(
                 frame.fill_rectangle(
                     Point::new(slot.x, bar_y),
                     Size::new(bar, BAR_HEIGHT),
-                    BAR_TRACK,
+                    bar_track(),
                 );
                 let filled = (bar * progress).round();
                 if filled > 0.0 {
@@ -794,18 +821,18 @@ fn draw_row(
                     format!("{}%", (progress * 100.0).round() as u32),
                     slot.x + bar + 6.0,
                     text_y,
-                    TEXT_DIM,
+                    text_dim(),
                     11.0,
                     alignment::Horizontal::Left,
                     mono,
                 );
                 continue;
             }
-            Column::Download => (format_rate(torrent.download_rate), TEXT, 11.0, mono),
-            Column::Upload => (format_rate(torrent.upload_rate), TEXT, 11.0, mono),
-            Column::Seeds => (torrent.seeds.to_string(), TEXT_DIM, 11.0, mono),
-            Column::Peers => (torrent.peers.to_string(), TEXT_DIM, 11.0, mono),
-            Column::Eta => (format_eta(torrent.eta_seconds), TEXT_DIM, 11.0, mono),
+            Column::Download => (format_rate(torrent.download_rate), text_main(), 11.0, mono),
+            Column::Upload => (format_rate(torrent.upload_rate), text_main(), 11.0, mono),
+            Column::Seeds => (torrent.seeds.to_string(), text_dim(), 11.0, mono),
+            Column::Peers => (torrent.peers.to_string(), text_dim(), 11.0, mono),
+            Column::Eta => (format_eta(torrent.eta_seconds), text_dim(), 11.0, mono),
         };
         let (x, horizontal) = if slot.column.right_aligned() {
             (slot.x + slot.width, alignment::Horizontal::Right)

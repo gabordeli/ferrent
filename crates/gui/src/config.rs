@@ -15,6 +15,48 @@ pub struct GuiConfig {
     pub profiles: Vec<ServerProfile>,
     #[serde(default)]
     pub active: Option<String>,
+    /// `dark` (default) or `light`.
+    #[serde(default)]
+    pub theme: Option<String>,
+    /// Accent colour as `#RRGGBB`; the primary/seeding colour follows it.
+    #[serde(default)]
+    pub accent: Option<String>,
+}
+
+impl GuiConfig {
+    /// The palette described by the config; unknown values fall back to dark.
+    #[must_use]
+    pub fn palette(&self) -> crate::theme::Palette {
+        let base = match self.theme.as_deref() {
+            Some("light") => crate::theme::Palette::light(),
+            _ => crate::theme::Palette::dark(),
+        };
+        match self.accent.as_deref().and_then(parse_hex) {
+            Some(accent) => base.with_accent(accent),
+            None => base,
+        }
+    }
+
+    /// Stores the chosen theme and accent.
+    pub fn set_appearance(&mut self, theme: &str, accent: Option<&str>) {
+        self.theme = Some(theme.to_owned());
+        self.accent = accent.map(str::to_owned);
+    }
+}
+
+/// Parses `#RRGGBB` into a colour; alpha is not supported here.
+#[must_use]
+pub fn parse_hex(value: &str) -> Option<iced::Color> {
+    let value = value.trim().strip_prefix('#')?;
+    if value.len() != 6 {
+        return None;
+    }
+    let channel = |offset: usize| u8::from_str_radix(&value[offset..offset + 2], 16).ok();
+    Some(iced::Color::from_rgb8(
+        channel(0)?,
+        channel(2)?,
+        channel(4)?,
+    ))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -155,7 +155,7 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ❌ | session + torrent szint |
-| **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ❌ | a GUI ma fix sötét |
+| **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben (M11-T2) |
 | **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ❌ | ma csak magyar/angol kevert |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) |
 
@@ -166,7 +166,7 @@ Haszon/ár szerint rendezve; a „kód” oszlop a becsült érintettséget jelz
 | # | Funkció | Miért | Kód | Javaslat |
 |---|---|---|---|---|
 | 1 | **Bugsink-hibák javítása** (FERRENT-4 redb lock, FERRENT-5 transport, FERRENT-11 `unwrap`) | a kiadási kapu része; valódi felhasználói hibák | kicsi–közepes | M11-T1 (hardening) |
-| 2 | **Téma: sötét/világos + akcentus** | a user kérése; a GUI minden színe egy `theme.rs`-ben van | kicsi | M11-T2 |
+| 2 | ~~**Téma: sötét/világos + akcentus**~~ – **kész (M11-T2)**: `Palette` + accessorok, Settings → Appearance, `gui.toml` (`docs/measurements/m11-theme.md`) | — | — | kész |
 | 3 | **Nyelvesítés (hu default, en)** | a user kérése; induláshoz elég a GUI+CLI szövegei | közepes | M11-T3 |
 | 4 | **Force recheck + átnevezés** | alap kliens-paritás; a set location **már van** (`MoveTorrent` → `move_storage`) | közepes | M11-T4 |
 | 5 | **Tracker szerkesztés + web seed** | privát trackereknél napi haszon | közepes | M11-T5 |
