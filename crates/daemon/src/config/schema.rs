@@ -500,6 +500,10 @@ pub struct SessionConfig {
     /// Trackers added to torrents whose metainfo carries no announce URL.
     /// Existing lists are never overwritten.
     pub default_trackers: Vec<String>,
+    /// Incomplete payloads land here and move to their final folder when the
+    /// torrent finishes. Empty keeps the label staging zone (or the global
+    /// download directory).
+    pub temp_dir: Option<String>,
 }
 
 /// One RSS/Atom feed. Items whose link is a `.torrent` are added.
@@ -713,6 +717,14 @@ impl ResolvedConfig {
             }
         }
         validate_bind(&self.bind)?;
+        if let Some(temp) = &self.session.temp_dir {
+            let temp = temp.trim();
+            if !temp.is_empty() && !std::path::Path::new(temp).is_absolute() {
+                return Err(ConfigError::invalid(format!(
+                    "session.temp_dir must be an absolute path: {temp:?}"
+                )));
+            }
+        }
         self.diskguard.validate().map_err(ConfigError::invalid)?;
         self.ratio.validate().map_err(ConfigError::invalid)?;
         self.network.validate().map_err(ConfigError::invalid)?;

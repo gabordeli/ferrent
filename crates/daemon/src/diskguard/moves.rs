@@ -69,9 +69,6 @@ impl crate::rpc::AppState {
 
     /// Moves a finished torrent to its zone, or explains why it stayed.
     pub async fn try_move(&self, id: TorrentId) -> MoveOutcome {
-        let Some(target) = self.move_target(id) else {
-            return MoveOutcome::NoTarget;
-        };
         let status = {
             let engine = Arc::clone(&self.engine);
             match tokio::task::spawn_blocking(move || {
@@ -84,6 +81,19 @@ impl crate::rpc::AppState {
                 Ok(Err(error)) => return MoveOutcome::Failed(error.to_string()),
                 Err(error) => return MoveOutcome::Failed(error.to_string()),
             }
+        };
+        // A torrent added into the incomplete folder has no label target of
+        // its own; its final home is the global download directory.
+        let target = self.move_target(id).or_else(|| {
+            let config = self.config.resolved().ok()?;
+            let temp = config.session.temp_dir.as_deref()?.trim();
+            if temp.is_empty() || status.save_path != std::path::Path::new(temp) {
+                return None;
+            }
+            Some(config.download_dir.clone())
+        });
+        let Some(target) = target else {
+            return MoveOutcome::NoTarget;
         };
         if status.save_path == target {
             return MoveOutcome::AlreadyThere;

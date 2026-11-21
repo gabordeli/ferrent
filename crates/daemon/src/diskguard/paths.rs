@@ -25,6 +25,17 @@ pub fn download_path(
         ));
     }
     let label = label.trim();
+    if let Some(temp) = config
+        .session
+        .temp_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|temp| !temp.is_empty())
+    {
+        // The payload lands in the incomplete folder first; the completion
+        // move puts it into the label's zone (or the download directory).
+        return Ok(PathBuf::from(temp));
+    }
     if label.is_empty() {
         return Ok(config.download_dir.clone());
     }
@@ -143,6 +154,33 @@ staging = true
         assert_eq!(
             download_path(&config, "", "Nope").expect("label without a zone"),
             PathBuf::from("/data/downloads")
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_temp_dir_receives_incomplete_payloads() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dp-temp");
+        let temp = base.join("incomplete");
+        std::fs::create_dir_all(&temp).expect("temp dir");
+        let config = config(&format!(
+            "download_dir = \"/data/downloads\"\n\n[session]\ntemp_dir = \"{}\"\n",
+            temp.display()
+        ));
+        assert_eq!(
+            download_path(&config, "", "").expect("temp"),
+            temp,
+            "an unlabelled add goes to the incomplete folder"
+        );
+        assert_eq!(
+            download_path(&config, "", "Filmek").expect("temp"),
+            temp,
+            "a labelled add starts in the incomplete folder too"
+        );
+        assert_eq!(
+            download_path(&config, "/mnt/x", "Filmek").expect("explicit"),
+            PathBuf::from("/mnt/x"),
+            "an explicit path still wins"
         );
         let _ = std::fs::remove_dir_all(&base);
     }
