@@ -5415,16 +5415,24 @@ impl App {
                 ]
                 .spacing(12),
                 row![
-                    detail_row("Size", format_size(torrent.total_bytes), dim),
-                    detail_row("Progress", format!("{:.1}%", torrent.progress * 100.0), dim),
-                    detail_row("Down", table::format_rate(torrent.download_rate), dim),
-                    detail_row("Up", table::format_rate(torrent.upload_rate), dim),
+                    detail_row(i18n::t("Size"), format_size(torrent.total_bytes), dim),
+                    detail_row(
+                        i18n::t("Progress"),
+                        format!("{:.1}%", torrent.progress * 100.0),
+                        dim
+                    ),
+                    detail_row(
+                        i18n::t("Down"),
+                        table::format_rate(torrent.download_rate),
+                        dim
+                    ),
+                    detail_row(i18n::t("Up"), table::format_rate(torrent.upload_rate), dim),
                 ]
                 .spacing(24),
                 row![
-                    detail_row("Seeds", torrent.seeds.to_string(), dim),
-                    detail_row("Peers", torrent.peers.to_string(), dim),
-                    detail_row("Torrent ID", torrent.id.to_string(), dim),
+                    detail_row(i18n::t("Seeds"), torrent.seeds.to_string(), dim),
+                    detail_row(i18n::t("Peers"), torrent.peers.to_string(), dim),
+                    detail_row(i18n::t("Torrent ID"), torrent.id.to_string(), dim),
                     detail_row(
                         "Label",
                         if torrent.label.is_empty() {
