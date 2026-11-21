@@ -17,10 +17,10 @@ pub const HEADER_HEIGHT: f32 = 30.0;
 pub const ROW_HEIGHT: f32 = 24.0;
 pub const VISIBLE_ROWS: usize = 64;
 
-const MENU_WIDTH: f32 = 160.0;
-const MENU_ITEM_HEIGHT: f32 = 26.0;
-const MENU_PADDING: f32 = 4.0;
-const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 7.0;
+pub const MENU_WIDTH: f32 = 160.0;
+pub const MENU_ITEM_HEIGHT: f32 = 26.0;
+pub const MENU_PADDING: f32 = 4.0;
+pub const MENU_HEIGHT: f32 = MENU_PADDING * 2.0 + MENU_ITEM_HEIGHT * 7.0;
 
 fn bg_header() -> Color {
     crate::theme::bg_secondary()
@@ -54,12 +54,6 @@ fn track() -> Color {
     crate::theme::surface()
 }
 fn thumb() -> Color {
-    crate::theme::border()
-}
-fn menu_bg() -> Color {
-    crate::theme::surface()
-}
-fn menu_border() -> Color {
     crate::theme::border()
 }
 
@@ -296,7 +290,7 @@ impl ColumnLayout {
 
 /// Column menu geometry: a fixed-size panel anchored under the header.
 const COLUMN_MENU_WIDTH: f32 = 184.0;
-const COLUMN_MENU_ROW: f32 = 21.0;
+pub const COLUMN_MENU_ROW: f32 = 21.0;
 const COLUMN_MENU_PAD: f32 = 6.0;
 
 #[must_use]
@@ -628,21 +622,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
         }
 
         self.draw_scrollbar(&mut frame, bounds);
-        let mut geometries = vec![frame.into_geometry()];
-        if self.context.is_some() || self.column_menu.is_some() {
-            // Text is rendered after the fills of the same frame, so an
-            // overlay menu in the main frame would have the row text drawn
-            // over its background; a second geometry keeps it on top.
-            let mut overlay = Frame::new(renderer, bounds.size());
-            if let Some(menu) = self.context {
-                self.draw_menu(&mut overlay, menu);
-            }
-            if let Some(origin) = self.column_menu {
-                self.draw_column_menu(&mut overlay, origin, bounds);
-            }
-            geometries.push(overlay.into_geometry());
-        }
-        geometries
+        vec![frame.into_geometry()]
     }
 }
 
@@ -679,35 +659,6 @@ impl Table<'_> {
         }
     }
 
-    fn draw_column_menu(&self, frame: &mut Frame, origin: Point, bounds: Rectangle) {
-        let rect = column_menu_rect(origin, bounds.width);
-        frame.fill_rectangle(rect.position(), rect.size(), menu_bg());
-        frame.fill_rectangle(rect.position(), Size::new(1.0, rect.height), menu_border());
-        for (index, column) in Column::ALL.iter().enumerate() {
-            let y = rect.y + COLUMN_MENU_PAD + index as f32 * COLUMN_MENU_ROW;
-            let check = if self.layout.is_visible(*column) {
-                "x"
-            } else {
-                " "
-            };
-            frame.fill_text(Text {
-                content: format!("[{check}] {}", column.title()),
-                position: Point::new(rect.x + 10.0, y + 3.0),
-                color: if self.layout.is_visible(*column) {
-                    text_main()
-                } else {
-                    text_header()
-                },
-                size: Pixels(11.0),
-                line_height: LineHeight::default(),
-                font: crate::theme::regular(),
-                horizontal_alignment: alignment::Horizontal::Left,
-                vertical_alignment: alignment::Vertical::Top,
-                shaping: Shaping::Basic,
-            });
-        }
-    }
-
     fn draw_scrollbar(&self, frame: &mut Frame, bounds: Rectangle) {
         if self.total == 0 {
             return;
@@ -738,65 +689,60 @@ impl Table<'_> {
             thumb(),
         );
     }
+}
 
-    fn draw_menu(&self, frame: &mut Frame, menu: ContextMenu) {
-        let rect = menu_rect(&menu);
-        frame.fill_rectangle(rect.position(), rect.size(), menu_bg());
-        frame.stroke_rectangle(
-            rect.position(),
-            rect.size(),
-            canvas::Stroke::default()
-                .with_color(menu_border())
-                .with_width(1.0),
-        );
-        let sequential = if menu.sequential {
-            crate::i18n::t("✓ Sequential download")
-        } else {
-            crate::i18n::t("Sequential download")
-        };
-        let super_seeding = if menu.super_seeding {
-            crate::i18n::t("✓ Super-seeding")
-        } else {
-            crate::i18n::t("Super-seeding")
-        };
-        let labels = if menu.paused {
-            [
-                crate::i18n::t("Resume"),
-                crate::i18n::t("Set label…"),
-                crate::i18n::t("Force recheck"),
-                crate::i18n::t("Rename file…"),
-                sequential,
-                super_seeding,
-                crate::i18n::t("Remove"),
-            ]
-        } else {
-            [
-                crate::i18n::t("Pause"),
-                crate::i18n::t("Set label…"),
-                crate::i18n::t("Force recheck"),
-                crate::i18n::t("Rename file…"),
-                sequential,
-                super_seeding,
-                crate::i18n::t("Remove"),
-            ]
-        };
-        for (index, label) in labels.iter().enumerate() {
-            frame.fill_text(Text {
-                content: (*label).to_owned(),
-                position: Point::new(
-                    menu.x + 10.0,
-                    menu.y + MENU_PADDING + index as f32 * MENU_ITEM_HEIGHT + 5.0,
-                ),
-                color: text_main(),
-                size: Pixels(13.0),
-                line_height: LineHeight::default(),
-                font: Font::default(),
-                horizontal_alignment: alignment::Horizontal::Left,
-                vertical_alignment: alignment::Vertical::Top,
-                shaping: Shaping::Basic,
-            });
-        }
-    }
+/// The row menu's entries, top to bottom: label and action. Rendered as a
+/// widget panel above the canvas, because a canvas paints its fills before
+/// its texts and a menu drawn inside it cannot cover the row text beneath.
+#[must_use]
+pub fn menu_items(menu: &ContextMenu) -> Vec<(String, MenuAction)> {
+    let sequential = if menu.sequential {
+        crate::i18n::t("✓ Sequential download")
+    } else {
+        crate::i18n::t("Sequential download")
+    };
+    let super_seeding = if menu.super_seeding {
+        crate::i18n::t("✓ Super-seeding")
+    } else {
+        crate::i18n::t("Super-seeding")
+    };
+    let first = if menu.paused {
+        (crate::i18n::t("Resume"), MenuAction::Resume)
+    } else {
+        (crate::i18n::t("Pause"), MenuAction::Pause)
+    };
+    vec![
+        (first.0.to_owned(), first.1),
+        (crate::i18n::t("Set label…").to_owned(), MenuAction::Label),
+        (
+            crate::i18n::t("Force recheck").to_owned(),
+            MenuAction::Recheck,
+        ),
+        (
+            crate::i18n::t("Rename file…").to_owned(),
+            MenuAction::Rename,
+        ),
+        (sequential.to_owned(), MenuAction::ToggleSequential),
+        (super_seeding.to_owned(), MenuAction::ToggleSuperSeeding),
+        (crate::i18n::t("Remove").to_owned(), MenuAction::Remove),
+    ]
+}
+
+/// The column chooser's entries: display label (with a check mark when the
+/// column is visible) and the column it toggles.
+#[must_use]
+pub fn column_menu_items(layout: &ColumnLayout) -> Vec<(String, Column)> {
+    Column::ALL
+        .iter()
+        .map(|column| {
+            let check = if layout.is_visible(*column) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            (format!("{check} {}", column.title()), *column)
+        })
+        .collect()
 }
 
 fn draw_row(
@@ -1118,5 +1064,36 @@ mod tests {
             Some(MenuAction::Remove)
         );
         assert_eq!(menu_action_at(&menu, Point::new(10.0, 10.0)), None);
+    }
+
+    /// The widget panel renders `menu_items`; a click on the panel padding
+    /// resolves through the canvas slots. The two must not drift apart.
+    #[test]
+    fn menu_items_align_with_the_hit_testing_slots() {
+        for paused in [false, true] {
+            let menu = ContextMenu {
+                row: 3,
+                x: 10.0,
+                y: 10.0,
+                paused,
+                sequential: false,
+                super_seeding: false,
+            };
+            let items = menu_items(&menu);
+            assert_eq!(items.len(), 7);
+            assert_eq!(
+                items[0].1,
+                if paused {
+                    MenuAction::Resume
+                } else {
+                    MenuAction::Pause
+                }
+            );
+            for (index, (label, action)) in items.iter().enumerate() {
+                assert!(!label.is_empty());
+                let y = menu.y + MENU_PADDING + index as f32 * MENU_ITEM_HEIGHT + 1.0;
+                assert_eq!(menu_action_at(&menu, Point::new(20.0, y)), Some(*action));
+            }
+        }
     }
 }

@@ -162,6 +162,8 @@ enum Message {
     FilterChanged(String),
     FilterSettled(u64),
     Table(TableMessage),
+    /// One entry of the floating row menu was chosen.
+    MenuPick(MenuAction),
     Refresh,
     Action(TorrentAction),
     ActionFinished {
@@ -947,6 +949,10 @@ impl App {
                 Task::none()
             }
             Message::Table(TableMessage::RightPressed(point)) => self.table_right_pressed(point),
+            Message::MenuPick(action) => match self.context {
+                Some(menu) => self.run_menu_action(menu, action),
+                None => Task::none(),
+            },
             Message::Refresh => self.refresh_page(),
             Message::Action(action) => self.start_action(action),
             Message::ActionFinished {
@@ -2002,25 +2008,31 @@ impl App {
         self.request_page(0)
     }
 
+    /// Runs one entry of the open row menu. The menu is a widget layer above
+    /// the table canvas, so its buttons arrive here directly; a click on the
+    /// padding still reaches the canvas and takes the same path.
+    fn run_menu_action(&mut self, menu: ContextMenu, action: MenuAction) -> Task<Message> {
+        self.context = None;
+        match action {
+            MenuAction::Pause => self.start_action(TorrentAction::Pause),
+            MenuAction::Resume => self.start_action(TorrentAction::Resume),
+            MenuAction::Label => self.open_set_label(),
+            MenuAction::Recheck => self.recheck_selected(),
+            MenuAction::Rename => self.open_rename(),
+            MenuAction::ToggleSequential => {
+                self.toggle_flag(menu.row, Flag::Sequential, !menu.sequential)
+            }
+            MenuAction::ToggleSuperSeeding => {
+                self.toggle_flag(menu.row, Flag::SuperSeeding, !menu.super_seeding)
+            }
+            MenuAction::Remove => self.open_remove_modal(),
+        }
+    }
+
     fn table_pressed(&mut self, point: Point) -> Task<Message> {
         if let Some(menu) = self.context {
             if let Some(action) = table::menu_action_at(&menu, point) {
-                self.context = None;
-                let action = match action {
-                    MenuAction::Pause => TorrentAction::Pause,
-                    MenuAction::Resume => TorrentAction::Resume,
-                    MenuAction::Label => return self.open_set_label(),
-                    MenuAction::Recheck => return self.recheck_selected(),
-                    MenuAction::Rename => return self.open_rename(),
-                    MenuAction::ToggleSequential => {
-                        return self.toggle_flag(menu.row, Flag::Sequential, !menu.sequential);
-                    }
-                    MenuAction::ToggleSuperSeeding => {
-                        return self.toggle_flag(menu.row, Flag::SuperSeeding, !menu.super_seeding);
-                    }
-                    MenuAction::Remove => return self.open_remove_modal(),
-                };
-                return self.start_action(action);
+                return self.run_menu_action(menu, action);
             }
         }
         if point.y < table::HEADER_HEIGHT {
@@ -5420,7 +5432,39 @@ impl App {
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        table.map(Message::Table)
+        let base: Element<Message> = table.map(Message::Table);
+        let overlay: Option<Element<Message>> = if let Some(menu) = self.context {
+            let items = table::menu_items(&menu)
+                .into_iter()
+                .map(|(label, action)| (label, Message::MenuPick(action)))
+                .collect();
+            Some(floating_menu(
+                menu.x,
+                menu.y,
+                table::MENU_WIDTH,
+                table::MENU_ITEM_HEIGHT,
+                items,
+            ))
+        } else if let Some(origin) = self.column_menu {
+            let rect = table::column_menu_rect(origin, self.window_width - 232.0 - 14.0);
+            let items = table::column_menu_items(&self.columns)
+                .into_iter()
+                .map(|(label, column)| (label, Message::Table(TableMessage::ToggleColumn(column))))
+                .collect();
+            Some(floating_menu(
+                rect.x,
+                rect.y,
+                rect.width,
+                table::COLUMN_MENU_ROW,
+                items,
+            ))
+        } else {
+            None
+        };
+        match overlay {
+            Some(overlay) => iced::widget::stack![base, overlay].into(),
+            None => base,
+        }
     }
 
     fn sidebar_view(&self) -> Element<'_, Message> {
@@ -7061,6 +7105,68 @@ fn toolbar_icon(
         control = control.on_press(message);
     }
     control.into()
+}
+
+/// A panel floating above the table canvas: widgets, not canvas. Inside one
+/// canvas iced paints every fill before every text, so a menu drawn there has
+/// the row text bleeding through its background.
+fn floating_menu<'a>(
+    x: f32,
+    y: f32,
+    width: f32,
+    item_height: f32,
+    items: Vec<(String, Message)>,
+) -> Element<'a, Message> {
+    let entries: Vec<Element<Message>> = items
+        .into_iter()
+        .map(|(label, message)| {
+            button(text(label).size(12).font(theme::regular()))
+                .on_press(message)
+                .padding([0, 8])
+                .width(Length::Fill)
+                .height(Length::Fixed(item_height))
+                .style(menu_item_style)
+                .into()
+        })
+        .collect();
+    let panel = container(WidgetColumn::with_children(entries))
+        .padding(table::MENU_PADDING as u16)
+        .width(Length::Fixed(width))
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::surface().into()),
+            border: iced::Border {
+                color: theme::border(),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        });
+    column![
+        vertical_space().height(Length::Fixed(y)),
+        row![horizontal_space().width(Length::Fixed(x)), panel].width(Length::Fill),
+        vertical_space(),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn menu_item_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => {
+            theme::mix(theme::surface(), theme::border(), 0.45)
+        }
+        _ => Color::TRANSPARENT,
+    };
+    button::Style {
+        background: Some(background.into()),
+        text_color: theme::text(),
+        border: iced::Border {
+            radius: 4.0.into(),
+            ..Default::default()
+        },
+        ..button::Style::default()
+    }
 }
 
 fn icon_button(icon: char, message: Message) -> Element<'static, Message> {

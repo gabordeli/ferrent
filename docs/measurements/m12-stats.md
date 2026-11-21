@@ -25,14 +25,25 @@ build.
 payload korábban már megvolt), ezért a libtorrent session-számlálója 0-t ad;
 a feltöltés 7,2 GiB a futás óta. A `ratio` ennek megfelelően 0,000.
 
-## Ismert GUI-hiba (a felhasználói lista elé)
+## GUI-hiba: a canvas-menü átütése — javítva
 
-A canvas-os sor-menü **háttere alá szorul a sorok szövege**: az iced a
+A canvas-os sor-menü háttere alá szorult a sorok szövege: az iced a
 canvas-frame-en belül előbb a kitöltéseket, utána a szövegeket rajzolja, így
-a menü téglalapja nem takarja a mögötte lévő sor-szöveget (mérve: a
-menü bal szélén a `709.bin`, `4097.bin` szöveg átüt). A második
-`Geometry`-be emelés nem oldotta meg; a tiszta javítás a menü
-**widget-rétegként** (stack) való kirajzolása — a következő GUI-körre.
+a menü téglalapja nem takarta a mögötte lévő sor-szöveget (mérve: a menü bal
+szélén a `709.bin`, `4097.bin` szöveg átütött).
+
+A második `Geometry`-be emelés **és** a második canvas (Stack) is
+átütött — a szöveg a layer szintjén később rajzolódik. A megoldás: a menü
+**widget-réteg** (`table::menu_items` + `floating_menu` a Stackben), mert a
+widget-primitívek sorrendje megmarad. Mérve (`/tmp/g17-menu.png`,
+`/tmp/g17-columns.png`): a sor-menü és a fejléc-osztályválasztó is teljesen
+takar, a szöveg a panel szélénél elvágódik; a menüpont kattintása (Szünet →
+„Paused by: user” a details panelen) és az oszlop-kapcsoló is működik.
+
+Külön, **nem a menü** hibája: a `ferrent-cli pause 8` után a torrent
+`seeding` maradt (a pause reason bekerült, a motor mégsem állt meg) — a
+libtorrent auto-managed torrent ismert viselkedése, külön vizsgálandó.
+
 
 ## Amit nem mértünk
 
