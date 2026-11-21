@@ -177,6 +177,7 @@ enum Message {
     SettingsTab(Tab),
     ThemeChosen(String),
     AccentChosen(String),
+    LanguageChosen(String),
     RssLoaded(Result<Vec<ferrent_protocol::v1::RssFeed>, String>),
     SettingsField(ConfigField, String),
     SettingsSeedMode(bool),
@@ -825,6 +826,14 @@ impl App {
                 theme::install(self.config.palette());
                 if let Err(error) = self.config.save(&self.config_path) {
                     self.status = format!("Cannot save appearance: {error}");
+                }
+                Task::none()
+            }
+            Message::LanguageChosen(code) => {
+                self.config.lang = Some(code.clone());
+                i18n::install(i18n::Lang::parse(&code));
+                if let Err(error) = self.config.save(&self.config_path) {
+                    self.status = format!("Cannot save language: {error}");
                 }
                 Task::none()
             }
@@ -4024,33 +4033,45 @@ impl App {
                     .into(),
             );
         }
-        let choice = |label: &'static str, name: &'static str| -> Element<'_, Message> {
-            let selected = active == name;
-            button(text(label).size(12))
-                .on_press(Message::ThemeChosen(name.to_owned()))
-                .padding([6, 14])
-                .style(move |_theme: &iced::Theme, _status| button::Style {
-                    background: Some(
-                        if selected {
-                            theme::primary()
-                        } else {
-                            theme::surface()
-                        }
-                        .into(),
-                    ),
-                    text_color: if selected { theme::bg() } else { theme::text() },
-                    border: iced::Border {
-                        color: theme::border(),
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..button::Style::default()
-                })
-                .into()
+        let pill =
+            |label: &'static str, selected: bool, message: Message| -> Element<'_, Message> {
+                button(text(label).size(12))
+                    .on_press(message)
+                    .padding([6, 14])
+                    .style(move |_theme: &iced::Theme, _status| button::Style {
+                        background: Some(
+                            if selected {
+                                theme::primary()
+                            } else {
+                                theme::surface()
+                            }
+                            .into(),
+                        ),
+                        text_color: if selected { theme::bg() } else { theme::text() },
+                        border: iced::Border {
+                            color: theme::border(),
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..button::Style::default()
+                    })
+                    .into()
+            };
+        let choice = |label: &'static str, name: &'static str| {
+            pill(label, active == name, Message::ThemeChosen(name.to_owned()))
+        };
+        let lang_choice = |label: &'static str, code: &'static str| {
+            pill(
+                label,
+                i18n::lang().code() == code,
+                Message::LanguageChosen(code.to_owned()),
+            )
         };
         column![
             text(i18n::t("Theme")).size(11).color(dim),
             row![choice("Dark", "dark"), choice("Light", "light")].spacing(8),
+            text(i18n::t("Language")).size(11).color(dim),
+            row![lang_choice("Magyar", "hu"), lang_choice("English", "en"),].spacing(8),
             text(i18n::t("Accent")).size(11).color(dim),
             row(picks).spacing(8),
             text(i18n::t(
