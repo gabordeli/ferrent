@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use ferrent_protocol::client::{AuthClient, connect as protocol_connect};
 use ferrent_protocol::tls::fingerprint_from_pem;
 use ferrent_protocol::v1::{
-    CreateLabelRequest, DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest,
-    GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest, GetStatusRequest,
-    GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, Label, LabelEntry,
-    ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest, SendTestNotificationRequest,
-    SetConfigRequest, SetFilePrioritiesRequest, SetTorrentLabelRequest, SortField, Torrent,
-    TorrentFile, TorrentPeer, TorrentTracker, UpdateLabelRequest,
+    CreateLabelRequest, CreateTorrentRequest, DeleteLabelRequest, GetAutoAddStatusRequest,
+    GetConfigRequest, GetDisksRequest, GetHookStatusRequest, GetNotificationStatusRequest,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest,
+    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, ScanAutoAddRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    SetTorrentLabelRequest, SortField, Torrent, TorrentFile, TorrentPeer, TorrentTracker,
+    UpdateLabelRequest,
 };
 
 use crate::config::ServerProfile;
@@ -202,6 +203,24 @@ pub async fn set_file_priorities(
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.files)
+}
+
+/// Builds a .torrent for a path on the daemon host.
+pub async fn create_torrent(
+    client: &AuthClient,
+    path: String,
+) -> Result<(Vec<u8>, String), String> {
+    let mut client = client.clone();
+    let response = client
+        .create_torrent(CreateTorrentRequest {
+            path,
+            piece_length: 0,
+            trackers: Vec::new(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok((response.metainfo, response.infohash))
 }
 
 /// The daemon configuration document and its revision.

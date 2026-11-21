@@ -15,23 +15,23 @@ use ferrent_protocol::v1::ferrent_server::{Ferrent, FerrentServer};
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, AddTorrentResponse, AutoAddDirStatus, ConfigChanged, CreateLabelRequest,
-    DeleteLabelRequest, DeleteLabelResponse, Disk as ProtoDisk, DiskZone as ProtoDiskZone,
-    GetAutoAddStatusRequest, GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse,
-    GetDisksRequest, GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse,
-    GetNotificationStatusRequest, GetNotificationStatusResponse, GetStatusRequest,
-    GetStatusResponse, GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
-    GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
-    GetTorrentTrackersResponse, HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry,
-    LabelResponse, ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest,
-    ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest,
-    PauseTorrentResponse, Progress, QueueDirection as ProtoQueueDirection, RemoveTorrentRequest,
-    RemoveTorrentResponse, Removed, ResumeTorrentRequest, ResumeTorrentResponse,
-    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
-    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
-    SetFilePrioritiesResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
-    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField, StateChanged, Torrent,
-    TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker, UpdateLabelRequest,
-    WatchRequest, WatchResponse,
+    CreateTorrentRequest, CreateTorrentResponse, DeleteLabelRequest, DeleteLabelResponse,
+    Disk as ProtoDisk, DiskZone as ProtoDiskZone, GetAutoAddStatusRequest,
+    GetAutoAddStatusResponse, GetConfigRequest, GetConfigResponse, GetDisksRequest,
+    GetDisksResponse, GetHookStatusRequest, GetHookStatusResponse, GetNotificationStatusRequest,
+    GetNotificationStatusResponse, GetStatusRequest, GetStatusResponse, GetTorrentFilesRequest,
+    GetTorrentFilesResponse, GetTorrentPeersRequest, GetTorrentPeersResponse, GetTorrentRequest,
+    GetTorrentResponse, GetTorrentTrackersRequest, GetTorrentTrackersResponse,
+    HookRun as ProtoHookRun, Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest,
+    ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest,
+    MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse, Progress,
+    QueueDirection as ProtoQueueDirection, RemoveTorrentRequest, RemoveTorrentResponse, Removed,
+    ResumeTorrentRequest, ResumeTorrentResponse, ScanAutoAddRequest, ScanAutoAddResponse,
+    SendTestNotificationRequest, SendTestNotificationResponse, SetConfigRequest, SetConfigResponse,
+    SetFilePrioritiesRequest, SetFilePrioritiesResponse, SetTorrentLabelRequest,
+    SetTorrentLabelResponse, SetTorrentLimitsRequest, SetTorrentLimitsResponse, SortField,
+    StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
+    UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -1053,6 +1053,30 @@ impl Ferrent for FerrentService {
         }))
     }
 
+    async fn create_torrent(
+        &self,
+        request: Request<CreateTorrentRequest>,
+    ) -> Result<Response<CreateTorrentResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let path = request.path.trim().to_owned();
+        if path.is_empty() {
+            return Err(Status::invalid_argument("path must not be empty"));
+        }
+        let spec = ferrent_engine::CreateTorrentSpec {
+            path: PathBuf::from(path),
+            piece_length: request.piece_length,
+            trackers: request.trackers,
+        };
+        let created = self
+            .with_engine(move |engine| engine.create_torrent(spec))
+            .await?;
+        Ok(Response::new(CreateTorrentResponse {
+            metainfo: created.metainfo,
+            infohash: created.infohash,
+        }))
+    }
+
     async fn get_torrent_peers(
         &self,
         request: Request<GetTorrentPeersRequest>,
@@ -1271,6 +1295,7 @@ impl Ferrent for FerrentService {
             active_limit: resolved.session.active_limit,
             listen_interfaces: resolved.network.listen_interfaces.clone(),
             outgoing_interfaces: resolved.network.outgoing_interfaces.clone(),
+            default_trackers: resolved.session.default_trackers.clone(),
         };
         self.with_engine(move |engine| {
             engine.set_settings(settings);

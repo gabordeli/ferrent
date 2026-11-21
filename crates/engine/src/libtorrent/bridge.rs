@@ -52,6 +52,13 @@ pub(crate) mod ffi {
         fails: u32,
     }
 
+    struct FfiCreateResult {
+        ok: bool,
+        metainfo: Vec<u8>,
+        infohash: String,
+        error: String,
+    }
+
     struct FfiEvent {
         kind: i32,
         id: u64,
@@ -107,6 +114,7 @@ pub(crate) mod ffi {
             connections_limit: u32,
             upload_slots_limit: u32,
         ) -> bool;
+        fn set_default_trackers(self: Pin<&mut Session>, trackers: &str);
         fn move_storage(self: Pin<&mut Session>, id: u64, path: &str) -> bool;
         fn remove(self: Pin<&mut Session>, id: u64, delete_files: bool) -> bool;
         fn move_in_queue(self: Pin<&mut Session>, id: u64, up: bool) -> bool;
@@ -130,5 +138,7 @@ pub(crate) mod ffi {
         fn last_error(self: &Session) -> String;
 
         fn make_torrent(name: &str, payload: &[u8]) -> Vec<u8>;
+        fn make_torrent_from_path(path: &str, piece_length: u32, trackers: &str)
+        -> FfiCreateResult;
     }
 }

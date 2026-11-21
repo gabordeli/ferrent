@@ -23,6 +23,8 @@
 #include <libtorrent/write_resume_data.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -36,6 +38,24 @@
 namespace lt = libtorrent;
 
 namespace {
+
+/// Splits a newline-separated list (the cxx bridge has no Vec<String> here).
+std::vector<std::string> split_lines(std::string const &text) {
+    std::vector<std::string> out;
+    std::string current;
+    for (char character : text) {
+        if (character == '\n') {
+            out.push_back(current);
+            current.clear();
+        } else if (character != '\r') {
+            current.push_back(character);
+        }
+    }
+    if (!current.empty()) {
+        out.push_back(current);
+    }
+    return out;
+}
 
 constexpr int32_t kQueued = 0;
 constexpr int32_t kChecking = 1;
@@ -89,6 +109,7 @@ struct Session::Impl {
     std::map<lt::sha1_hash, uint64_t> ids;
     std::map<uint64_t, std::vector<char>> resume_data;
     std::set<uint64_t> moving;
+    std::vector<std::string> default_trackers;
     bool seed_mode;
     uint64_t next_id = 1;
     std::string last_error;
@@ -226,6 +247,13 @@ FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
     }
     params.ti = std::move(info);
     params.save_path = static_cast<std::string>(save_path);
+    // A metainfo without announce URLs gets the configured defaults; torrents
+    // that carry their own trackers keep them untouched.
+    if (params.ti->trackers().empty()) {
+        for (auto const &tracker : impl_->default_trackers) {
+            params.trackers.push_back(tracker);
+        }
+    }
     // Auto-managed torrents are the only ones libtorrent keeps a queue
     // position for, which is what the client's up/down buttons move.
     params.flags |= lt::torrent_flags::auto_managed;
@@ -311,6 +339,10 @@ bool Session::resume(uint64_t id) {
     it->second.set_flags(lt::torrent_flags::auto_managed);
     it->second.resume();
     return true;
+}
+
+void Session::set_default_trackers(rust::Str trackers) {
+    impl_->default_trackers = split_lines(static_cast<std::string>(trackers));
 }
 
 bool Session::set_torrent_limits(uint64_t id, uint64_t download_rate_limit,
@@ -617,6 +649,131 @@ std::unique_ptr<Session> new_session(uint64_t download_rate_limit,
                                      active_downloads, active_seeds, active_limit,
                                      static_cast<std::string>(listen_interfaces),
                                      static_cast<std::string>(outgoing_interfaces));
+}
+
+FfiCreateResult make_torrent_from_path_impl(FfiCreateResult &result, rust::Str path,
+                                            uint32_t piece_length, rust::Str trackers);
+
+FfiCreateResult make_torrent_from_path(rust::Str path, uint32_t piece_length,
+                                       rust::Str trackers) {
+    FfiCreateResult result{};
+    try {
+        return make_torrent_from_path_impl(result, path, piece_length, trackers);
+    } catch (std::exception const &error) {
+        // libtorrent throws here (e.g. a missing piece hash); a C++ exception
+        // must not take the daemon down.
+        FfiCreateResult failed{};
+        failed.error = rust::String(error.what());
+        return failed;
+    }
+}
+
+FfiCreateResult make_torrent_from_path_impl(FfiCreateResult &result, rust::Str path,
+                                            uint32_t piece_length, rust::Str trackers) {
+    std::string root(path);
+    lt::error_code ec;
+    bool const directory = std::filesystem::is_directory(root, ec);
+    if (ec) {
+        result.error = rust::String(ec.message());
+        return result;
+    }
+
+    lt::file_storage files;
+    if (directory) {
+        lt::add_files(files, root, [](std::string const &) { return true; });
+        if (files.num_files() == 0) {
+            result.error = rust::String("the directory has no files");
+            return result;
+        }
+    } else {
+        auto size = std::filesystem::file_size(root, ec);
+        if (ec) {
+            result.error = rust::String(ec.message());
+            return result;
+        }
+        files.add_file(std::filesystem::path(root).filename().string(),
+                       static_cast<std::int64_t>(size));
+    }
+
+    int piece = piece_length == 0 ? 256 * 1024 : static_cast<int>(piece_length);
+    piece = std::clamp(piece, 16 * 1024, 16 * 1024 * 1024);
+    // v1-only: we hash the pieces ourselves, and v2 metadata would demand
+    // piece-aligned files with pad files this walker does not produce.
+    lt::create_torrent torrent(files, piece, lt::create_torrent::v1_only);
+    for (auto const &entry : split_lines(static_cast<std::string>(trackers))) {
+        if (!entry.empty()) {
+            torrent.add_tracker(entry);
+        }
+    }
+
+    // Hash the pieces by hand: set_piece_hashes posts to an io_context, which
+    // this worker thread does not run, and a 64 KiB buffer keeps the loop
+    // aligned with the piece boundaries.
+    auto const base = std::filesystem::path(root).parent_path();
+    std::vector<char> buffer(static_cast<std::size_t>(torrent.piece_length()));
+    lt::hasher hasher;
+    lt::piece_index_t piece_index{0};
+    std::int64_t filled = 0;
+    for (lt::file_index_t index{0}; index < files.end_file(); ++index) {
+        if (files.pad_file_at(index)) {
+            continue;
+        }
+        auto const file = base / files.file_path(index);
+        std::ifstream input(file, std::ios::binary);
+        if (!input) {
+            result.error = rust::String("cannot read " + file.string());
+            return result;
+        }
+        while (input) {
+            // Fill the current piece exactly: a piece can span two files, so
+            // the read size is whatever is still missing.
+            auto const want =
+                static_cast<std::streamsize>(torrent.piece_length() - filled);
+            input.read(buffer.data(), want);
+            auto const got = input.gcount();
+            if (got <= 0) {
+                break;
+            }
+            hasher.update(buffer.data(), static_cast<int>(got));
+            filled += got;
+            if (filled == torrent.piece_length()) {
+                torrent.set_hash(piece_index, hasher.final());
+                piece_index = lt::piece_index_t(static_cast<int>(piece_index) + 1);
+                filled = 0;
+            }
+        }
+    }
+    if (filled > 0) {
+        torrent.set_hash(piece_index, hasher.final());
+    }
+
+    auto meta = [&]() {
+        try {
+            return torrent.generate();
+        } catch (std::exception const &error) {
+            result.error = rust::String(std::string("generate: ") + error.what() + " after " +
+                                        std::to_string(static_cast<int>(piece_index)) + " of " +
+                                        std::to_string(torrent.num_pieces()) + " pieces");
+            return lt::entry{};
+        }
+    }();
+    if (!result.error.empty()) {
+        return result;
+    }
+    std::vector<char> info_encoded;
+    lt::bencode(std::back_inserter(info_encoded), meta.dict().at("info"));
+    lt::hasher info_hasher;
+    info_hasher.update(info_encoded.data(), static_cast<int>(info_encoded.size()));
+    result.infohash = rust::String(lt::aux::to_hex(info_hasher.final()));
+
+    std::vector<char> encoded;
+    lt::bencode(std::back_inserter(encoded), meta);
+    result.metainfo.reserve(encoded.size());
+    for (char byte : encoded) {
+        result.metainfo.push_back(static_cast<uint8_t>(byte));
+    }
+    result.ok = true;
+    return result;
 }
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload) {

@@ -12,6 +12,7 @@ struct FfiEvent;
 struct FfiFile;
 struct FfiPeer;
 struct FfiTracker;
+struct FfiCreateResult;
 
 class Session {
   public:
@@ -35,6 +36,7 @@ class Session {
     bool set_torrent_limits(uint64_t id, uint64_t download_rate_limit,
                             uint64_t upload_rate_limit, uint32_t connections_limit,
                             uint32_t upload_slots_limit);
+    void set_default_trackers(rust::Str trackers);
     bool move_storage(uint64_t id, rust::Str path);
     bool remove(uint64_t id, bool delete_files);
     bool move_in_queue(uint64_t id, bool up);
@@ -68,3 +70,8 @@ std::unique_ptr<Session> new_session(uint64_t download_rate_limit, uint64_t uplo
                                      rust::Str outgoing_interfaces);
 
 rust::Vec<uint8_t> make_torrent(rust::Str name, rust::Slice<const uint8_t> payload);
+
+/// Builds a .torrent for a file or directory on the daemon host. Trackers are
+/// a newline-separated list.
+FfiCreateResult make_torrent_from_path(rust::Str path, uint32_t piece_length,
+                                       rust::Str trackers);

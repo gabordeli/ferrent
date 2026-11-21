@@ -359,6 +359,7 @@ fn session_settings(
         active_limit: config.session.active_limit,
         listen_interfaces: config.network.listen_interfaces.clone(),
         outgoing_interfaces: config.network.outgoing_interfaces.clone(),
+        default_trackers: config.session.default_trackers.clone(),
     }
 }
 

@@ -87,6 +87,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         active_limit: resolved.session.active_limit,
         listen_interfaces: resolved.network.listen_interfaces.clone(),
         outgoing_interfaces: resolved.network.outgoing_interfaces.clone(),
+        default_trackers: resolved.session.default_trackers.clone(),
     };
 
     let tls = TlsMaterial::load_or_generate(&data_dir)?;

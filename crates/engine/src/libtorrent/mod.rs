@@ -15,7 +15,7 @@ use crate::{
     TorrentState, TorrentStatus,
 };
 
-use self::bridge::ffi::{FfiEvent, FfiStatus, new_session};
+use self::bridge::ffi::{FfiEvent, FfiStatus, make_torrent_from_path, new_session};
 
 mod bridge;
 
@@ -83,6 +83,10 @@ enum Command {
         id: TorrentId,
         priorities: Vec<i32>,
         reply: Sender<Result<(), EngineError>>,
+    },
+    CreateTorrent {
+        spec: crate::CreateTorrentSpec,
+        reply: Sender<Result<crate::CreatedTorrent, EngineError>>,
     },
     Peers {
         id: TorrentId,
@@ -261,6 +265,15 @@ impl TorrentEngine for LibtorrentEngine {
         Self::recv(response)
     }
 
+    fn create_torrent(
+        &mut self,
+        spec: crate::CreateTorrentSpec,
+    ) -> Result<crate::CreatedTorrent, EngineError> {
+        let (reply, response) = mpsc::channel();
+        self.send(Command::CreateTorrent { spec, reply })?;
+        Self::recv(response)
+    }
+
     fn peers(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentPeerInfo>, EngineError> {
         let (reply, response) = mpsc::channel();
         self.send(Command::Peers { id, reply })?;
@@ -320,6 +333,9 @@ fn run_worker(
         &settings.listen_interfaces,
         &settings.outgoing_interfaces,
     );
+    session
+        .pin_mut()
+        .set_default_trackers(&settings.default_trackers.join("\n"));
     let mut last_progress = Instant::now();
     let mut finished = std::collections::BTreeSet::new();
 
@@ -542,7 +558,29 @@ fn run_worker(
                     settings.active_limit,
                     settings.seed_mode,
                 );
+                session
+                    .pin_mut()
+                    .set_default_trackers(&settings.default_trackers.join("\n"));
                 let _ = reply.send(());
+            }
+            Ok(Command::CreateTorrent { spec, reply }) => {
+                let trackers = spec.trackers.join("\n");
+                let created = make_torrent_from_path(
+                    &spec.path.to_string_lossy(),
+                    spec.piece_length,
+                    &trackers,
+                );
+                let result = if created.ok {
+                    Ok(crate::CreatedTorrent {
+                        metainfo: created.metainfo,
+                        infohash: created.infohash.to_string(),
+                    })
+                } else {
+                    Err(EngineError::Rejected {
+                        reason: created.error.to_string(),
+                    })
+                };
+                let _ = reply.send(result);
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
@@ -691,6 +729,89 @@ mod tests {
             engine.set_file_priorities(999, &[4]).is_err(),
             "an unknown torrent id is an error, not a silent no-op"
         );
+        engine.remove(id, true).expect("remove");
+    }
+
+    #[test]
+    fn create_torrent_from_a_directory_round_trips_through_add() {
+        let dir = temp_dir("libtorrent-create");
+        let source = dir.join("album");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(source.join("one.bin"), b"one".repeat(1024)).expect("write one");
+        fs::write(source.join("two.bin"), b"two".repeat(2048)).expect("write two");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let created = engine
+            .create_torrent(crate::CreateTorrentSpec {
+                path: source.clone(),
+                piece_length: 16 * 1024,
+                trackers: vec!["udp://tracker.example:6969".to_owned()],
+            })
+            .expect("create torrent");
+        assert!(!created.metainfo.is_empty());
+        assert_eq!(created.infohash.len(), 40);
+
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "album".to_owned(),
+                total_bytes: 0,
+                source: TorrentSource::Metainfo(created.metainfo.clone()),
+                save_path: dir.clone(),
+                resume_data: None,
+            })
+            .expect("add the created torrent");
+
+        let status = engine.status(id).expect("status");
+        assert_eq!(status.infohash, created.infohash, "the info hash matches");
+        let files = engine.files(id).expect("files");
+        assert_eq!(files.len(), 2, "both files are in the metainfo");
+        assert!(files.iter().any(|file| file.path.ends_with("one.bin")));
+
+        // An empty directory is a user error, not a panic.
+        let empty = dir.join("empty");
+        fs::create_dir_all(&empty).expect("empty dir");
+        let error = engine
+            .create_torrent(crate::CreateTorrentSpec {
+                path: empty,
+                piece_length: 0,
+                trackers: Vec::new(),
+            })
+            .expect_err("empty directory");
+        assert!(matches!(error, EngineError::Rejected { .. }));
+
+        engine.remove(id, true).expect("remove");
+    }
+
+    #[test]
+    fn create_torrent_hashes_several_pieces() {
+        let dir = temp_dir("libtorrent-create-multi");
+        let source = dir.join("album");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(source.join("one.bin"), vec![1_u8; 1_000_000]).expect("write one");
+        fs::write(source.join("two.bin"), vec![2_u8; 250_000]).expect("write two");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let created = engine
+            .create_torrent(crate::CreateTorrentSpec {
+                path: source.clone(),
+                piece_length: 0,
+                trackers: Vec::new(),
+            })
+            .expect("create torrent");
+        // Five pieces of 256 KiB: the metainfo carries 5 x 20 bytes of hashes.
+        assert!(created.metainfo.len() > 200);
+        assert_eq!(created.infohash.len(), 40);
+
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "album".to_owned(),
+                total_bytes: 0,
+                source: TorrentSource::Metainfo(created.metainfo),
+                save_path: dir.clone(),
+                resume_data: None,
+            })
+            .expect("add the created torrent");
+        assert_eq!(engine.status(id).expect("status").total_bytes, 1_250_000);
         engine.remove(id, true).expect("remove");
     }
 

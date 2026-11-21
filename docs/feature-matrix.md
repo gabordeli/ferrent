@@ -68,7 +68,7 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | SequentialDownload | ❌ | nincs sequential flag |
 | PreventSuspend | ❌ | desktop-only, alacsony prioritás |
 | Streaming | ❌ | nincs HTTP stream a letöltés közben |
-| Default Trackers | ❌ | nincs „minden új torrenthez” tracker-lista |
+| Default Trackers | ✅ | `[session] default_trackers` (M10-T3); a metainfót nem írja át |
 | Randomize / autoport | ❌ | nincs port-randomizálás/teszt |
 | Updatorr, FlexGet/FlexRSS, YaRSS2 | ❌ | feed-alapú automatizálás; a *arr a qBittorrent API-n át megy |
 | uTorrentImport | ❌ | csak Deluge-import van (`M8-T1`) |
@@ -106,8 +106,9 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 3. **RSS-watcher** – a Deluge-ban is csak plugin (YaRSS2, a TRaSH szerint
    halott); beépítve ez valódi differenciáló.
 4. **IP blocklist** – privát trackereknél/anti-leechhez; közepes.
-5. **Torrent készítés + default trackerek** – kicsi, hasznos (a bridge
-   `make_torrent` már létezik).
+5. ~~**Torrent készítés + default trackerek**~~ – **kész (M10-T3)**:
+   `CreateTorrent` RPC + `ferrent-cli create` + GUI gomb; a default trackert a
+   `[session] default_trackers` adja (`docs/measurements/m10-torrent-creation.md`).
 6. **Sequential download** – kicsi, streameléshez/watch-while-downloading.
 7. **Statisztika-nézet / session összesítés** – GUI-kényelem.
 8. **Pieces nézet, streaming, prevent-suspend** – alacsony prioritás.

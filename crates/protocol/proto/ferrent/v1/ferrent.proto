@@ -24,6 +24,9 @@ service Ferrent {
   // Replaces the per-file priorities of one torrent (0 skip, 1 low, 4 normal,
   // 7 high). The list must have one entry per file, in file order.
   rpc SetFilePriorities(SetFilePrioritiesRequest) returns (SetFilePrioritiesResponse);
+
+  // Builds a .torrent for a file or directory on the daemon host.
+  rpc CreateTorrent(CreateTorrentRequest) returns (CreateTorrentResponse);
   // Returns the connected peers of one torrent.
   rpc GetTorrentPeers(GetTorrentPeersRequest) returns (GetTorrentPeersResponse);
   // Returns the trackers of one torrent.
@@ -595,6 +598,22 @@ message SetFilePrioritiesRequest {
 
 message SetFilePrioritiesResponse {
   repeated TorrentFile files = 1;
+}
+
+message CreateTorrentRequest {
+  // File or directory on the daemon host.
+  string path = 1;
+  // Piece size in bytes; 0 picks 256 KiB (clamped to 16 KiB..16 MiB).
+  uint32 piece_length = 2;
+  // Announce URLs; the daemon's default trackers are added when empty.
+  repeated string trackers = 3;
+}
+
+message CreateTorrentResponse {
+  // Raw .torrent metainfo bytes.
+  bytes metainfo = 1;
+  // v1 info hash, lowercase hex.
+  string infohash = 2;
 }
 
 // One connected peer.

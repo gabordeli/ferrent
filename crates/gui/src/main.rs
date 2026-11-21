@@ -152,6 +152,12 @@ enum Message {
         errors: Vec<String>,
     },
     AddSavePathChanged(String),
+    AddCreateFolder,
+    AddCreateFolderPicked(Option<std::path::PathBuf>),
+    AddCreated {
+        name: String,
+        result: Result<(Vec<u8>, String), String>,
+    },
     AddNameChanged(String),
     AddConfirmed,
     PickTorrent,
@@ -715,6 +721,58 @@ impl App {
             } => self.action_finished(*undo, action, errors),
             Message::AddSavePathChanged(value) => {
                 self.add_save_path = value;
+                Task::none()
+            }
+            Message::AddCreateFolder => {
+                if self.client.is_none() {
+                    return Task::none();
+                }
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .pick_folder()
+                            .await
+                            .map(|handle| handle.path().to_path_buf())
+                    },
+                    Message::AddCreateFolderPicked,
+                )
+            }
+            Message::AddCreateFolderPicked(Some(path)) => {
+                let Some(client) = self.client.clone() else {
+                    return Task::none();
+                };
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("torrent")
+                    .to_owned();
+                let daemon_path = path.display().to_string();
+                self.status = format!("creating {name} on the daemon…");
+                Task::perform(
+                    async move { connection::create_torrent(&client, daemon_path).await },
+                    move |result| Message::AddCreated {
+                        name: name.clone(),
+                        result,
+                    },
+                )
+            }
+            Message::AddCreateFolderPicked(None) => Task::none(),
+            Message::AddCreated { name, result } => {
+                match result {
+                    Ok((metainfo, infohash)) => {
+                        let target = std::env::temp_dir().join(format!("{name}.torrent"));
+                        match std::fs::write(&target, metainfo) {
+                            Ok(()) => {
+                                self.prepare_add(target);
+                                self.status = format!("created {name} ({infohash})");
+                            }
+                            Err(error) => {
+                                self.status = format!("cannot write {}: {error}", target.display());
+                            }
+                        }
+                    }
+                    Err(error) => self.status = format!("create failed: {error}"),
+                }
                 Task::none()
             }
             Message::AddNameChanged(value) => {
@@ -4236,7 +4294,13 @@ impl App {
                 .into()
         };
         let body = column![
-            detail_row("File", self.add_path.clone(), theme::TEXT_MUTED),
+            row![
+                container(detail_row("File", self.add_path.clone(), theme::TEXT_MUTED))
+                    .width(Length::Fill),
+                action_button("Create from folder…", Message::AddCreateFolder, false),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
             text("Name").size(11).color(theme::TEXT_MUTED),
             text_input("Torrent name", &self.add_name)
                 .on_input(Message::AddNameChanged)

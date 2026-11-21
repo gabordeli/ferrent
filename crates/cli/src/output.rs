@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use ferrent_protocol::v1::watch_response::Event;
-use ferrent_protocol::v1::{Torrent, TorrentFile, TorrentState, WatchResponse};
+use ferrent_protocol::v1::{Torrent, TorrentFile, TorrentState, TorrentTracker, WatchResponse};
 use serde_json::{Value, json};
 
 use crate::error::CliError;
@@ -56,6 +56,40 @@ pub fn files_json(files: &[TorrentFile]) -> Value {
             }))
             .collect::<Vec<_>>()
     )
+}
+
+pub fn trackers_json(trackers: &[TorrentTracker]) -> Value {
+    json!(
+        trackers
+            .iter()
+            .map(|tracker| json!({
+                "url": tracker.url,
+                "status": tracker.status,
+                "seeds": tracker.seeds,
+                "leechers": tracker.leechers,
+                "message": tracker.message,
+                "next_announce": tracker.next_announce,
+                "fails": tracker.fails,
+            }))
+            .collect::<Vec<_>>()
+    )
+}
+
+pub fn print_trackers(trackers: &[TorrentTracker]) {
+    for tracker in trackers {
+        outln!(
+            "{:<10}  {:>5} {:>5}  {}{}",
+            tracker.status,
+            tracker.seeds,
+            tracker.leechers,
+            tracker.url,
+            if tracker.message.is_empty() {
+                String::new()
+            } else {
+                format!("  ({})", tracker.message)
+            }
+        );
+    }
 }
 
 pub fn print_files(files: &[TorrentFile]) {

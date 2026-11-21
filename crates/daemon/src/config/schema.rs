@@ -443,6 +443,9 @@ pub struct SessionConfig {
     pub active_limit: u32,
     /// Treat newly added torrents as complete without an initial file check.
     pub seed_mode: bool,
+    /// Trackers added to torrents whose metainfo carries no announce URL.
+    /// Existing lists are never overwritten.
+    pub default_trackers: Vec<String>,
 }
 
 /// Queueing behaviour. The queue order itself lives in the daemon, not in
@@ -674,6 +677,27 @@ token_file = "/etc/ferrent/token"
         assert_eq!(file.data_dir.as_deref(), Some(Path::new("/srv/ferrent")));
         assert_eq!(file.session, SessionConfig::default());
         assert!(file.queue.enabled);
+    }
+
+    #[test]
+    fn default_trackers_are_parsed() {
+        let file = FileConfig::parse(
+            r#"
+[session]
+default_trackers = ["udp://tracker.example:6969/announce", "https://t.example/a"]
+"#,
+        )
+        .expect("default trackers");
+        let resolved = file
+            .resolve(&std::collections::BTreeMap::new())
+            .expect("resolve");
+        assert_eq!(
+            resolved.session.default_trackers,
+            vec![
+                "udp://tracker.example:6969/announce".to_owned(),
+                "https://t.example/a".to_owned()
+            ]
+        );
     }
 
     #[test]

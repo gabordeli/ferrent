@@ -114,6 +114,25 @@ pub struct EngineSettings {
     /// libtorrent `outgoing_interfaces` (e.g. `wg0/10.8.0.2`); empty means
     /// "any".
     pub outgoing_interfaces: String,
+    /// Trackers added to torrents whose metainfo has no announce URL.
+    pub default_trackers: Vec<String>,
+}
+
+/// One torrent-creation request, resolved on the engine host.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTorrentSpec {
+    /// File or directory to publish.
+    pub path: std::path::PathBuf,
+    /// Piece size in bytes; `0` picks a 256 KiB default.
+    pub piece_length: u32,
+    pub trackers: Vec<String>,
+}
+
+/// The resulting metainfo and its v1 info hash.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreatedTorrent {
+    pub metainfo: Vec<u8>,
+    pub infohash: String,
 }
 
 /// Per-torrent limits. A value of `0` means unlimited.

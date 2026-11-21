@@ -92,6 +92,17 @@ pub trait TorrentEngine: Send + 'static {
         Ok(())
     }
 
+    /// Builds a .torrent for a path on the engine host.
+    fn create_torrent(
+        &mut self,
+        spec: crate::CreateTorrentSpec,
+    ) -> Result<crate::CreatedTorrent, EngineError> {
+        let _ = spec;
+        Err(EngineError::Rejected {
+            reason: "torrent creation is not supported by this engine".to_owned(),
+        })
+    }
+
     /// Returns the connected peers of one torrent.
     fn peers(&mut self, id: TorrentId) -> Result<Vec<TorrentPeerInfo>, EngineError> {
         let _ = id;

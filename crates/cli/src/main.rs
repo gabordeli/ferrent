@@ -11,11 +11,12 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, CreateLabelRequest, GetConfigRequest, GetDisksRequest,
-    GetNotificationStatusRequest, GetTorrentFilesRequest, GetTorrentRequest, Label as ProtoLabel,
-    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, QueueDirection,
-    RemoveTorrentRequest, ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest,
-    SetFilePrioritiesRequest, SortField, WatchRequest,
+    AddTorrentRequest, CreateLabelRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
+    GetNotificationStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
+    GetTorrentTrackersRequest, Label as ProtoLabel, ListTorrentsRequest, MoveTorrentRequest,
+    PauseTorrentRequest, QueueDirection, RemoveTorrentRequest, ResumeTorrentRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SortField,
+    WatchRequest,
 };
 use serde_json::json;
 
@@ -111,6 +112,25 @@ enum Command {
     },
     /// Show one torrent.
     Show {
+        /// Torrent id.
+        id: u64,
+    },
+    /// Build a .torrent from a file or directory on the daemon host.
+    Create {
+        /// File or directory on the daemon host.
+        path: String,
+        /// Announce URL; repeatable.
+        #[arg(long = "tracker")]
+        trackers: Vec<String>,
+        /// Piece size in bytes (16 KiB - 16 MiB; 0 picks 256 KiB).
+        #[arg(long, default_value_t = 0)]
+        piece_length: u32,
+        /// Where to write the .torrent (default: <name>.torrent here).
+        #[arg(long = "output")]
+        out: Option<PathBuf>,
+    },
+    /// List the trackers of one torrent.
+    Trackers {
         /// Torrent id.
         id: u64,
     },
@@ -482,6 +502,55 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_json(&output::torrent_json(&torrent));
             } else {
                 output::print_torrent(&torrent);
+            }
+        }
+        Command::Create {
+            path,
+            trackers,
+            piece_length,
+            out,
+        } => {
+            let response = client
+                .create_torrent(CreateTorrentRequest {
+                    path: path.clone(),
+                    piece_length,
+                    trackers,
+                })
+                .await?
+                .into_inner();
+            let target = out.unwrap_or_else(|| {
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "torrent".to_owned());
+                PathBuf::from(format!("{name}.torrent"))
+            });
+            std::fs::write(&target, &response.metainfo)?;
+            if json {
+                output::print_json(&json!({
+                    "output": target,
+                    "infohash": response.infohash,
+                    "bytes": response.metainfo.len(),
+                }));
+            } else {
+                println!(
+                    "{} ({} bytes, {})",
+                    target.display(),
+                    response.metainfo.len(),
+                    response.infohash
+                );
+            }
+        }
+        Command::Trackers { id } => {
+            let trackers = client
+                .get_torrent_trackers(GetTorrentTrackersRequest { id })
+                .await?
+                .into_inner()
+                .trackers;
+            if json {
+                output::print_json(&output::trackers_json(&trackers));
+            } else {
+                output::print_trackers(&trackers);
             }
         }
         Command::Files { id, set } => {
