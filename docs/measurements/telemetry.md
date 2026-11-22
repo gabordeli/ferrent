@@ -35,6 +35,15 @@ profillal, nem strippelve:
 Ugyanez a próba a strippelt binárisból `<unknown>` kereteket ad — pontosan
 azt, amit a FERRENT-11 mutatott.
 
+**FERRENT-11 visszafejtési kísérlet (2026-11-22):** a v0.1.2 tag **release
+profil nélkül** készült (`debug = 0`), tehát a `.deb`-be került bináris
+szimbólum nélkül ment. Az újraépített v0.1.2 GUI-ban (30 MB, `.symtab` van,
+`.debug_line` nincs) a rögzített címek egyike sem adott page-aligned bázist
+egyetlen ismert szimbólumhoz sem, tehát a buildkörnyezet eltér (a pontos
+bináris már nincs meg). A GUI saját kódjában nincs `unwrap`, a panic
+függőségből jött; a következő, már szimbolizált előfordulás mondja meg a
+helyet.
+
 ## Változás
 
 | Beállítás | Előtte | Utána |
