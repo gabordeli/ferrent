@@ -16,7 +16,6 @@ set -euo pipefail
 debdir=${1:-target/debian-dist}
 api=${CI_API_V4_URL:-${GITLAB_URL:-https://cirice-gitlab.ddns.net}/api/v4}
 project=${CI_PROJECT_ID:-${GITLAB_PROJECT_ID:?set GITLAB_PROJECT_ID}}
-package=ferrentd
 
 if [ -n "${CI_JOB_TOKEN:-}" ]; then
     auth=(--header "JOB-TOKEN: $CI_JOB_TOKEN")
@@ -33,8 +32,10 @@ debs=("$debdir"/*.deb)
 
 for deb in "${debs[@]}"; do
     file=$(basename "$deb")
+    # ferrent_0.1.2-1_amd64.deb / ferrent-gui_0.1.2-1_amd64.deb
+    package=$(printf '%s' "$file" | cut -d_ -f1)
     version=$(printf '%s' "$file" | sed -E 's/^[^_]+_([^_]+)_.*/\1/')
-    [ -n "$version" ] || { echo "cannot read the version from $file" >&2; exit 1; }
+    [ -n "$package" ] && [ -n "$version" ] || { echo "cannot read package/version from $file" >&2; exit 1; }
     url="$api/projects/$project/packages/generic/$package/$version/$file"
     code=$(curl -sS -o /tmp/ferrent-publish.json -w '%{http_code}' \
         "${auth[@]}" --upload-file "$deb" "$url")

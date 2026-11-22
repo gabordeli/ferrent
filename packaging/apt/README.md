@@ -1,7 +1,7 @@
 # Ferrent APT repository
 
 The `.deb` files are published from the `gh-pages` branch as a signed APT
-repository (`dists/stable` + `pool/main/f/ferrentd`). The client side is
+repository (`dists/stable` + `pool/main/f/<package>`). The client side is
 described in `docs/apt-install.md`.
 
 ## Signing key
@@ -71,9 +71,16 @@ dropped by deleting it from the branch by hand.
 
 ## Publishing
 
-`.github/workflows/release-apt.yml` runs on a `v*` tag:
+The canonical build runs once, on GitLab:
 
-1. builds the two `.deb` files in the container,
+1. `release-deb` builds `ferrent` and `ferrent-gui` in the container, runs the
+   container test, and publishes them to the GitLab generic registry;
+2. `packaging/apt/publish-github-release.sh` attaches the same files to the
+   GitHub release (`GITHUB_RELEASE_TOKEN` CI variable, Contents: read/write).
+
+`.github/workflows/release-apt.yml` runs on `release: published` (or manually):
+
+1. downloads the `.deb` assets of the release,
 2. checks out `gh-pages` (or starts an empty orphan branch),
 3. regenerates `dists/stable` with `apt-ftparchive`, signs `InRelease` and
    `Release.gpg`, copies the public key to `/ferrent.gpg`,

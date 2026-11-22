@@ -18,18 +18,22 @@ fi
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 dist="$repo/dists/stable"
-pool="$repo/pool/main/f/ferrentd"
+pool="$repo/pool/main"
 mkdir -p "$pool" "$dist"
 
 for dir in "$@"; do
     [ -d "$dir" ] || { echo "no such directory: $dir" >&2; exit 1; }
-    find "$dir" -maxdepth 1 -name '*.deb' -exec cp -p {} "$pool/" \;
+    while IFS= read -r -d '' deb; do
+        package=$(basename "$deb" | cut -d_ -f1)
+        mkdir -p "$pool/f/$package"
+        cp -p "$deb" "$pool/f/$package/"
+    done < <(find "$dir" -maxdepth 1 -name '*.deb' -print0)
 done
 
 # A version removed from the input dirs is not removed from the pool: the
-# repository keeps every version it has ever shipped.
-shopt -s nullglob
-debs=("$pool"/*.deb)
+# repository keeps every version it has ever shipped. The scan recurses into
+# the per-package subdirectories, so the 0.1.x ferrentd files stay visible.
+mapfile -t debs < <(find "$pool" -type f -name '*.deb' | sort)
 if [ "${#debs[@]}" -eq 0 ]; then
     echo "no .deb files in $pool" >&2
     exit 1
@@ -39,7 +43,7 @@ arches=$(for deb in "${debs[@]}"; do dpkg-deb -f "$deb" Architecture; done | sor
 for arch in $arches; do
     mkdir -p "$dist/main/binary-$arch"
     # Relative to the repo root: the Filename field must work from the URL.
-    (cd "$repo" && dpkg-scanpackages -m -a "$arch" pool/main/f/ferrentd /dev/null) \
+    (cd "$repo" && dpkg-scanpackages -m -a "$arch" pool/main /dev/null) \
         > "$dist/main/binary-$arch/Packages"
     gzip -9n -c "$dist/main/binary-$arch/Packages" > "$dist/main/binary-$arch/Packages.gz"
 done

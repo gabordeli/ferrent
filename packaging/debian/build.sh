@@ -45,6 +45,9 @@ amd64)
     link_env=""
     cargo_target=""
     pkg_config_path="/opt/lt/lib/pkgconfig"
+    # The GUI is amd64-only for now: cross-building GTK for arm64 needs the
+    # whole -dev:arm64 pkg-config set, and the server side does not run it.
+    gui=1
     ;;
 arm64)
     arch_pre="RUN dpkg --add-architecture arm64"
@@ -58,12 +61,22 @@ arm64)
     PKG_CONFIG_ALLOW_CROSS=1"
     cargo_target="--target aarch64-unknown-linux-gnu"
     pkg_config_path="/opt/lt/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig"
+    gui=0
     ;;
 *)
     echo "unsupported arch: $arch (amd64|arm64)" >&2
     exit 1
     ;;
 esac
+
+gui_apt=""
+gui_run=""
+if [ "$gui" = 1 ]; then
+    gui_apt="libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libglib2.0-dev libgtk-3-dev"
+    gui_run='RUN cargo build --release -p ferrent-gui $cargo_target \
+ && cargo deb -p ferrent-gui --no-build $cargo_target \
+      --deb-version "$DEB_VERSION" --output /out'
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -76,7 +89,7 @@ $arch_pre
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends \\
       build-essential cmake pkg-config libboost-dev libssl-dev zlib1g-dev \\
-      curl ca-certificates file $arch_apt \\
+      curl ca-certificates file $arch_apt $gui_apt \\
  && rm -rf /var/lib/apt/lists/*
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \\
  && . /root/.cargo/env && cargo install cargo-deb --version $CARGO_DEB_VERSION --locked
@@ -103,10 +116,18 @@ WORKDIR /src
 ENV PKG_CONFIG_PATH=$pkg_config_path FERRENT_LIBTORRENT_STATIC=1
 $link_env
 RUN cargo build --release -p ferrent-daemon --features libtorrent $cargo_target \\
- && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target \
+ && cargo build --release -p ferrent-cli $cargo_target \\
+ && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target \\
       --deb-version "\$DEB_VERSION" --output /out
-RUN dpkg-deb -f /out/*.deb Depends Architecture
+$gui_run
+RUN dpkg-deb -f /out/*.deb Package Version Architecture
 EOF
+
+# Handy when the generated recipe has to be checked without a 10 minute build.
+if [ -n "${FERRENT_DEB_PRINT_DOCKERFILE:-}" ]; then
+    cat "$work/Dockerfile"
+    exit 0
+fi
 
 echo "== building $tag (libtorrent $LT_VERSION, static)"
 # Plain progress: a failing RUN must leave the compiler output in the CI log.

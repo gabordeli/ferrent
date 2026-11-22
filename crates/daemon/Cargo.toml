@@ -36,21 +36,28 @@ name = "rpc_bench"
 path = "examples/rpc_bench.rs"
 
 [package.metadata.deb]
-name = "ferrentd"
+name = "ferrent"
 maintainer = "Gabor Deli <gabor.deli@gmail.com>"
 copyright = "2026, Gabor Deli"
 license-file = ["../../LICENSE", "0"]
-extended-description = "Headless Ferrent BitTorrent daemon with TLS gRPC, redb state and fastresume restart."
+extended-description = "Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume restart."
 section = "net"
 priority = "optional"
 depends = "$auto, adduser, init-system-helpers"
+# The 0.1.x packages were named after the binary. A single transition entry
+# lets apt replace them on upgrade while the service and paths stay the same.
+replaces = "ferrentd (<= 0.1.2-1)"
+breaks = "ferrentd (<= 0.1.2-1)"
+provides = "ferrentd"
 maintainer-scripts = "../../packaging/debian"
 conf-files = ["/etc/ferrent/config.toml"]
 assets = [
     ["target/release/ferrentd", "usr/bin/", "755"],
+    ["target/release/ferrent-cli", "usr/bin/", "755"],
     ["../../packaging/debian/ferrentd.service", "lib/systemd/system/", "644"],
     ["../../packaging/debian/config.toml", "etc/ferrent/", "640"],
     ["../../packaging/debian/ferrentd.1", "usr/share/man/man1/", "644"],
+    ["../../packaging/debian/ferrent-cli.1", "usr/share/man/man1/", "644"],
 ]
 
 [dependencies]
