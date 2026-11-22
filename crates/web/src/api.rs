@@ -308,6 +308,7 @@ pub async fn add(
             label: body.label,
             magnet: body.magnet,
             sequential: body.sequential.unwrap_or(false),
+            resume_data: Vec::new(),
         })
         .await
         .map_err(grpc)?

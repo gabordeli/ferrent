@@ -92,6 +92,33 @@ fn list_request() -> ListTorrentsRequest {
     }
 }
 
+/// The table is fed by the mirror task, so an import is visible a moment
+/// after the RPC returns; poll instead of racing the event loop.
+async fn wait_for_list(
+    client: &mut ferrent_protocol::client::AuthClient,
+    expected: usize,
+    paused: bool,
+) -> ferrent_protocol::v1::ListTorrentsResponse {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let list = client
+            .list_torrents(list_request())
+            .await
+            .expect("list")
+            .into_inner();
+        let ready = list.torrents.len() == expected
+            && (!paused
+                || list
+                    .torrents
+                    .iter()
+                    .all(|torrent| torrent.state == TorrentState::Paused as i32));
+        if ready || std::time::Instant::now() > deadline {
+            return list;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 #[tokio::test]
 async fn tls_auth_and_crud() {
     let server = start_server("secret").await;
@@ -108,6 +135,7 @@ async fn tls_auth_and_crud() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("add")
@@ -123,6 +151,7 @@ async fn tls_auth_and_crud() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("duplicate add")
@@ -231,6 +260,7 @@ async fn label_crud_assignment_and_filter() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("add auto")
@@ -244,6 +274,7 @@ async fn label_crud_assignment_and_filter() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("add other")
@@ -386,6 +417,7 @@ async fn watch_streams_added_and_stays_idle() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("add");
@@ -519,6 +551,7 @@ async fn file_priorities_are_validated_against_the_file_count() {
             label: String::new(),
             magnet: String::new(),
             sequential: false,
+            resume_data: Vec::new(),
         })
         .await
         .expect("add")
@@ -618,6 +651,7 @@ async fn deluge_import_previews_then_commits_paused() {
         source: "deluge".to_owned(),
         state_dir: state_dir.to_owned(),
         config_dir: String::new(),
+        options: std::collections::HashMap::new(),
     };
 
     let preview = client
@@ -629,6 +663,17 @@ async fn deluge_import_previews_then_commits_paused() {
     assert_eq!(preview.present, 0);
     assert!(preview.labels.iter().any(|label| label == "movies"));
     assert!(preview.torrents.iter().any(|entry| entry.label == "movies"));
+    let previewed_alpha = preview
+        .torrents
+        .iter()
+        .find(|entry| entry.name == "alpha.bin")
+        .expect("alpha previewed");
+    assert_eq!(previewed_alpha.save_path, "/srv/movies");
+    assert_eq!(
+        previewed_alpha.trackers,
+        ["http://tracker.example/announce"],
+        "the preview carries the announce URLs for the filters"
+    );
 
     let imported = client
         .import_state(ImportStateRequest {
@@ -636,6 +681,8 @@ async fn deluge_import_previews_then_commits_paused() {
             state_dir: state_dir.clone(),
             config_dir: String::new(),
             paused: true,
+            info_hashes: Vec::new(),
+            options: std::collections::HashMap::new(),
         })
         .await
         .expect("import")
@@ -651,6 +698,8 @@ async fn deluge_import_previews_then_commits_paused() {
             state_dir: state_dir.clone(),
             config_dir: String::new(),
             paused: true,
+            info_hashes: Vec::new(),
+            options: std::collections::HashMap::new(),
         })
         .await
         .expect("second import")
@@ -659,17 +708,22 @@ async fn deluge_import_previews_then_commits_paused() {
     assert_eq!(again.skipped, 2);
     assert_eq!(again.failed, 0);
 
-    let list = client
-        .list_torrents(list_request())
-        .await
-        .expect("list")
-        .into_inner();
+    let list = wait_for_list(&mut client, 2, true).await;
     assert_eq!(list.torrents.len(), 2);
     assert!(
         list.torrents
             .iter()
             .all(|torrent| torrent.state == TorrentState::Paused as i32),
         "the import adds the torrents paused"
+    );
+    let alpha = list
+        .torrents
+        .iter()
+        .find(|torrent| torrent.name == "alpha.bin")
+        .expect("alpha listed");
+    assert_eq!(
+        alpha.save_path, "/srv/movies",
+        "the import keeps Deluge's per-torrent save path"
     );
 
     // The mock engine's infohash is a synthetic hash of the metainfo, not the
@@ -693,6 +747,64 @@ async fn deluge_import_previews_then_commits_paused() {
             .as_ref()
             .is_some_and(|label| label.name == "movies")
     }));
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn import_state_adds_only_the_selected_torrents() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    let state_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/deluge-state")
+        .display()
+        .to_string();
+
+    let imported = client
+        .import_state(ImportStateRequest {
+            source: "deluge".to_owned(),
+            state_dir: state_dir.clone(),
+            config_dir: String::new(),
+            paused: true,
+            info_hashes: vec!["19191f352a43d716d1669ae7c9b82ba336a99e42".to_owned()],
+            options: std::collections::HashMap::new(),
+        })
+        .await
+        .expect("import")
+        .into_inner();
+    assert_eq!(imported.added, 1, "only the selected info hash is added");
+    assert_eq!(imported.skipped, 0);
+    assert_eq!(imported.failed, 0);
+
+    let list = wait_for_list(&mut client, 1, true).await;
+    assert_eq!(list.torrents.len(), 1);
+    assert_eq!(list.torrents[0].name, "alpha.bin");
+
+    // A hash the source does not know is reported, not silently dropped.
+    let missing = client
+        .import_state(ImportStateRequest {
+            source: "deluge".to_owned(),
+            state_dir,
+            config_dir: String::new(),
+            paused: true,
+            info_hashes: vec!["0".repeat(40)],
+            options: std::collections::HashMap::new(),
+        })
+        .await
+        .expect("import missing")
+        .into_inner();
+    assert_eq!(missing.added, 0);
+    assert!(
+        missing
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("not in the source")),
+        "a selection outside the source is a warning: {:?}",
+        missing.warnings
+    );
 
     server.shutdown();
 }

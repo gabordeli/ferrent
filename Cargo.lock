@@ -1566,6 +1566,7 @@ dependencies = [
  "ferrent-protocol",
  "ferrent-telemetry",
  "iced",
+ "regex",
  "rfd",
  "serde",
  "tokio",

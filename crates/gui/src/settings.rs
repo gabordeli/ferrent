@@ -21,14 +21,13 @@ pub enum Tab {
     Scheduler,
     Notifications,
     Storage,
-    Import,
     Labels,
     Rss,
     Appearance,
 }
 
 impl Tab {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Connection,
         Self::Session,
         Self::AutoAdd,
@@ -36,7 +35,6 @@ impl Tab {
         Self::Scheduler,
         Self::Notifications,
         Self::Storage,
-        Self::Import,
         Self::Labels,
         Self::Rss,
         Self::Appearance,
@@ -52,7 +50,6 @@ impl Tab {
             Self::Scheduler => crate::i18n::t("Scheduler"),
             Self::Notifications => crate::i18n::t("Notifications"),
             Self::Storage => crate::i18n::t("Storage"),
-            Self::Import => crate::i18n::t("Import"),
             Self::Labels => crate::i18n::t("Labels"),
             Self::Rss => "RSS",
             Self::Appearance => crate::i18n::t("Appearance"),
@@ -82,9 +79,6 @@ impl Tab {
             ),
             Self::Storage => crate::i18n::t(
                 "Filesystem zones: each label's library folder and the staging folder per disk.",
-            ),
-            Self::Import => crate::i18n::t(
-                "Copy torrents from another client; the preview only reads the source.",
             ),
             Self::Labels => crate::i18n::t("Definitions, limits and auto-assignment rules."),
             Self::Rss => crate::i18n::t("Feeds the daemon polls; add them like servers."),
@@ -2601,33 +2595,6 @@ pub struct Settings {
     pub rss_preview_for: Option<(String, String)>,
     pub rss_preview_error: Option<String>,
     pub rss_preview_loading: bool,
-    /// Import tab: the source path on the daemon host and the last preview.
-    pub import_state_dir: String,
-    pub import_config_dir: String,
-    pub import_loading: bool,
-    pub import_running: bool,
-    pub import_error: Option<String>,
-    pub import_preview: Option<ImportPreview>,
-    pub import_result: Option<ImportResult>,
-}
-
-/// A read-only Deluge scan, as shown in the Import tab.
-#[derive(Debug, Clone, Default)]
-pub struct ImportPreview {
-    pub torrents: Vec<ferrent_protocol::v1::ImportTorrentEntry>,
-    pub labels: Vec<String>,
-    pub warnings: Vec<String>,
-    pub present: u32,
-}
-
-/// The outcome of one import run.
-#[derive(Debug, Clone, Default)]
-pub struct ImportResult {
-    pub added: u32,
-    pub skipped: u32,
-    pub failed: u32,
-    pub warnings: Vec<String>,
-    pub errors: Vec<String>,
 }
 
 impl Default for Settings {
@@ -2676,13 +2643,6 @@ impl Default for Settings {
             rss_preview_for: None,
             rss_preview_error: None,
             rss_preview_loading: false,
-            import_state_dir: String::new(),
-            import_config_dir: String::new(),
-            import_loading: false,
-            import_running: false,
-            import_error: None,
-            import_preview: None,
-            import_result: None,
         }
     }
 }
@@ -2750,7 +2710,6 @@ impl Settings {
             Tab::Connection | Tab::Session => self.dirty(),
             Tab::Rss => self.rss != self.rss_baseline,
             Tab::Appearance => false,
-            Tab::Import => false,
         }
     }
 

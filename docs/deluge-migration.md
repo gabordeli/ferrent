@@ -2,7 +2,7 @@
 
 A Deluge állapotkönyvtárából a torrentek és a címkék átemelhetők; a
 pluginok konfigurációja beolvasva, de nem alkalmazva. A import ugyanazt a
-kódot használja a GUI-ban (Beállítások → Importálás) és a CLI-ben
+kódot használja a GUI-ban (bal oldali sáv → Importálás) és a CLI-ben
 (`ferrent-cli import-deluge`), így az előnézet és a végrehajtás nem térhet el.
 
 ## Hol van a forrás
@@ -44,10 +44,12 @@ A Deluge a torrenteket az info-hash-ről elnevezett fájlokban tartja; a
 ## Lépések
 
 1. Állítsd le a Deluge-ot, vagy legalább ne írjon a state könyvtárba.
-2. GUI: Beállítások → Importálás → állapotkönyvtár → **Előnézet**.
+2. GUI: **Importálás** (bal oldali sáv) → állapotkönyvtár → **Előnézet**.
    CLI: `ferrent-cli import-deluge --state-dir <dir> --dry-run`.
-3. Ellenőrizd a listát (darabszám, már megvan, címkék, figyelmeztetések).
-4. GUI: **Importálás szüneteltetve**; CLI: `--dry-run` nélkül.
+3. Szűrj (név/tracker regex, mentési út, címke), és ellenőrizd a listát
+   (darabszám, már megvan, címkék, figyelmeztetések).
+4. Jelöld ki az importálandókat (vagy **Összes találat kijelölése**),
+   majd GUI: **Importálás szüneteltetve**; CLI: `--dry-run` nélkül.
 5. A torrentek `paused` állapotban jelennek meg; a szükségeseket indítsd
    (resume), vagy állítsd be a címkék zónáit/limiteit előbb.
 

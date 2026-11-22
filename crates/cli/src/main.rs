@@ -453,6 +453,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     label,
                     magnet: String::new(),
                     sequential,
+                    resume_data: Vec::new(),
                 })
                 .await?
                 .into_inner();
@@ -487,6 +488,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                         .map(|path| path.to_string_lossy().into_owned())
                         .unwrap_or_default(),
                     paused: true,
+                    // The CLI imports everything; the GUI sends a selection.
+                    info_hashes: Vec::new(),
+                    options: std::collections::HashMap::new(),
                 })
                 .await?
                 .into_inner();

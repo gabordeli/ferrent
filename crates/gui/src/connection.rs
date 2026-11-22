@@ -376,18 +376,20 @@ pub async fn rss_status(client: &AuthClient) -> Result<Vec<ferrent_protocol::v1:
     Ok(response.feeds)
 }
 
-/// Reads a client's state directory without changing anything.
+/// Reads one client's torrent list without changing anything.
 pub async fn import_preview(
     client: &AuthClient,
+    source: &str,
     state_dir: &str,
     config_dir: &str,
 ) -> Result<(Vec<ImportTorrentEntry>, Vec<String>, Vec<String>, u32), String> {
     let mut client = client.clone();
     let response = client
         .import_preview(ImportPreviewRequest {
-            source: "deluge".to_owned(),
+            source: source.to_owned(),
             state_dir: state_dir.to_owned(),
             config_dir: config_dir.to_owned(),
+            options: std::collections::HashMap::new(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
@@ -400,20 +402,25 @@ pub async fn import_preview(
     ))
 }
 
-/// Adds the torrents from a client's state, paused.
+/// Adds the selected torrents from a client, paused. An empty selection
+/// means every candidate.
 pub async fn import_state(
     client: &AuthClient,
+    source: &str,
     state_dir: &str,
     config_dir: &str,
     paused: bool,
+    info_hashes: &[String],
 ) -> Result<ImportStateResponse, String> {
     let mut client = client.clone();
     let response = client
         .import_state(ImportStateRequest {
-            source: "deluge".to_owned(),
+            source: source.to_owned(),
             state_dir: state_dir.to_owned(),
             config_dir: config_dir.to_owned(),
             paused,
+            info_hashes: info_hashes.to_vec(),
+            options: std::collections::HashMap::new(),
         })
         .await
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?

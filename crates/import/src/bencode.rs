@@ -14,7 +14,7 @@ pub enum Value {
 }
 
 impl Value {
-    fn get(&self, key: &[u8]) -> Option<&Value> {
+    pub fn get(&self, key: &[u8]) -> Option<&Value> {
         match self {
             Self::Dict(entries) => entries
                 .iter()
@@ -24,14 +24,14 @@ impl Value {
         }
     }
 
-    fn as_int(&self) -> Option<i64> {
+    pub fn as_int(&self) -> Option<i64> {
         match self {
             Self::Int(value) => Some(*value),
             _ => None,
         }
     }
 
-    fn as_bytes(&self) -> Option<&[u8]> {
+    pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Bytes(value) => Some(value),
             _ => None,
@@ -45,6 +45,8 @@ pub struct Metainfo {
     pub info_hash: String,
     pub name: String,
     pub total_bytes: u64,
+    /// Announce URLs, in the order the metainfo lists them.
+    pub trackers: Vec<String>,
 }
 
 struct Parser<'a> {
@@ -137,6 +139,23 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Parses a bencoded document into a value tree.
+///
+/// Deluge's `torrents.fastresume` is a dictionary of info-hash → resume blob,
+/// and each blob is itself bencoded, so the importer needs the whole tree and
+/// not just the `.torrent` fields.
+pub fn parse_value(data: &[u8]) -> Result<Value, String> {
+    let mut parser = Parser::new(data);
+    let value = parser.value()?;
+    if parser.pos != data.len() {
+        return Err(format!(
+            "{} trailing bytes after the document",
+            data.len() - parser.pos
+        ));
+    }
+    Ok(value)
+}
+
 /// Parses a `.torrent` file down to the fields the catalogue and the importer
 /// need. `info` must be the last-stored raw bytes for a correct infohash, so
 /// the span is taken from the stream, not from a re-encoding.
@@ -190,11 +209,35 @@ pub fn parse(data: &[u8]) -> Result<Metainfo, String> {
         },
     };
 
+    let mut trackers = Vec::new();
+    if let Some(url) = root.get(b"announce").and_then(Value::as_bytes) {
+        push_tracker(&mut trackers, url);
+    }
+    if let Some(Value::List(tiers)) = root.get(b"announce-list") {
+        for tier in tiers {
+            if let Value::List(urls) = tier {
+                for url in urls {
+                    if let Some(url) = url.as_bytes() {
+                        push_tracker(&mut trackers, url);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Metainfo {
         info_hash,
         name,
         total_bytes,
+        trackers,
     })
+}
+
+fn push_tracker(trackers: &mut Vec<String>, url: &[u8]) {
+    let url = String::from_utf8_lossy(url).trim().to_owned();
+    if !url.is_empty() && !trackers.contains(&url) {
+        trackers.push(url);
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -214,6 +257,17 @@ mod tests {
         b"d8:announce29:http://tracker.local/announce4:infod6:lengthi1000e4:name9:alpha.binee";
 
     #[test]
+    fn reads_the_announce_urls_of_both_shapes() {
+        let data = b"d8:announce25:http://a.example/announce13:announce-listll25:http://a.example/announceel25:http://b.example/announceee4:infod6:lengthi1e4:name1:xee";
+        let metainfo = parse(data).expect("parse");
+        assert_eq!(
+            metainfo.trackers,
+            ["http://a.example/announce", "http://b.example/announce"],
+            "the flat announce and each tier, deduplicated"
+        );
+    }
+
+    #[test]
     fn reads_single_file_torrents() {
         let metainfo = parse(SINGLE).expect("parse");
         assert_eq!(metainfo.name, "alpha.bin");
@@ -230,6 +284,20 @@ mod tests {
         let metainfo = parse(data).expect("parse");
         assert_eq!(metainfo.name, "multi");
         assert_eq!(metainfo.total_bytes, 42);
+    }
+
+    #[test]
+    fn reads_nested_documents_as_a_value_tree() {
+        let data = b"d4:blobd4:name1:xe3:numi7ee";
+        let value = parse_value(data).expect("parse");
+        let blob = value.get(b"blob").expect("blob");
+        assert_eq!(blob.get(b"name").and_then(Value::as_bytes), Some(&b"x"[..]));
+        assert_eq!(value.get(b"num").and_then(Value::as_int), Some(7));
+    }
+
+    #[test]
+    fn rejects_trailing_bytes() {
+        assert!(parse_value(b"i1ee").is_err());
     }
 
     #[test]

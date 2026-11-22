@@ -230,6 +230,10 @@ message AddTorrentRequest {
   string magnet = 6;
   // Download the pieces in order (streaming-friendly).
   bool sequential = 7;
+  // libtorrent resume data for metainfo that already exists on disk; empty
+  // when the daemon should check the payload itself. An import passes the
+  // source client's blob so the finished data is not rechecked.
+  bytes resume_data = 8;
 }
 
 // Response with the engine-assigned torrent id.
@@ -854,6 +858,10 @@ message ImportPreviewRequest {
   string state_dir = 2;
   // Where the plugin configs live; empty means "next to state/".
   string config_dir = 3;
+  // Client-specific settings for sources that are not read from a state
+  // directory (url, user, password, api_key, ...). `state_dir` and
+  // `config_dir` take precedence when they are set.
+  map<string, string> options = 4;
 }
 
 message ImportTorrentEntry {
@@ -864,6 +872,10 @@ message ImportTorrentEntry {
   string label = 4;
   // True when the info hash is already in the daemon.
   bool already_present = 5;
+  // Where the source client keeps the payload; empty when unknown.
+  string save_path = 6;
+  // Announce URLs from the metainfo, so the UI can filter by tracker.
+  repeated string trackers = 7;
 }
 
 message ImportPreviewResponse {
@@ -881,6 +893,10 @@ message ImportStateRequest {
   // Add the torrents paused (default false for API compatibility; the GUI
   // sends true).
   bool paused = 4;
+  // Only these info hashes; empty means every candidate.
+  repeated string info_hashes = 5;
+  // See ImportPreviewRequest.options.
+  map<string, string> options = 6;
 }
 
 message ImportOutcome {

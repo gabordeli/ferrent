@@ -15,6 +15,7 @@ use ferrent_gui::config::{GuiConfig, PinDecision, ServerProfile, parse_hex};
 use ferrent_gui::connection::{self, ListQuery, Page, ServerConfig, ServerStatus};
 use ferrent_gui::i18n;
 use ferrent_gui::icons::{self, glyph};
+use ferrent_gui::import;
 use ferrent_gui::settings::{
     self, ConfigField, DigestField, DiskRow, HookEvent, HookField, LabelField, RssField,
     SchedulerLevel, Settings, StorageField, SuccessAction, Tab, WatchField, WebhookField,
@@ -40,7 +41,8 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
     Column as WidgetColumn, Row as WidgetRow, button, checkbox, column, container,
-    horizontal_space, mouse_area, row, scrollable, text, text_input, tooltip, vertical_space,
+    horizontal_space, mouse_area, pick_list, row, scrollable, text, text_input, tooltip,
+    vertical_space,
 };
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, mouse};
 
@@ -90,6 +92,14 @@ enum ConnectionState {
     Reconnecting,
     /// No client; the status bar must not show the last poll's numbers.
     Offline,
+}
+
+/// The main content area: the torrent table or the import page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum View {
+    #[default]
+    Torrents,
+    Import,
 }
 
 struct PendingPin {
@@ -262,8 +272,18 @@ enum Message {
     RssWatcherEnabled(bool),
     RssPreview,
     RssPreviewed(Result<(u32, Vec<ferrent_protocol::v1::RssPreviewItem>), String>),
+    ShowView(View),
     ImportStateDir(String),
     ImportConfigDir(String),
+    ImportNameFilter(String),
+    ImportTrackerFilter(String),
+    ImportPathFilter(Option<String>),
+    ImportLabelFilter(Option<String>),
+    ImportOnlyMissing(bool),
+    ImportToggle(String),
+    ImportSelectFiltered,
+    ImportClearSelection,
+    ImportOffset(usize),
     ImportPreview,
     ImportPreviewed(Result<ImportPreviewData, String>),
     ImportRun,
@@ -414,6 +434,8 @@ struct App {
     /// counter, which every poll overwrites.
     notice: Option<(String, Instant)>,
     state: ConnectionState,
+    view: View,
+    import: import::ImportState,
     pending: Option<PendingPin>,
     generation: u64,
     last_config: Option<ServerConfig>,
@@ -527,6 +549,8 @@ impl Default for App {
             status,
             notice: None,
             state: ConnectionState::Idle,
+            view: View::Torrents,
+            import: import::ImportState::new(),
             pending: None,
             generation: 0,
             last_config: None,
@@ -663,6 +687,7 @@ impl App {
                 Task::none()
             }
             Message::SelectCategory(filter) => {
+                self.view = View::Torrents;
                 self.state_filter = filter;
                 self.label_filter.clear();
                 self.scroll = 0.0;
@@ -1356,65 +1381,125 @@ impl App {
                 }
                 Task::none()
             }
+            Message::ShowView(view) => {
+                self.view = view;
+                Task::none()
+            }
             Message::ImportStateDir(value) => {
-                self.settings.import_state_dir = value;
+                self.import.state_dir = value;
                 Task::none()
             }
             Message::ImportConfigDir(value) => {
-                self.settings.import_config_dir = value;
+                self.import.config_dir = value;
+                Task::none()
+            }
+            Message::ImportNameFilter(value) => {
+                self.import.filters.name = value;
+                self.import.filter_error = self.import.filters.compile().err();
+                self.import.offset = 0;
+                Task::none()
+            }
+            Message::ImportTrackerFilter(value) => {
+                self.import.filters.tracker = value;
+                self.import.filter_error = self.import.filters.compile().err();
+                self.import.offset = 0;
+                Task::none()
+            }
+            Message::ImportPathFilter(value) => {
+                self.import.filters.save_path = value;
+                self.import.offset = 0;
+                Task::none()
+            }
+            Message::ImportLabelFilter(value) => {
+                self.import.filters.label = value;
+                self.import.offset = 0;
+                Task::none()
+            }
+            Message::ImportOnlyMissing(value) => {
+                self.import.filters.only_missing = value;
+                self.import.offset = 0;
+                Task::none()
+            }
+            Message::ImportToggle(hash) => {
+                self.import.toggle(&hash);
+                Task::none()
+            }
+            Message::ImportSelectFiltered => {
+                self.import.select_filtered();
+                Task::none()
+            }
+            Message::ImportClearSelection => {
+                self.import.selected.clear();
+                Task::none()
+            }
+            Message::ImportOffset(offset) => {
+                self.import.offset = offset;
                 Task::none()
             }
             Message::ImportPreview => {
                 let Some(client) = self.client.clone() else {
-                    self.settings.import_error = Some(i18n::t("Not connected").to_owned());
+                    self.import.error = Some(i18n::t("Not connected").to_owned());
                     return Task::none();
                 };
-                self.settings.import_loading = true;
-                self.settings.import_error = None;
-                let state_dir = self.settings.import_state_dir.trim().to_owned();
-                let config_dir = self.settings.import_config_dir.trim().to_owned();
+                self.import.loading = true;
+                self.import.error = None;
+                let source = self.import.source.clone();
+                let state_dir = self.import.state_dir.trim().to_owned();
+                let config_dir = self.import.config_dir.trim().to_owned();
                 Task::perform(
-                    async move { connection::import_preview(&client, &state_dir, &config_dir).await },
+                    async move {
+                        connection::import_preview(&client, &source, &state_dir, &config_dir).await
+                    },
                     Message::ImportPreviewed,
                 )
             }
             Message::ImportPreviewed(result) => {
-                self.settings.import_loading = false;
+                self.import.loading = false;
                 match result {
                     Ok((torrents, labels, warnings, present)) => {
-                        self.settings.import_preview = Some(settings::ImportPreview {
-                            torrents,
-                            labels,
-                            warnings,
-                            present,
-                        });
-                        self.settings.import_error = None;
+                        self.import.set_preview(torrents, labels, warnings, present);
+                        self.import.error = None;
                     }
                     Err(error) => {
-                        self.settings.import_preview = None;
-                        self.settings.import_error = Some(error);
+                        self.import.entries.clear();
+                        self.import.selected.clear();
+                        self.import.error = Some(error);
                     }
                 }
                 Task::none()
             }
             Message::ImportRun => {
                 let Some(client) = self.client.clone() else {
-                    self.settings.import_error = Some(i18n::t("Not connected").to_owned());
+                    self.import.error = Some(i18n::t("Not connected").to_owned());
                     return Task::none();
                 };
-                self.settings.import_running = true;
-                self.settings.import_error = None;
-                let state_dir = self.settings.import_state_dir.trim().to_owned();
-                let config_dir = self.settings.import_config_dir.trim().to_owned();
+                let selection = self.import.selection();
+                if selection.is_empty() {
+                    self.import.error = Some(i18n::t("Select at least one torrent").to_owned());
+                    return Task::none();
+                }
+                self.import.running = true;
+                self.import.error = None;
+                let source = self.import.source.clone();
+                let state_dir = self.import.state_dir.trim().to_owned();
+                let config_dir = self.import.config_dir.trim().to_owned();
                 Task::perform(
                     async move {
-                        connection::import_state(&client, &state_dir, &config_dir, true).await
+                        connection::import_state(
+                            &client,
+                            &source,
+                            &state_dir,
+                            &config_dir,
+                            true,
+                            &selection,
+                        )
+                        .await
                     },
                     Message::Imported,
                 )
             }
             Message::Imported(result) => {
-                self.settings.import_running = false;
+                self.import.running = false;
                 match result {
                     Ok(response) => {
                         let errors = response
@@ -1423,30 +1508,37 @@ impl App {
                             .filter(|outcome| outcome.status == "error")
                             .map(|outcome| format!("{}: {}", outcome.name, outcome.detail))
                             .collect();
-                        self.settings.import_result = Some(settings::ImportResult {
+                        self.import.outcome = Some(import::Outcome {
                             added: response.added,
                             skipped: response.skipped,
                             failed: response.failed,
                             warnings: response.warnings,
                             errors,
                         });
-                        self.settings.import_error = None;
+                        self.import.selected.clear();
+                        self.import.error = None;
                         // Refresh the preview so the "already present" flags
                         // match what the daemon now holds.
                         if let Some(client) = self.client.clone() {
-                            let state_dir = self.settings.import_state_dir.trim().to_owned();
-                            let config_dir = self.settings.import_config_dir.trim().to_owned();
-                            self.settings.import_loading = true;
+                            let source = self.import.source.clone();
+                            let state_dir = self.import.state_dir.trim().to_owned();
+                            let config_dir = self.import.config_dir.trim().to_owned();
+                            self.import.loading = true;
                             return Task::perform(
                                 async move {
-                                    connection::import_preview(&client, &state_dir, &config_dir)
-                                        .await
+                                    connection::import_preview(
+                                        &client,
+                                        &source,
+                                        &state_dir,
+                                        &config_dir,
+                                    )
+                                    .await
                                 },
                                 Message::ImportPreviewed,
                             );
                         }
                     }
-                    Err(error) => self.settings.import_error = Some(error),
+                    Err(error) => self.import.error = Some(error),
                 }
                 Task::none()
             }
@@ -3576,7 +3668,6 @@ impl App {
             Tab::Scheduler => self.settings_scheduler_view(),
             Tab::Notifications => self.settings_notifications_view(),
             Tab::Storage => self.settings_storage_view(),
-            Tab::Import => self.settings_import_view(),
             Tab::Labels => self.settings_labels_view(),
             Tab::Rss => self.settings_rss_view(),
             Tab::Appearance => self.settings_appearance_view(),
@@ -3625,7 +3716,6 @@ impl App {
             | Tab::Storage => Message::SettingsSave,
             Tab::Rss => Message::SettingsSave,
             Tab::Appearance => Message::SettingsSave,
-            Tab::Import => Message::ImportRun,
         };
         let can_save = !settings.loading
             && match settings.tab {
@@ -3639,23 +3729,10 @@ impl App {
                 | Tab::Storage => true,
                 Tab::Rss => true,
                 Tab::Appearance => false,
-                Tab::Import => settings.import_preview.is_some() && !settings.import_running,
             };
-        let (reload_label, reload_message) = if settings.tab == Tab::Import {
-            (i18n::t("Preview"), Message::ImportPreview)
-        } else {
-            ("Reload", Message::SettingsReload)
-        };
-        let reload_enabled = if settings.tab == Tab::Import {
-            !settings.import_loading && !settings.import_state_dir.trim().is_empty()
-        } else {
-            !settings.loading
-        };
-        let save_label = if settings.tab == Tab::Import {
-            i18n::t("Import paused")
-        } else {
-            "Save"
-        };
+        let (reload_label, reload_message) = ("Reload", Message::SettingsReload);
+        let reload_enabled = !settings.loading;
+        let save_label = "Save";
         let footer = row![
             summary,
             action_button(reload_label, reload_message, reload_enabled),
@@ -5202,164 +5279,329 @@ impl App {
         scrollable(body).height(Length::Fill).into()
     }
 
-    fn settings_import_view(&self) -> Element<'_, Message> {
-        let settings = &self.settings;
+    /// The import page: source, filters, the candidate list and the
+    /// selection. It is a full page because a library-sized preview does not
+    /// fit in a settings form.
+    fn import_view(&self) -> Element<'_, Message> {
+        let state = &self.import;
         let dim = theme::text_muted();
+        let connected = self.client.is_some();
 
-        let field = |label: &'static str,
-                     value: &str,
-                     placeholder: &'static str,
-                     input: fn(String) -> Message| {
+        let source_card = container(
             column![
-                text(label).size(11).color(dim),
-                text_input(placeholder, value)
-                    .style(muted_input_style)
+                row![
+                    text(i18n::t("Source")).size(11).color(dim),
+                    text("Deluge").size(12),
+                    horizontal_space(),
+                    text(i18n::t(
+                        "More clients later: Transmission, uTorrent, qBittorrent."
+                    ))
+                    .size(10)
+                    .color(dim),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+                row![
+                    text_input("/var/lib/deluged/config/state", &state.state_dir)
+                        .on_input(Message::ImportStateDir)
+                        .padding([4, 8])
+                        .size(12)
+                        .width(Length::Fill),
+                    text_input(
+                        i18n::t("plugin config dir (empty: next to the state dir)"),
+                        &state.config_dir
+                    )
+                    .on_input(Message::ImportConfigDir)
                     .padding([4, 8])
                     .size(12)
-                    .on_input(input)
-                    .width(Length::Fill),
+                    .width(Length::Fixed(300.0)),
+                    action_button(
+                        i18n::t("Preview"),
+                        Message::ImportPreview,
+                        connected && !state.loading,
+                    ),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
             ]
-            .spacing(3)
-        };
+            .spacing(6),
+        )
+        .padding(10)
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::bg_secondary().into()),
+            border: iced::Border {
+                color: theme::border(),
+                width: 1.0,
+                radius: 5.0.into(),
+            },
+            ..container::Style::default()
+        });
 
-        let panel = column![
+        let all = i18n::t("All").to_owned();
+        let mut path_options: Vec<String> = vec![all.clone()];
+        path_options.extend(state.save_paths().into_iter().map(|(path, _count)| path));
+        let mut label_options: Vec<String> = vec![all.clone()];
+        label_options.extend(state.used_labels().into_iter().map(|(label, _count)| label));
+        let all_for_path = all.clone();
+        let all_for_label = all.clone();
+
+        let filters = column![
             row![
-                text(i18n::t("Source")).size(11).color(dim),
-                text("Deluge").size(12),
-                horizontal_space(),
-                text(i18n::t("more clients later")).size(10).color(dim),
+                text_input(i18n::t("name (regex)"), &state.filters.name)
+                    .on_input(Message::ImportNameFilter)
+                    .padding([4, 8])
+                    .size(12)
+                    .width(Length::Fill),
+                text_input(i18n::t("tracker (regex)"), &state.filters.tracker)
+                    .on_input(Message::ImportTrackerFilter)
+                    .padding([4, 8])
+                    .size(12)
+                    .width(Length::Fill),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
-            field(
-                i18n::t("State directory on the daemon host"),
-                &settings.import_state_dir,
-                "/var/lib/deluge/.config/deluge/state",
-                Message::ImportStateDir,
-            ),
-            field(
-                i18n::t("Plugin config directory"),
-                &settings.import_config_dir,
-                i18n::t("empty: next to the state directory"),
-                Message::ImportConfigDir,
-            ),
-            text(i18n::t(
-                "The preview only reads the directory; the import adds the torrents paused.",
-            ))
-            .size(10)
-            .color(dim),
+            row![
+                pick_list(
+                    path_options,
+                    Some(
+                        state
+                            .filters
+                            .save_path
+                            .clone()
+                            .unwrap_or_else(|| all.clone())
+                    ),
+                    move |value| Message::ImportPathFilter(
+                        (value != all_for_path).then_some(value)
+                    ),
+                )
+                .text_size(12)
+                .padding([4, 8])
+                .width(Length::Fixed(260.0)),
+                pick_list(
+                    label_options,
+                    Some(state.filters.label.clone().unwrap_or_else(|| all.clone())),
+                    move |value| Message::ImportLabelFilter(
+                        (value != all_for_label).then_some(value)
+                    ),
+                )
+                .text_size(12)
+                .padding([4, 8])
+                .width(Length::Fixed(170.0)),
+                checkbox(i18n::t("Only missing"), state.filters.only_missing)
+                    .on_toggle(Message::ImportOnlyMissing)
+                    .size(14.0)
+                    .text_size(12),
+                horizontal_space(),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(10)
-        .width(Length::Fixed(330.0));
+        .spacing(6);
 
-        let mut results = column![].spacing(6).width(Length::Fill);
-        if settings.import_loading {
-            results = results.push(text(i18n::t("Reading the source…")).size(11).color(dim));
+        let error_line: Element<Message> = if let Some(error) = &state.error {
+            text(error.clone()).size(11).color(theme::error()).into()
+        } else if let Some(error) = &state.filter_error {
+            text(error.clone()).size(11).color(theme::error()).into()
+        } else if state.loading {
+            text(i18n::t("Reading the source…"))
+                .size(11)
+                .color(dim)
+                .into()
+        } else if state.running {
+            text(i18n::t("Importing…")).size(11).color(dim).into()
+        } else {
+            text("").size(1).into()
+        };
+
+        let header = row![
+            text("").size(10).width(Length::Fixed(28.0)),
+            text(i18n::t("Name"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fill),
+            text(i18n::t("Size"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(80.0)),
+            text(i18n::t("Label"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(110.0)),
+            text(i18n::t("Save path"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(210.0)),
+            text(i18n::t("Tracker"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(180.0)),
+            text(i18n::t("Status"))
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(70.0)),
+        ]
+        .spacing(8)
+        .padding([4, 6]);
+
+        let (start, rows) = state.window();
+        let mut list = column![header].spacing(1);
+        for entry in &rows {
+            let checked = state.selected.contains(&entry.info_hash);
+            let hash = entry.info_hash.clone();
+            let tracker = entry
+                .trackers
+                .first()
+                .map_or_else(String::new, |url| announce_host(url));
+            let status: Element<Message> = if entry.already_present {
+                text(i18n::t("present"))
+                    .size(10)
+                    .color(theme::downloading())
+                    .into()
+            } else {
+                text("").size(10).into()
+            };
+            let row = row![
+                checkbox("", checked)
+                    .on_toggle(move |_| Message::ImportToggle(hash.clone()))
+                    .size(14.0)
+                    .width(Length::Fixed(28.0)),
+                text(&entry.name).size(11).width(Length::Fill),
+                text(import_size(entry.total_bytes))
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(80.0)),
+                text(if entry.label.is_empty() {
+                    "—".to_owned()
+                } else {
+                    entry.label.clone()
+                })
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(110.0)),
+                text(if entry.save_path.is_empty() {
+                    "—".to_owned()
+                } else {
+                    entry.save_path.clone()
+                })
+                .size(10)
+                .color(dim)
+                .width(Length::Fixed(210.0)),
+                text(tracker)
+                    .size(10)
+                    .color(dim)
+                    .width(Length::Fixed(180.0)),
+                container(status).width(Length::Fixed(70.0)),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .padding([2, 6]);
+            list = list.push(Element::from(row));
         }
-        if settings.import_running {
-            results = results.push(text(i18n::t("Importing…")).size(11).color(dim));
-        }
-        if let Some(error) = &settings.import_error {
-            results = results.push(
-                text(i18n::t_fmt("Import failed: {}", &[error]))
-                    .size(11)
-                    .color(theme::error()),
-            );
-        }
-        if let Some(result) = &settings.import_result {
-            results = results.push(
+
+        let filtered = state.filtered().len();
+        let selected = state.selected.len();
+        let end = (start + rows.len()).min(filtered);
+        let summary = if state.entries.is_empty() {
+            i18n::t("Run the preview to see what the import would add.").to_owned()
+        } else {
+            i18n::t_fmt(
+                "{} torrents · {} matching · {} selected · {} already present",
+                &[
+                    &state.entries.len().to_string(),
+                    &filtered.to_string(),
+                    &selected.to_string(),
+                    &state.present.to_string(),
+                ],
+            )
+        };
+
+        let pager: Element<Message> = if filtered > import::PAGE {
+            row![
+                action_button(
+                    i18n::t("Previous"),
+                    Message::ImportOffset(start.saturating_sub(import::PAGE)),
+                    start > 0,
+                ),
+                text(format!("{}-{} / {filtered}", start + 1, end))
+                    .size(10)
+                    .color(dim),
+                action_button(
+                    i18n::t("Next"),
+                    Message::ImportOffset(start + import::PAGE),
+                    end < filtered,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            text("").size(1).into()
+        };
+
+        let mut notes = column![].spacing(2);
+        if let Some(outcome) = &state.outcome {
+            notes = notes.push(
                 text(i18n::t_fmt(
                     "Added {}, skipped {}, failed {}.",
                     &[
-                        &result.added.to_string(),
-                        &result.skipped.to_string(),
-                        &result.failed.to_string(),
-                    ],
-                ))
-                .size(12)
-                .color(theme::text_secondary()),
-            );
-            for error in &result.errors {
-                results = results.push(text(error).size(10).color(theme::error()));
-            }
-        }
-        if let Some(preview) = &settings.import_preview {
-            results = results.push(
-                text(i18n::t_fmt(
-                    "{} torrents · {} already present · {} labels",
-                    &[
-                        &preview.torrents.len().to_string(),
-                        &preview.present.to_string(),
-                        &preview.labels.len().to_string(),
+                        &outcome.added.to_string(),
+                        &outcome.skipped.to_string(),
+                        &outcome.failed.to_string(),
                     ],
                 ))
                 .size(11)
                 .color(theme::text_secondary()),
             );
-            let rows: Vec<Element<Message>> = preview
-                .torrents
-                .iter()
-                .map(|torrent| {
-                    row![
-                        text(&torrent.name).size(11).width(Length::Fill),
-                        text(if torrent.label.is_empty() {
-                            "—".to_owned()
-                        } else {
-                            format!("#{}", torrent.label)
-                        })
-                        .size(10)
-                        .color(dim)
-                        .width(Length::Fixed(90.0)),
-                        text(import_size(torrent.total_bytes))
-                            .size(10)
-                            .color(dim)
-                            .width(Length::Fixed(70.0)),
-                        text(if torrent.already_present {
-                            i18n::t("present")
-                        } else {
-                            ""
-                        })
-                        .size(10)
-                        .color(theme::queued())
-                        .width(Length::Fixed(60.0)),
-                    ]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center)
-                    .into()
-                })
-                .collect();
-            results = results.push(
-                container(scrollable(WidgetColumn::with_children(rows).spacing(2)))
-                    .height(Length::Fill),
-            );
-            if !preview.warnings.is_empty() {
-                let warnings: Vec<Element<Message>> = preview
-                    .warnings
-                    .iter()
-                    .map(|warning| text(warning).size(10).color(theme::queued()).into())
-                    .collect();
-                results = results.push(text(i18n::t("Warnings")).size(10).color(dim));
-                results = results.push(
-                    container(scrollable(WidgetColumn::with_children(warnings).spacing(1)))
-                        .height(Length::Fixed(80.0)),
-                );
+            for error in &outcome.errors {
+                notes = notes.push(text(error).size(10).color(theme::error()));
             }
-        } else if !settings.import_loading {
-            results = results.push(
-                text(i18n::t("Run the preview to see what the import would add."))
-                    .size(11)
-                    .color(dim),
-            );
+            // The outcome repeats the source warnings; only the new ones
+            // (a selection outside the source) are worth a second line.
+            for warning in &outcome.warnings {
+                if !state.warnings.contains(warning) {
+                    notes = notes.push(text(warning).size(10).color(theme::queued()));
+                }
+            }
+        }
+        for warning in &state.warnings {
+            notes = notes.push(text(warning).size(10).color(theme::queued()));
         }
 
-        row![
-            panel,
-            container(results)
-                .padding([0, 12])
-                .width(Length::Fill)
-                .height(Length::Fill),
+        column![
+            source_card,
+            filters,
+            error_line,
+            container(scrollable(list))
+                .height(Length::Fill)
+                .width(Length::Fill),
+            pager,
+            row![
+                text(summary).size(10).color(dim),
+                horizontal_space(),
+                action_button(
+                    i18n::t("Select all matching"),
+                    Message::ImportSelectFiltered,
+                    filtered > 0,
+                ),
+                action_button(
+                    i18n::t("Clear selection"),
+                    Message::ImportClearSelection,
+                    selected > 0,
+                ),
+                action_button(
+                    i18n::t("Import paused"),
+                    Message::ImportRun,
+                    connected && !state.running && selected > 0,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            container(scrollable(notes)).height(Length::Fixed(90.0)),
         ]
-        .spacing(12)
+        .spacing(8)
+        .padding([10, 14])
+        .width(Length::Fill)
         .height(Length::Fill)
         .into()
     }
@@ -6018,20 +6260,22 @@ impl App {
     }
 
     fn main_view(&self) -> Element<'_, Message> {
-        row![
-            self.sidebar_view(),
-            column![
+        let content: Element<Message> = match self.view {
+            View::Torrents => column![
                 self.toolbar_view(),
                 self.select_all_hint(),
                 self.table_view(),
                 self.details_panel()
             ]
             .width(Length::Fill)
-            .height(Length::Fill),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+            .height(Length::Fill)
+            .into(),
+            View::Import => self.import_view(),
+        };
+        row![self.sidebar_view(), content]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn table_view(&self) -> Element<'_, Message> {
@@ -6271,6 +6515,17 @@ impl App {
         };
         let bottom: Element<Message> = WidgetColumn::with_children(vec![
             disks_line,
+            icon_nav(
+                expanded,
+                glyph::FOLDER_OPEN,
+                if self.view == View::Import {
+                    theme::primary()
+                } else {
+                    theme::text_secondary()
+                },
+                i18n::t("Import"),
+                Message::ShowView(View::Import),
+            ),
             icon_nav(
                 expanded,
                 glyph::SETTINGS,
@@ -8210,6 +8465,16 @@ fn main() -> iced::Result {
         }
     }
     result
+}
+
+/// The host of an announce URL, for the tracker column and filter preview.
+fn announce_host(url: &str) -> String {
+    url.split_once("://")
+        .map_or(url, |(_scheme, rest)| rest)
+        .split(['/', '?'])
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn import_size(bytes: u64) -> String {

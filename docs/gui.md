@@ -43,21 +43,33 @@ hozzáadható; a save path ilyenkor a mező aktuális értéke.
 
 ## Import (másik kliensből)
 
-Beállítások → **Importálás**. A forrás jelenleg a Deluge: a daemon hostján
-lévő `state/` könyvtár (pl. `/var/lib/deluge/.config/deluge/state`); a
-plugin-config könyvtár üresen hagyva a `state/` mellett keresendő.
+A bal oldali sáv **Importálás** pontja egy önálló, teljes szélességű oldalt
+nyit; a forrás jelenleg a Deluge (a daemon hostján lévő `state/` könyvtár, pl.
+`/var/lib/deluged/config/state`). A plugin-config könyvtár üresen hagyva a
+`state/` mellett keresendő. A forrásillesztő (`ferrent_import::Source`) miatt
+a következő kliensek (Transmission, uTorrent, qBittorrent) új adapterként
+kerülnek be, a felület és az RPC változatlan marad.
 
-1. **Előnézet** — csak olvas: hány torrent van, mennyi van már meg (info-hash
-   szerint), milyen címkéket deklarál a forrás, és milyen figyelmeztetéseket ad
-   (pl. nem ezen a hoston lévő autoadd útvonalak).
-2. **Importálás szüneteltetve** — a hiányzó címkéket létrehozza, a torrenteket
-   **paused** állapotban adja hozzá; a meglévőket kihagyja. Az eredmény
-   torrentenként: hozzáadva / kihagyva / hiba.
+1. **Előnézet** — csak olvas. A találatok táblában jelennek meg: név, méret,
+   címke, **mentési út** és tracker-host, illetve hogy a daemonban már megvan-e.
+   A mentési utat és a resume blobot a Deluge `state/torrents.fastresume`
+   fájljából olvassa, ezért az import a valódi mappába kerül, és a meglévő
+   adatot nem kell újraellenőrizni.
+2. **Szűrés** — név-regex, tracker-regex, mentési út (a valós értékek
+   legördülője), címke, és „Csak ami még nincs meg”. A szűrők a teljes
+   jelöltlistán futnak, laptól függetlenül; a tábla 100 soros ablakokban
+   lapoz.
+3. **Kijelölés** — soronkénti pipa, vagy **Összes találat kijelölése**
+   (a szűrőnek megfelelő összeset), illetve **Kijelölés törlése**.
+4. **Importálás szüneteltetve** — csak a kijelölt info-hash-eket adja hozzá,
+   a hiányzó címkéket létrehozza, a torrenteket **paused** állapotban tartja;
+   a meglévőket kihagyja. Az eredmény torrentenként: hozzáadva / kihagyva /
+   hiba, a forrás figyelmeztetései alatta.
 
 A művelet ismételhető (idempotens), és ugyanazt a kódot használja, mint a
 `ferrent-cli import-deluge`; a részletek: `docs/deluge-migration.md`.
 
-![Import fül](images/import-tab.png)
+![Import oldal](images/import-page.png)
 
 ![A tábla az import után](images/import-paused-table.png)
 

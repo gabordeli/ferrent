@@ -553,12 +553,15 @@ impl Ferrent for FerrentService {
         } else {
             TorrentSource::Metainfo(request.metainfo.clone())
         };
+        // A blob from the source client makes libtorrent trust the existing
+        // payload instead of hashing it again.
+        let resume_data = (!request.resume_data.is_empty()).then(|| request.resume_data.clone());
         let spec = AddTorrent {
             name: request.name,
             total_bytes,
             source,
             save_path,
-            resume_data: None,
+            resume_data: resume_data.clone(),
         };
         let name = spec.name.clone();
         let match_name = name.clone();
@@ -598,7 +601,7 @@ impl Ferrent for FerrentService {
                 name: name.clone(),
                 save_path: save_path.clone(),
                 metainfo,
-                resume_data: None,
+                resume_data,
                 paused_by_user: false,
                 label: None,
             };
@@ -638,7 +641,12 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<ImportPreviewResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let request = request.into_inner();
-        let report = import_report(&request.source, &request.state_dir, &request.config_dir)?;
+        let report = import_report(
+            &request.source,
+            &request.state_dir,
+            &request.config_dir,
+            &request.options,
+        )?;
         let present: std::collections::BTreeSet<String> = {
             let engine = self.state.engine.lock().expect("engine mutex poisoned");
             engine
@@ -660,6 +668,8 @@ impl Ferrent for FerrentService {
                 total_bytes: torrent.total_bytes,
                 label: torrent.label.clone().unwrap_or_default(),
                 already_present,
+                save_path: torrent.save_path.clone().unwrap_or_default(),
+                trackers: torrent.trackers.clone(),
             });
         }
         Ok(Response::new(ImportPreviewResponse {
@@ -682,12 +692,25 @@ impl Ferrent for FerrentService {
         self.state.auth.check(request.metadata())?;
         let metadata = request.metadata().clone();
         let request = request.into_inner();
-        let report = import_report(&request.source, &request.state_dir, &request.config_dir)?;
+        let report = import_report(
+            &request.source,
+            &request.state_dir,
+            &request.config_dir,
+            &request.options,
+        )?;
         let mut warnings = report.warnings.clone();
         let mut outcomes = Vec::with_capacity(report.torrents.len());
         let mut added = 0u32;
         let mut skipped = 0u32;
         let mut failed = 0u32;
+        // An empty selection imports everything, which keeps the old callers
+        // working; the GUI sends exactly the rows the user ticked.
+        let selected: std::collections::BTreeSet<String> = request
+            .info_hashes
+            .iter()
+            .map(|hash| hash.to_ascii_lowercase())
+            .collect();
+        let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         // A torrent can only be added under an existing label, so the
         // declared ones are created first (AlreadyExists is fine).
@@ -708,6 +731,11 @@ impl Ferrent for FerrentService {
         }
 
         for torrent in report.torrents {
+            let hash = torrent.info_hash.to_ascii_lowercase();
+            if !selected.is_empty() && !selected.contains(&hash) {
+                continue;
+            }
+            matched.insert(hash);
             let outcome = |status: &str, detail: &str| ImportOutcome {
                 name: torrent.name.clone(),
                 info_hash: torrent.info_hash.clone(),
@@ -725,11 +753,12 @@ impl Ferrent for FerrentService {
             let mut add = Request::new(AddTorrentRequest {
                 name: torrent.name.clone(),
                 metainfo,
-                save_path: String::new(),
+                save_path: torrent.save_path.clone().unwrap_or_default(),
                 total_bytes: torrent.total_bytes,
                 label: torrent.label.clone().unwrap_or_default(),
                 magnet: String::new(),
                 sequential: false,
+                resume_data: torrent.resume_data.clone().unwrap_or_default(),
             });
             *add.metadata_mut() = metadata.clone();
             match self.add_torrent(add).await {
@@ -755,6 +784,12 @@ impl Ferrent for FerrentService {
                     outcomes.push(outcome("error", &error.to_string()));
                 }
             }
+        }
+        if !selected.is_empty() && matched.len() < selected.len() {
+            warnings.push(format!(
+                "{} selected torrents are not in the source",
+                selected.len() - matched.len()
+            ));
         }
 
         Ok(Response::new(ImportStateResponse {
@@ -2186,27 +2221,24 @@ fn import_report(
     source: &str,
     state_dir: &str,
     config_dir: &str,
+    options: &std::collections::HashMap<String, String>,
 ) -> Result<ferrent_import::Report, Status> {
-    let source = if source.is_empty() { "deluge" } else { source };
-    if source != "deluge" {
-        return Err(Status::invalid_argument(format!(
-            "unsupported import source {source:?}"
-        )));
+    // The legacy fields win, and anything else the client sends (url, user,
+    // api_key, ...) rides along in the options map, so a new source is a new
+    // adapter rather than a new RPC field.
+    let mut options: std::collections::BTreeMap<String, String> = options
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if !state_dir.trim().is_empty() {
+        options.insert("state_dir".to_owned(), state_dir.to_owned());
     }
-    if state_dir.is_empty() {
-        return Err(Status::invalid_argument("state_dir is required"));
+    if !config_dir.trim().is_empty() {
+        options.insert("config_dir".to_owned(), config_dir.to_owned());
     }
-    let state = std::path::Path::new(state_dir);
-    let config = if config_dir.is_empty() {
-        ferrent_import::default_config_dir(state)
-    } else {
-        std::path::PathBuf::from(config_dir)
-    };
-    ferrent_import::scan(&ferrent_import::Options {
-        state_dir: state.to_path_buf(),
-        config_dir: config,
-    })
-    .map_err(Status::invalid_argument)
+    let source =
+        ferrent_import::build_source(source, &options).map_err(Status::invalid_argument)?;
+    source.scan().map_err(Status::invalid_argument)
 }
 
 #[cfg(test)]
@@ -2552,6 +2584,7 @@ staging = true
                 label: "Filmek".to_owned(),
                 magnet: String::new(),
                 sequential: false,
+                resume_data: Vec::new(),
             }))
             .await
             .expect("add")
@@ -2600,6 +2633,7 @@ staging = true
                 label: String::new(),
                 magnet: String::new(),
                 sequential: false,
+                resume_data: Vec::new(),
             }))
             .await
             .expect_err("low disk");
@@ -2635,6 +2669,7 @@ staging = true
                 label: String::new(),
                 magnet: String::new(),
                 sequential: false,
+                resume_data: Vec::new(),
             }))
             .await
             .expect_err("payload does not fit");

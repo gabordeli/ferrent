@@ -176,13 +176,20 @@ pub fn print_page_note(first: u32, last: u32, total: u32) {
 /// Dry-run listing for `import-deluge`: torrents first, then the plugin
 /// configs the import would carry over.
 pub fn print_import_table(report: &ferrent_import::Report) {
-    outln!("{:>9}  {:<44}  {:<10}  INFOHASH", "SIZE", "NAME", "LABEL");
+    outln!(
+        "{:>9}  {:<40}  {:<10}  {:<32}  INFOHASH",
+        "SIZE",
+        "NAME",
+        "LABEL",
+        "SAVE PATH"
+    );
     for torrent in &report.torrents {
         outln!(
-            "{:>9}  {:<44}  {:<10}  {}",
+            "{:>9}  {:<40}  {:<10}  {:<32}  {}",
             format_bytes(torrent.total_bytes),
-            short(&torrent.name, 44),
+            short(&torrent.name, 40),
             torrent.label.as_deref().unwrap_or("—"),
+            short(torrent.save_path.as_deref().unwrap_or("—"), 32),
             torrent.info_hash
         );
     }
@@ -191,7 +198,17 @@ pub fn print_import_table(report: &ferrent_import::Report) {
         .iter()
         .filter(|torrent| torrent.label.is_some())
         .count();
-    outln!("\n{} torrents, {labelled} labelled", report.torrents.len());
+    // Without the resume state the add falls back to the daemon's download
+    // directory, which is worth seeing before the import runs.
+    let placed = report
+        .torrents
+        .iter()
+        .filter(|torrent| torrent.save_path.is_some())
+        .count();
+    outln!(
+        "\n{} torrents, {labelled} labelled, {placed} with a save path",
+        report.torrents.len()
+    );
 
     let plugins = &report.plugins;
     outln!(

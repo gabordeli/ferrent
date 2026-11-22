@@ -8,11 +8,14 @@
 //! commit can never disagree.
 
 mod bencode;
+mod sources;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
+
+pub use sources::{Deluge, Source, build as build_source};
 
 /// One torrent found in the state directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +25,14 @@ pub struct Found {
     pub name: String,
     pub total_bytes: u64,
     pub label: Option<String>,
+    /// Announce URLs from the metainfo, for the import filters.
+    pub trackers: Vec<String>,
+    /// Deluge's save path for this torrent, from `torrents.fastresume`.
+    /// `None` when the resume state has no entry (a fresh or broken torrent).
+    pub save_path: Option<String>,
+    /// libtorrent resume data, so an import does not have to recheck the
+    /// already-downloaded payload.
+    pub resume_data: Option<Vec<u8>>,
 }
 
 /// A Deluge AutoAdd watch directory.
@@ -123,6 +134,9 @@ pub fn scan(options: &Options) -> Result<Report, String> {
                         info_hash: metainfo.info_hash,
                         name: metainfo.name,
                         total_bytes: metainfo.total_bytes,
+                        trackers: metainfo.trackers,
+                        save_path: None,
+                        resume_data: None,
                     });
                 }
                 Err(error) => warnings.push(format!("{}: {error}", entry.display())),
@@ -131,6 +145,20 @@ pub fn scan(options: &Options) -> Result<Report, String> {
         }
     }
     torrents.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut resumes = read_fastresume(&options.state_dir, &mut warnings);
+    for torrent in &mut torrents {
+        if let Some(resume) = resumes.remove(&torrent.info_hash) {
+            torrent.save_path = resume.save_path;
+            torrent.resume_data = Some(resume.data);
+        }
+    }
+    if !resumes.is_empty() {
+        warnings.push(format!(
+            "{} fastresume entries match no torrent in the state directory",
+            resumes.len()
+        ));
+    }
 
     let known: BTreeSet<&String> = plugins.labels.iter().map(|label| &label.name).collect();
     for (hash, label) in &plugins.assignments {
@@ -174,6 +202,65 @@ fn read_dir(dir: &Path, warnings: &mut Vec<String>) -> Vec<PathBuf> {
             Vec::new()
         }
     }
+}
+
+/// One torrent's resume state as far as the import needs it.
+struct Resume {
+    save_path: Option<String>,
+    data: Vec<u8>,
+}
+
+/// Reads `state/torrents.fastresume`: info-hash → libtorrent resume blob.
+///
+/// The `.torrent` files under `state/` carry no save path; the resume blob
+/// does, and it is also what lets libtorrent pick up the finished payload
+/// without rechecking it. Without this every imported torrent lands in the
+/// session download directory and its data looks missing.
+fn read_fastresume(state_dir: &Path, warnings: &mut Vec<String>) -> BTreeMap<String, Resume> {
+    let path = state_dir.join("torrents.fastresume");
+    let Ok(data) = std::fs::read(&path) else {
+        return BTreeMap::new();
+    };
+    let value = match bencode::parse_value(&data) {
+        Ok(value) => value,
+        Err(error) => {
+            warnings.push(format!("{}: {error}", path.display()));
+            return BTreeMap::new();
+        }
+    };
+    let bencode::Value::Dict(entries) = value else {
+        warnings.push(format!("{}: not a dictionary", path.display()));
+        return BTreeMap::new();
+    };
+    let mut out = BTreeMap::new();
+    for (hash, value) in entries {
+        let bencode::Value::Bytes(blob) = value else {
+            continue;
+        };
+        let save_path = match bencode::parse_value(&blob) {
+            Ok(resume) => resume
+                .get(b"save_path")
+                .and_then(bencode::Value::as_bytes)
+                .map(|path| String::from_utf8_lossy(path).into_owned())
+                .filter(|path| !path.trim().is_empty()),
+            Err(error) => {
+                warnings.push(format!(
+                    "{}: {}: {error}",
+                    path.display(),
+                    String::from_utf8_lossy(&hash)
+                ));
+                None
+            }
+        };
+        out.insert(
+            String::from_utf8_lossy(&hash).to_ascii_lowercase(),
+            Resume {
+                save_path,
+                data: blob,
+            },
+        );
+    }
+    out
 }
 
 fn read_plugins(config_dir: &Path, warnings: &mut Vec<String>) -> Plugins {
@@ -323,6 +410,41 @@ mod tests {
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("/srv/downloads/incoming"))
+        );
+    }
+
+    #[test]
+    fn the_fastresume_carries_the_save_path_and_the_resume_blob() {
+        let report = scan(&fixture()).expect("scan");
+        let alpha = report
+            .torrents
+            .iter()
+            .find(|torrent| torrent.name == "alpha.bin")
+            .expect("alpha");
+        assert_eq!(alpha.save_path.as_deref(), Some("/srv/movies"));
+        assert!(
+            alpha
+                .resume_data
+                .as_ref()
+                .is_some_and(|data| !data.is_empty()),
+            "the resume blob is carried so an import skips the recheck"
+        );
+
+        let beta = report
+            .torrents
+            .iter()
+            .find(|torrent| torrent.name == "beta.bin")
+            .expect("beta");
+        assert_eq!(beta.save_path, None, "no resume entry means no path");
+        assert_eq!(beta.resume_data, None);
+
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("fastresume entries match no torrent")),
+            "an orphaned resume entry is reported: {:?}",
+            report.warnings
         );
     }
 
