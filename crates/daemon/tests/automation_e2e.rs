@@ -41,8 +41,13 @@ impl TorrentEngine for SharedEngine {
         self.lock().add_torrent(spec)
     }
 
-    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
-        self.lock().restore_torrent(id, spec)
+    fn restore_torrent(
+        &mut self,
+        id: TorrentId,
+        spec: AddTorrent,
+        paused: bool,
+    ) -> Result<(), EngineError> {
+        self.lock().restore_torrent(id, spec, paused)
     }
 
     fn request_resume_data(&mut self, id: TorrentId) -> Result<(), EngineError> {
@@ -185,7 +190,7 @@ impl Harness {
             let id = torrent.id;
             mock.lock()
                 .expect("engine")
-                .restore_torrent(id, torrent.clone().into_add_torrent())
+                .restore_torrent(id, torrent.clone().into_add_torrent(), true)
                 .expect("restore");
             if index % 128 == 127 {
                 // Keep the mirror task draining the mock's 256-event channel.

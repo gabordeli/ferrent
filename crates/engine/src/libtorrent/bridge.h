@@ -28,7 +28,8 @@ class Session {
     FfiAddResult add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
                              rust::Slice<const uint8_t> resume_data);
     bool restore_torrent(uint64_t id, rust::Slice<const uint8_t> metainfo,
-                         rust::Str save_path, rust::Slice<const uint8_t> resume_data);
+                         rust::Str save_path, rust::Slice<const uint8_t> resume_data,
+                         bool paused);
     bool request_resume(uint64_t id);
     rust::Vec<uint8_t> take_resume(uint64_t id);
     bool pause(uint64_t id);
@@ -76,7 +77,8 @@ class Session {
     FfiAddResult add_impl(std::optional<uint64_t> requested_id,
                           rust::Slice<const uint8_t> metainfo,
                           rust::Str save_path,
-                          rust::Slice<const uint8_t> resume_data);
+                          rust::Slice<const uint8_t> resume_data,
+                          bool paused);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

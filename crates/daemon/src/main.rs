@@ -137,15 +137,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     for torrent in persisted {
         let id = torrent.id;
         let paused_by_user = torrent.paused_by_user;
-        if let Err(error) = engine.restore_torrent(id, torrent.into_add_torrent()) {
+        // The add itself carries the flag: pausing right after the add races
+        // with the session's queue and the pause can be lost (FERRENT-81).
+        if let Err(error) = engine.restore_torrent(id, torrent.into_add_torrent(), paused_by_user) {
             eprintln!("failed to restore torrent {id}: {error}");
             continue;
         }
         if paused_by_user {
             control.set_user(id, true);
-            if let Err(error) = ferrent_daemon::rpc::pause_settled(&mut *engine, id) {
-                eprintln!("failed to pause restored torrent {id}: {error}");
-            }
         }
     }
 

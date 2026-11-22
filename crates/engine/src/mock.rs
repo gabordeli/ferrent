@@ -171,7 +171,12 @@ impl TorrentEngine for MockEngine {
         Ok(id)
     }
 
-    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
+    fn restore_torrent(
+        &mut self,
+        id: TorrentId,
+        spec: AddTorrent,
+        paused: bool,
+    ) -> Result<(), EngineError> {
         if self.torrents.contains_key(&id) {
             return Err(EngineError::AlreadyExists { id });
         }
@@ -179,7 +184,10 @@ impl TorrentEngine for MockEngine {
         if let Some(existing) = self.infohash_index.get(&infohash) {
             return Err(EngineError::AlreadyExists { id: *existing });
         }
-        let status = status_from_spec(id, spec, infohash.clone());
+        let mut status = status_from_spec(id, spec, infohash.clone());
+        if paused {
+            status.state = TorrentState::Paused;
+        }
         self.next_id = self.next_id.max(id + 1);
         self.infohash_index.insert(infohash, id);
         self.torrents.insert(id, status.clone());

@@ -37,6 +37,7 @@ enum Command {
     Restore {
         id: TorrentId,
         spec: AddTorrent,
+        paused: bool,
         reply: Sender<Result<(), EngineError>>,
     },
     RequestResume {
@@ -204,9 +205,19 @@ impl TorrentEngine for LibtorrentEngine {
         Self::recv(response)
     }
 
-    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError> {
+    fn restore_torrent(
+        &mut self,
+        id: TorrentId,
+        spec: AddTorrent,
+        paused: bool,
+    ) -> Result<(), EngineError> {
         let (reply, response) = mpsc::channel();
-        self.send(Command::Restore { id, spec, reply })?;
+        self.send(Command::Restore {
+            id,
+            spec,
+            paused,
+            reply,
+        })?;
         Self::recv(response)
     }
 
@@ -500,7 +511,12 @@ fn run_worker(
                 let _ = events.send(EngineEvent::Added(status));
                 let _ = reply.send(Ok(id));
             }
-            Ok(Command::Restore { id, spec, reply }) => {
+            Ok(Command::Restore {
+                id,
+                spec,
+                paused,
+                reply,
+            }) => {
                 let metainfo = match &spec.source {
                     TorrentSource::Metainfo(bytes) => bytes.clone(),
                     TorrentSource::Magnet(_) => {
@@ -515,7 +531,7 @@ fn run_worker(
                 let resume_data = spec.resume_data.as_deref().unwrap_or(&[]);
                 if session
                     .pin_mut()
-                    .restore_torrent(id, &metainfo, &save_path, resume_data)
+                    .restore_torrent(id, &metainfo, &save_path, resume_data, paused)
                 {
                     let status = convert_status(session.status(id));
                     if status.progress >= 0.999 {
@@ -1216,6 +1232,7 @@ mod tests {
                     save_path: dir.clone(),
                     resume_data: Some(resume),
                 },
+                false,
             )
             .expect("restore torrent");
         std::thread::sleep(Duration::from_millis(500));

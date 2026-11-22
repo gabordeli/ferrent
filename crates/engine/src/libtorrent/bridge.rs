@@ -103,6 +103,7 @@ pub(crate) mod ffi {
             metainfo: &[u8],
             save_path: &str,
             resume_data: &[u8],
+            paused: bool,
         ) -> bool;
         fn request_resume(self: Pin<&mut Session>, id: u64) -> bool;
         fn take_resume(self: Pin<&mut Session>, id: u64) -> Vec<u8>;

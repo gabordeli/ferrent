@@ -213,7 +213,7 @@ Session::~Session() = default;
 
 FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
                                rust::Slice<const uint8_t> metainfo, rust::Str save_path,
-                               rust::Slice<const uint8_t> resume_data) {
+                               rust::Slice<const uint8_t> resume_data, bool paused) {
     impl_->last_error.clear();
 
     lt::error_code ec;
@@ -256,9 +256,17 @@ FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
             params.trackers.push_back(tracker);
         }
     }
-    // Auto-managed torrents are the only ones libtorrent keeps a queue
-    // position for, which is what the client's up/down buttons move.
-    params.flags |= lt::torrent_flags::auto_managed;
+    if (paused) {
+        // A restored torrent must come up paused without a follow-up pause call:
+        // setting the flag after the add races with the session's queue and the
+        // pause can be lost (FERRENT-81).
+        params.flags |= lt::torrent_flags::paused;
+        params.flags &= ~lt::torrent_flags::auto_managed;
+    } else {
+        // Auto-managed torrents are the only ones libtorrent keeps a queue
+        // position for, which is what the client's up/down buttons move.
+        params.flags |= lt::torrent_flags::auto_managed;
+    }
     if (impl_->seed_mode) {
         params.flags |= lt::torrent_flags::seed_mode;
     }
@@ -290,12 +298,13 @@ FfiAddResult Session::add_impl(std::optional<uint64_t> requested_id,
 
 FfiAddResult Session::add_torrent(rust::Slice<const uint8_t> metainfo, rust::Str save_path,
                                   rust::Slice<const uint8_t> resume_data) {
-    return add_impl(std::nullopt, metainfo, save_path, resume_data);
+    return add_impl(std::nullopt, metainfo, save_path, resume_data, false);
 }
 
 bool Session::restore_torrent(uint64_t id, rust::Slice<const uint8_t> metainfo,
-                              rust::Str save_path, rust::Slice<const uint8_t> resume_data) {
-    return add_impl(id, metainfo, save_path, resume_data).ok;
+                              rust::Str save_path, rust::Slice<const uint8_t> resume_data,
+                              bool paused) {
+    return add_impl(id, metainfo, save_path, resume_data, paused).ok;
 }
 
 bool Session::request_resume(uint64_t id) {

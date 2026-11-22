@@ -19,7 +19,12 @@ pub trait TorrentEngine: Send + 'static {
     fn add_torrent(&mut self, spec: AddTorrent) -> Result<TorrentId, EngineError>;
 
     /// Restores a torrent with a stable id (used by the daemon on startup).
-    fn restore_torrent(&mut self, id: TorrentId, spec: AddTorrent) -> Result<(), EngineError>;
+    fn restore_torrent(
+        &mut self,
+        id: TorrentId,
+        spec: AddTorrent,
+        paused: bool,
+    ) -> Result<(), EngineError>;
 
     /// Requests fastresume data for a torrent.
     fn request_resume_data(&mut self, id: TorrentId) -> Result<(), EngineError>;
