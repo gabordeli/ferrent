@@ -88,6 +88,10 @@ service Ferrent {
   rpc SendTestNotification(SendTestNotificationRequest) returns (SendTestNotificationResponse);
   // Returns the storage payload: filesystems, zones and free space.
   rpc GetDisks(GetDisksRequest) returns (GetDisksResponse);
+  // Reads another client's state directory without changing anything.
+  rpc ImportPreview(ImportPreviewRequest) returns (ImportPreviewResponse);
+  // Adds the torrents from another client's state, paused by default.
+  rpc ImportState(ImportStateRequest) returns (ImportStateResponse);
 }
 
 message GetNotificationStatusRequest {}
@@ -841,4 +845,57 @@ message GetTorrentTrackersRequest {
 
 message GetTorrentTrackersResponse {
   repeated TorrentTracker trackers = 1;
+}
+
+// Reads another client's state directory; `source` is "deluge" for now.
+message ImportPreviewRequest {
+  string source = 1;
+  // The client's state directory on the daemon host (e.g. Deluge's state/).
+  string state_dir = 2;
+  // Where the plugin configs live; empty means "next to state/".
+  string config_dir = 3;
+}
+
+message ImportTorrentEntry {
+  string name = 1;
+  string info_hash = 2;
+  uint64 total_bytes = 3;
+  // Label the source client assigned, when one was found.
+  string label = 4;
+  // True when the info hash is already in the daemon.
+  bool already_present = 5;
+}
+
+message ImportPreviewResponse {
+  repeated ImportTorrentEntry torrents = 1;
+  // Labels the source declares; the commit creates the missing ones.
+  repeated string labels = 2;
+  repeated string warnings = 3;
+  uint32 present = 4;
+}
+
+message ImportStateRequest {
+  string source = 1;
+  string state_dir = 2;
+  string config_dir = 3;
+  // Add the torrents paused (default false for API compatibility; the GUI
+  // sends true).
+  bool paused = 4;
+}
+
+message ImportOutcome {
+  string name = 1;
+  string info_hash = 2;
+  // "added", "skipped" or "error".
+  string status = 3;
+  // Error text for the "error" status.
+  string detail = 4;
+}
+
+message ImportStateResponse {
+  repeated ImportOutcome outcomes = 1;
+  uint32 added = 2;
+  uint32 skipped = 3;
+  uint32 failed = 4;
+  repeated string warnings = 5;
 }

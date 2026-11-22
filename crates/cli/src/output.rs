@@ -175,7 +175,7 @@ pub fn print_page_note(first: u32, last: u32, total: u32) {
 
 /// Dry-run listing for `import-deluge`: torrents first, then the plugin
 /// configs the import would carry over.
-pub fn print_import_table(report: &crate::import_deluge::Report) {
+pub fn print_import_table(report: &ferrent_import::Report) {
     outln!("{:>9}  {:<44}  {:<10}  INFOHASH", "SIZE", "NAME", "LABEL");
     for torrent in &report.torrents {
         outln!(

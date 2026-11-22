@@ -24,20 +24,22 @@ use ferrent_protocol::v1::{
     GetTorrentFilesRequest, GetTorrentFilesResponse, GetTorrentPeersRequest,
     GetTorrentPeersResponse, GetTorrentRequest, GetTorrentResponse, GetTorrentTrackersRequest,
     GetTorrentTrackersResponse, GetWebSeedsRequest, GetWebSeedsResponse, HookRun as ProtoHookRun,
-    Label as ProtoLabel, LabelEntry, LabelResponse, ListLabelsRequest, ListLabelsResponse,
-    ListTorrentsRequest, ListTorrentsResponse, MoveTorrentRequest, MoveTorrentResponse,
-    PauseTorrentRequest, PauseTorrentResponse, PreviewRssFeedRequest, PreviewRssFeedResponse,
-    Progress, QueueDirection as ProtoQueueDirection, RecheckTorrentRequest, RecheckTorrentResponse,
-    RefreshBlocklistRequest, RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse,
-    RemoveTrackerRequest, RemoveTrackerResponse, Removed, RenameTorrentFileRequest,
-    RenameTorrentFileResponse, ResumeTorrentRequest, ResumeTorrentResponse, RssPreviewItem,
-    ScanAutoAddRequest, ScanAutoAddResponse, SendTestNotificationRequest,
-    SendTestNotificationResponse, SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest,
-    SetFilePrioritiesResponse, SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest,
-    SetSuperSeedingResponse, SetTorrentLabelRequest, SetTorrentLabelResponse,
-    SetTorrentLimitsRequest, SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse,
-    SortField, StateChanged, Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState,
-    TorrentTracker, UpdateLabelRequest, WatchRequest, WatchResponse,
+    ImportOutcome, ImportPreviewRequest, ImportPreviewResponse, ImportStateRequest,
+    ImportStateResponse, ImportTorrentEntry, Label as ProtoLabel, LabelEntry, LabelResponse,
+    ListLabelsRequest, ListLabelsResponse, ListTorrentsRequest, ListTorrentsResponse,
+    MoveTorrentRequest, MoveTorrentResponse, PauseTorrentRequest, PauseTorrentResponse,
+    PreviewRssFeedRequest, PreviewRssFeedResponse, Progress, QueueDirection as ProtoQueueDirection,
+    RecheckTorrentRequest, RecheckTorrentResponse, RefreshBlocklistRequest,
+    RefreshBlocklistResponse, RemoveTorrentRequest, RemoveTorrentResponse, RemoveTrackerRequest,
+    RemoveTrackerResponse, Removed, RenameTorrentFileRequest, RenameTorrentFileResponse,
+    ResumeTorrentRequest, ResumeTorrentResponse, RssPreviewItem, ScanAutoAddRequest,
+    ScanAutoAddResponse, SendTestNotificationRequest, SendTestNotificationResponse,
+    SetConfigRequest, SetConfigResponse, SetFilePrioritiesRequest, SetFilePrioritiesResponse,
+    SetSequentialRequest, SetSequentialResponse, SetSuperSeedingRequest, SetSuperSeedingResponse,
+    SetTorrentLabelRequest, SetTorrentLabelResponse, SetTorrentLimitsRequest,
+    SetTorrentLimitsResponse, SetWebSeedsRequest, SetWebSeedsResponse, SortField, StateChanged,
+    Torrent, TorrentFile, TorrentFinished, TorrentPeer, TorrentState, TorrentTracker,
+    UpdateLabelRequest, WatchRequest, WatchResponse,
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -200,7 +202,8 @@ impl AppState {
             return Ok(0);
         }
         let engine = Arc::clone(&self.engine);
-        tokio::task::spawn_blocking(move || {
+        let mirror_ids = changed.clone();
+        let count = tokio::task::spawn_blocking(move || {
             let mut engine = engine.lock().expect("engine mutex poisoned");
             if active {
                 engine.pause_many(&changed)
@@ -209,7 +212,28 @@ impl AppState {
             }
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))
+        .map_err(|error| Status::internal(error.to_string()))?;
+        self.refresh_mirror(mirror_ids).await?;
+        Ok(count)
+    }
+
+    /// Copies the engine's current status for `ids` into the mirror. Pause,
+    /// resume and the flag setters change the engine only; without this the
+    /// table keeps the pre-change state.
+    pub async fn refresh_mirror(&self, ids: Vec<TorrentId>) -> Result<(), Status> {
+        let engine = Arc::clone(&self.engine);
+        let statuses = tokio::task::spawn_blocking(move || {
+            let engine = engine.lock().expect("engine mutex poisoned");
+            ids.into_iter()
+                .filter_map(|id| engine.status(id).ok())
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?;
+        for status in statuses {
+            self.mirror.apply(EngineEvent::Added(status));
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -444,6 +468,37 @@ impl FerrentService {
         self.apply_limits_many(&ids).await?;
         Ok(matched.len())
     }
+
+    /// Pauses a torrent the import just added and records the user intent.
+    async fn pause_imported(&self, id: TorrentId) -> Result<(), Status> {
+        let (changed, paused) = {
+            let mut control = self
+                .state
+                .control
+                .lock()
+                .expect("pause control mutex poisoned");
+            let changed = control.set_user(id, true);
+            (changed, control.is_paused(id))
+        };
+        if changed && paused {
+            if let Err(error) = self.with_engine(move |engine| engine.pause(id)).await {
+                self.state
+                    .control
+                    .lock()
+                    .expect("pause control mutex poisoned")
+                    .set_user(id, false);
+                return Err(error);
+            }
+        }
+        self.persist(move |store| persist::save_paused(store, id, true))
+            .await?;
+        self.refresh_mirror(vec![id]).await?;
+        Ok(())
+    }
+
+    async fn refresh_mirror(&self, ids: Vec<TorrentId>) -> Result<(), Status> {
+        self.state.refresh_mirror(ids).await
+    }
 }
 
 #[tonic::async_trait]
@@ -574,6 +629,140 @@ impl Ferrent for FerrentService {
         Ok(Response::new(AddTorrentResponse { id, duplicate }))
     }
 
+    async fn import_preview(
+        &self,
+        request: Request<ImportPreviewRequest>,
+    ) -> Result<Response<ImportPreviewResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let request = request.into_inner();
+        let report = import_report(&request.source, &request.state_dir, &request.config_dir)?;
+        let present: std::collections::BTreeSet<String> = {
+            let engine = self.state.engine.lock().expect("engine mutex poisoned");
+            engine
+                .list()
+                .into_iter()
+                .map(|status| status.infohash.to_ascii_lowercase())
+                .collect()
+        };
+        let mut present_count = 0u32;
+        let mut torrents = Vec::with_capacity(report.torrents.len());
+        for torrent in &report.torrents {
+            let already_present = present.contains(&torrent.info_hash.to_ascii_lowercase());
+            if already_present {
+                present_count += 1;
+            }
+            torrents.push(ImportTorrentEntry {
+                name: torrent.name.clone(),
+                info_hash: torrent.info_hash.clone(),
+                total_bytes: torrent.total_bytes,
+                label: torrent.label.clone().unwrap_or_default(),
+                already_present,
+            });
+        }
+        Ok(Response::new(ImportPreviewResponse {
+            torrents,
+            labels: report
+                .plugins
+                .labels
+                .iter()
+                .map(|label| label.name.clone())
+                .collect(),
+            warnings: report.warnings,
+            present: present_count,
+        }))
+    }
+
+    async fn import_state(
+        &self,
+        request: Request<ImportStateRequest>,
+    ) -> Result<Response<ImportStateResponse>, Status> {
+        self.state.auth.check(request.metadata())?;
+        let metadata = request.metadata().clone();
+        let request = request.into_inner();
+        let report = import_report(&request.source, &request.state_dir, &request.config_dir)?;
+        let mut warnings = report.warnings.clone();
+        let mut outcomes = Vec::with_capacity(report.torrents.len());
+        let mut added = 0u32;
+        let mut skipped = 0u32;
+        let mut failed = 0u32;
+
+        // A torrent can only be added under an existing label, so the
+        // declared ones are created first (AlreadyExists is fine).
+        for label in &report.plugins.labels {
+            let mut create = Request::new(CreateLabelRequest {
+                label: Some(ProtoLabel {
+                    name: label.name.clone(),
+                    color: label.color.clone(),
+                    ..ProtoLabel::default()
+                }),
+            });
+            *create.metadata_mut() = metadata.clone();
+            match self.create_label(create).await {
+                Ok(_) => {}
+                Err(error) if error.code() == tonic::Code::AlreadyExists => {}
+                Err(error) => warnings.push(format!("label {}: {error}", label.name)),
+            }
+        }
+
+        for torrent in report.torrents {
+            let outcome = |status: &str, detail: &str| ImportOutcome {
+                name: torrent.name.clone(),
+                info_hash: torrent.info_hash.clone(),
+                status: status.to_owned(),
+                detail: detail.to_owned(),
+            };
+            let metainfo = match std::fs::read(&torrent.path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    failed += 1;
+                    outcomes.push(outcome("error", &error.to_string()));
+                    continue;
+                }
+            };
+            let mut add = Request::new(AddTorrentRequest {
+                name: torrent.name.clone(),
+                metainfo,
+                save_path: String::new(),
+                total_bytes: torrent.total_bytes,
+                label: torrent.label.clone().unwrap_or_default(),
+                magnet: String::new(),
+                sequential: false,
+            });
+            *add.metadata_mut() = metadata.clone();
+            match self.add_torrent(add).await {
+                Ok(response) => {
+                    let response = response.into_inner();
+                    if response.duplicate {
+                        skipped += 1;
+                        outcomes.push(outcome("skipped", "already present"));
+                    } else {
+                        if request.paused {
+                            if let Err(error) = self.pause_imported(response.id).await {
+                                failed += 1;
+                                outcomes.push(outcome("error", &error.to_string()));
+                                continue;
+                            }
+                        }
+                        added += 1;
+                        outcomes.push(outcome("added", ""));
+                    }
+                }
+                Err(error) => {
+                    failed += 1;
+                    outcomes.push(outcome("error", &error.to_string()));
+                }
+            }
+        }
+
+        Ok(Response::new(ImportStateResponse {
+            outcomes,
+            added,
+            skipped,
+            failed,
+            warnings,
+        }))
+    }
+
     async fn pause_torrent(
         &self,
         request: Request<PauseTorrentRequest>,
@@ -601,6 +790,8 @@ impl Ferrent for FerrentService {
         }
         self.persist(move |store| persist::save_paused(store, id, true))
             .await?;
+        // The table is served from the mirror; the engine keeps the real state.
+        self.refresh_mirror(vec![id]).await?;
         Ok(Response::new(PauseTorrentResponse {}))
     }
 
@@ -624,6 +815,8 @@ impl Ferrent for FerrentService {
         }
         self.persist(move |store| persist::save_paused(store, id, false))
             .await?;
+        // The table is served from the mirror; the engine keeps the real state.
+        self.refresh_mirror(vec![id]).await?;
         Ok(Response::new(ResumeTorrentResponse {}))
     }
 
@@ -1960,6 +2153,33 @@ pub fn spawn_mirror(
     watch: broadcast::Sender<EngineEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_mirror(mirror, events, watch))
+}
+
+fn import_report(
+    source: &str,
+    state_dir: &str,
+    config_dir: &str,
+) -> Result<ferrent_import::Report, Status> {
+    let source = if source.is_empty() { "deluge" } else { source };
+    if source != "deluge" {
+        return Err(Status::invalid_argument(format!(
+            "unsupported import source {source:?}"
+        )));
+    }
+    if state_dir.is_empty() {
+        return Err(Status::invalid_argument("state_dir is required"));
+    }
+    let state = std::path::Path::new(state_dir);
+    let config = if config_dir.is_empty() {
+        ferrent_import::default_config_dir(state)
+    } else {
+        std::path::PathBuf::from(config_dir)
+    };
+    ferrent_import::scan(&ferrent_import::Options {
+        state_dir: state.to_path_buf(),
+        config_dir: config,
+    })
+    .map_err(Status::invalid_argument)
 }
 
 #[cfg(test)]

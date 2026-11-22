@@ -15,9 +15,10 @@ use ferrent_protocol::client::connect;
 use ferrent_protocol::v1::watch_response::Event as WatchEvent;
 use ferrent_protocol::v1::{
     AddTorrentRequest, CreateLabelRequest, DeleteLabelRequest, GetConfigRequest, GetTorrentRequest,
-    Label as ProtoLabel, ListLabelsRequest, ListTorrentsRequest, PauseTorrentRequest,
-    RemoveTorrentRequest, ResumeTorrentRequest, SetConfigRequest, SetFilePrioritiesRequest,
-    SetTorrentLabelRequest, SetTorrentLimitsRequest, SortField, TorrentState, WatchRequest,
+    ImportPreviewRequest, ImportStateRequest, Label as ProtoLabel, ListLabelsRequest,
+    ListTorrentsRequest, PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest,
+    SetConfigRequest, SetFilePrioritiesRequest, SetTorrentLabelRequest, SetTorrentLimitsRequest,
+    SortField, TorrentState, WatchRequest,
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -599,6 +600,99 @@ async fn an_unknown_enum_value_is_tolerated() {
         .expect("unknown enum values must not fail the call")
         .into_inner();
     assert_eq!(listed.total, 0);
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn deluge_import_previews_then_commits_paused() {
+    let server = start_server("secret").await;
+    let mut client = connect(&server.uri(), &server.tls.cert_pem, "secret")
+        .await
+        .expect("connect");
+
+    let state_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/deluge-state");
+    let state_dir = state_dir.display().to_string();
+    let preview_request = |state_dir: &str| ImportPreviewRequest {
+        source: "deluge".to_owned(),
+        state_dir: state_dir.to_owned(),
+        config_dir: String::new(),
+    };
+
+    let preview = client
+        .import_preview(preview_request(&state_dir))
+        .await
+        .expect("preview")
+        .into_inner();
+    assert_eq!(preview.torrents.len(), 2, "the fixture has two torrents");
+    assert_eq!(preview.present, 0);
+    assert!(preview.labels.iter().any(|label| label == "movies"));
+    assert!(preview.torrents.iter().any(|entry| entry.label == "movies"));
+
+    let imported = client
+        .import_state(ImportStateRequest {
+            source: "deluge".to_owned(),
+            state_dir: state_dir.clone(),
+            config_dir: String::new(),
+            paused: true,
+        })
+        .await
+        .expect("import")
+        .into_inner();
+    assert_eq!(imported.added, 2);
+    assert_eq!(imported.skipped, 0);
+    assert_eq!(imported.failed, 0);
+
+    // The same directory again: everything is deduplicated by info hash.
+    let again = client
+        .import_state(ImportStateRequest {
+            source: "deluge".to_owned(),
+            state_dir: state_dir.clone(),
+            config_dir: String::new(),
+            paused: true,
+        })
+        .await
+        .expect("second import")
+        .into_inner();
+    assert_eq!(again.added, 0);
+    assert_eq!(again.skipped, 2);
+    assert_eq!(again.failed, 0);
+
+    let list = client
+        .list_torrents(list_request())
+        .await
+        .expect("list")
+        .into_inner();
+    assert_eq!(list.torrents.len(), 2);
+    assert!(
+        list.torrents
+            .iter()
+            .all(|torrent| torrent.state == TorrentState::Paused as i32),
+        "the import adds the torrents paused"
+    );
+
+    // The mock engine's infohash is a synthetic hash of the metainfo, not the
+    // BitTorrent info hash, so the preview cannot match it here; libtorrent
+    // reports the real one. The dedupe itself is covered by the skips above.
+    let preview = client
+        .import_preview(preview_request(&state_dir))
+        .await
+        .expect("preview after import")
+        .into_inner();
+    assert_eq!(preview.present, 0);
+
+    let labels = client
+        .list_labels(ListLabelsRequest {})
+        .await
+        .expect("labels")
+        .into_inner();
+    assert!(labels.labels.iter().any(|entry| {
+        entry
+            .label
+            .as_ref()
+            .is_some_and(|label| label.name == "movies")
+    }));
 
     server.shutdown();
 }

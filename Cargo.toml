@@ -11,6 +11,7 @@ members = [
     "crates/cli",
     "crates/gui",
     "crates/i18n",
+    "crates/import",
     "crates/web",
     "crates/telemetry",
 ]

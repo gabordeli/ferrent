@@ -72,11 +72,13 @@ ferrent-cli import-deluge --state-dir <dir> [--config-dir <dir>] [--dry-run]
 - `config set <file>`: a teljes TOML-t feltölti; `--revision N` nélkül a CLI
   lekéri a aktuális revíziót. Elavult revízióra a daemon `ABORTED`-del válaszol,
   a futó config nem változik.
-- `import-deluge`: Deluge `state/` könyvtár importja — `.torrent` + a
-  `label.conf`/`autoadd.conf`/`execute.conf`/`scheduler.conf` mappingje.
-  `--dry-run` a daemon nélkül is működik, és kilistázza a plugin-configokat
-  is. **Éles próbánál csak publikus trackeres torrentekkel futtasd**: az add
-  announce-ol, és a privát tracker kitilthat.
+- `import-deluge`: Deluge `state/` könyvtár importja a daemon `ImportState`
+  RPC-jén (ugyanaz a scan, mint a GUI Import fülén): a hiányzó címkéket
+  létrehozza, a torrenteket **paused** adja hozzá, info-hash szerint dedupál,
+  és torrentenként adja vissza az eredményt. `--dry-run` a daemon nélkül is
+  működik, és kilistázza a plugin-configokat is. **Éles próbánál csak publikus
+  trackeres torrentekkel futtasd**: a resume után az add announce-ol, és a
+  privát tracker kitilthat.
 - `--json` globális flag: minden parancs JSON-t ad.
 
 ## JSON kimenet (stabil, v1)

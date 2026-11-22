@@ -63,6 +63,7 @@ assets = [
 [dependencies]
 arc-swap = "1"
 ferrent-engine = { path = "../engine" }
+ferrent-import = { path = "../import" }
 ferrent-protocol = { path = "../protocol" }
 ferrent-telemetry = { path = "../telemetry" }
 rcgen = "0.14"

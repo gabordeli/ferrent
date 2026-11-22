@@ -1,9 +1,7 @@
 //! `ferrent-cli`: control a Ferrent daemon over TLS.
 
-mod bencode;
 mod config;
 mod error;
-mod import_deluge;
 mod output;
 
 use std::path::PathBuf;
@@ -11,14 +9,14 @@ use std::path::PathBuf;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest,
-    GetConfigRequest, GetDisksRequest, GetNotificationStatusRequest, GetRssStatusRequest,
-    GetStatsRequest, GetStatusRequest, GetTorrentFilesRequest, GetTorrentRequest,
-    GetTorrentTrackersRequest, GetWebSeedsRequest, Label as ProtoLabel, ListTorrentsRequest,
-    MoveTorrentRequest, PauseTorrentRequest, QueueDirection, RecheckTorrentRequest,
-    RefreshBlocklistRequest, RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest,
-    ResumeTorrentRequest, SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
-    SetWebSeedsRequest, SortField, WatchRequest,
+    AddTorrentRequest, AddTrackerRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
+    GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest, GetStatusRequest,
+    GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
+    ImportStateRequest, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
+    QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest, RemoveTorrentRequest,
+    RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetWebSeedsRequest,
+    SortField, WatchRequest,
 };
 use serde_json::json;
 
@@ -481,72 +479,51 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             config_dir,
             dry_run: false,
         } => {
-            let options = import_deluge::Options {
-                config_dir: config_dir
-                    .unwrap_or_else(|| import_deluge::default_config_dir(&state_dir)),
-                state_dir,
-            };
-            let report = import_deluge::scan(&options).map_err(CliError::Config)?;
-            // A torrent can only be added under an existing label, so the
-            // declared ones are created first (AlreadyExists is fine).
-            for label in &report.plugins.labels {
-                let request = CreateLabelRequest {
-                    label: Some(ProtoLabel {
-                        name: label.name.clone(),
-                        color: label.color.clone(),
-                        ..ProtoLabel::default()
-                    }),
-                };
-                if let Err(error) = client.create_label(request).await {
-                    if error.code() != tonic::Code::AlreadyExists {
-                        eprintln!("label {}: {error}", label.name);
-                    }
-                }
-            }
-            let mut added = 0u32;
-            let mut skipped = 0u32;
-            let mut failed = 0u32;
-            for torrent in &report.torrents {
-                let metainfo = std::fs::read(&torrent.path)?;
-                let response = client
-                    .add_torrent(AddTorrentRequest {
-                        name: torrent.name.clone(),
-                        metainfo,
-                        save_path: String::new(),
-                        total_bytes: torrent.total_bytes,
-                        label: torrent.label.clone().unwrap_or_default(),
-                        magnet: String::new(),
-                        sequential: false,
-                    })
-                    .await;
-                match response {
-                    Ok(response) => {
-                        if response.into_inner().duplicate {
-                            skipped += 1;
-                        } else {
-                            added += 1;
-                        }
-                    }
-                    Err(error) => {
-                        failed += 1;
-                        eprintln!("{}: {error}", torrent.name);
-                    }
-                }
-            }
+            let response = client
+                .import_state(ImportStateRequest {
+                    source: "deluge".to_owned(),
+                    state_dir: state_dir.to_string_lossy().into_owned(),
+                    config_dir: config_dir
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    paused: true,
+                })
+                .await?
+                .into_inner();
             if json {
+                let outcomes: Vec<_> = response
+                    .outcomes
+                    .iter()
+                    .map(|outcome| {
+                        json!({
+                            "name": outcome.name,
+                            "status": outcome.status,
+                            "detail": outcome.detail,
+                        })
+                    })
+                    .collect();
                 output::print_json(&json!({
-                    "found": report.torrents.len(),
-                    "added": added,
-                    "already_present": skipped,
-                    "failed": failed,
-                    "warnings": report.warnings,
+                    "found": response.outcomes.len(),
+                    "added": response.added,
+                    "already_present": response.skipped,
+                    "failed": response.failed,
+                    "warnings": response.warnings,
+                    "outcomes": outcomes,
                 }));
             } else {
                 println!(
-                    "imported {added}, already present {skipped}, failed {failed} of {} torrents",
-                    report.torrents.len()
+                    "imported {}, already present {}, failed {} of {} torrents",
+                    response.added,
+                    response.skipped,
+                    response.failed,
+                    response.outcomes.len()
                 );
-                print_import_warnings(&report.warnings);
+                for outcome in &response.outcomes {
+                    if outcome.status == "error" {
+                        println!("  {}: {}", outcome.name, outcome.detail);
+                    }
+                }
+                print_import_warnings(&response.warnings);
             }
         }
         Command::List {
@@ -1016,14 +993,14 @@ fn import_deluge_report(
     config_dir: Option<&std::path::Path>,
     json: bool,
 ) -> Result<(), CliError> {
-    let options = import_deluge::Options {
+    let options = ferrent_import::Options {
         config_dir: config_dir.map_or_else(
-            || import_deluge::default_config_dir(state_dir),
+            || ferrent_import::default_config_dir(state_dir),
             std::path::Path::to_path_buf,
         ),
         state_dir: state_dir.to_path_buf(),
     };
-    let report = import_deluge::scan(&options).map_err(CliError::Config)?;
+    let report = ferrent_import::scan(&options).map_err(CliError::Config)?;
 
     if json {
         let torrents: Vec<_> = report

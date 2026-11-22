@@ -1,0 +1,16 @@
+[package]
+name = "ferrent-import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Deluge state import: torrents and bundled plugin configs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = "1"
+sha1 = "0.10"

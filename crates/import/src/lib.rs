@@ -3,14 +3,16 @@
 //!
 //! Deluge stores one `.torrent` per torrent under `state/` and keeps the
 //! plugin data as JSON next to it. Nothing here talks to the daemon: [`scan`]
-//! builds a report, and the caller decides whether to add the torrents.
+//! builds a report, and the caller decides whether to add the torrents. Both
+//! the CLI and the daemon's import RPC use this crate, so the preview and the
+//! commit can never disagree.
+
+mod bencode;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
-
-use crate::bencode;
 
 /// One torrent found in the state directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
