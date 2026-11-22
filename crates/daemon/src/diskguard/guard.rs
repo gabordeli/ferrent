@@ -172,15 +172,7 @@ impl crate::rpc::AppState {
             }
         }
 
-        let devices = |wanted: Level| -> BTreeSet<u64> {
-            levels
-                .iter()
-                .filter(|(_, level, _)| *level == wanted)
-                .filter_map(|(mount, _, _)| device_id(mount))
-                .collect()
-        };
-        let low_devices = devices(Level::Low);
-        let ok_devices = devices(Level::Ok);
+        let (low_devices, ok_devices) = device_sets(levels);
         if low_devices.is_empty() && ok_devices.is_empty() {
             return pass;
         }
@@ -241,6 +233,23 @@ impl crate::rpc::AppState {
         }
         pass
     }
+}
+
+/// Splits the mounted devices by level. Free space belongs to the filesystem,
+/// so a device that is low on one mount cannot be ok on another — otherwise
+/// the guard would pause and immediately resume the same torrents.
+fn device_sets(levels: &[(PathBuf, Level, bool)]) -> (BTreeSet<u64>, BTreeSet<u64>) {
+    let devices = |wanted: Level| -> BTreeSet<u64> {
+        levels
+            .iter()
+            .filter(|(_, level, _)| *level == wanted)
+            .filter_map(|(mount, _, _)| device_id(mount))
+            .collect()
+    };
+    let low = devices(Level::Low);
+    let mut ok = devices(Level::Ok);
+    ok.retain(|device| !low.contains(device));
+    (low, ok)
 }
 
 /// Starts the guard loop; the poll interval comes from the config, so a
@@ -319,6 +328,26 @@ mod tests {
         let levels = evaluate(&report(0), &BTreeMap::new(), 0, 0);
         assert_eq!(levels[0].1, Level::Ok);
         assert!(!levels[0].2);
+    }
+
+    #[test]
+    fn a_low_mount_wins_on_a_shared_device() {
+        let root = std::env::temp_dir().join(format!("ferrent-device-sets-{}", std::process::id()));
+        let low = root.join("low");
+        let ok = root.join("ok");
+        std::fs::create_dir_all(&low).expect("low");
+        std::fs::create_dir_all(&ok).expect("ok");
+        let (lows, oks) = device_sets(&[
+            (low.clone(), Level::Low, true),
+            (ok.clone(), Level::Ok, false),
+        ]);
+        let device = crate::diskguard::device_id(&low).expect("device");
+        assert!(lows.contains(&device));
+        assert!(
+            !oks.contains(&device),
+            "a device that is low on one mount cannot be ok on another"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

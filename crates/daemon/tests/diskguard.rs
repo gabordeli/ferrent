@@ -29,6 +29,24 @@ fn base(tag: &str) -> PathBuf {
     directory
 }
 
+/// A directory on a filesystem other than `base`, so the guard sees two
+/// devices. `/tmp` often shares the root filesystem (the GitHub runners do
+/// this), so try the shared-memory tmpfs first.
+fn other_device(base: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let device = std::fs::metadata(base).expect("base metadata").dev();
+    for root in ["/dev/shm", "/run", "/tmp"] {
+        let directory = Path::new(root).join(format!("ferrent-guard-{}", std::process::id()));
+        if std::fs::create_dir_all(&directory).is_err() {
+            continue;
+        }
+        if std::fs::metadata(&directory).expect("metadata").dev() != device {
+            return Some(directory);
+        }
+    }
+    None
+}
+
 fn zone_toml(library: &Path, staging: &Path) -> String {
     format!(
         r#"
@@ -411,8 +429,10 @@ async fn the_guard_pauses_writers_and_resumes_them_after_recovery() {
     engine.advance(manual, 0.5, 1, 0).expect("advance");
     engine.pause(manual).expect("pause");
     // A second filesystem: its downloads must not be touched.
-    let other = std::path::Path::new("/tmp").join(format!("ferrent-guard-{}", std::process::id()));
-    std::fs::create_dir_all(&other).expect("other");
+    let Some(other) = other_device(&base) else {
+        eprintln!("no second filesystem for the guard isolation check; skipping");
+        return;
+    };
     let elsewhere = engine
         .add_torrent(AddTorrent {
             name: "elsewhere.mkv".to_owned(),
