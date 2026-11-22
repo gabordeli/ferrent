@@ -1068,6 +1068,40 @@ mod tests {
     }
 
     #[test]
+    fn restore_with_the_paused_flag_starts_paused() {
+        let dir = temp_dir("libtorrent-restore-paused");
+        let data = payload();
+        fs::write(dir.join("payload.bin"), &data).expect("write payload");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        engine
+            .restore_torrent(
+                7,
+                AddTorrent {
+                    name: "payload.bin".to_owned(),
+                    total_bytes: data.len() as u64,
+                    source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+                    save_path: dir.clone(),
+                    resume_data: None,
+                },
+                true,
+            )
+            .expect("restore");
+
+        assert_eq!(
+            engine.status(7).expect("status").state,
+            TorrentState::Paused,
+            "the add itself must carry the paused flag"
+        );
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        assert_eq!(
+            engine.status(7).expect("status").state,
+            TorrentState::Paused,
+            "the queue must not resume a restored paused torrent"
+        );
+    }
+
+    #[test]
     fn add_pause_resume_remove_roundtrip() {
         let dir = temp_dir("libtorrent-roundtrip");
         let data = payload();
@@ -1243,6 +1277,57 @@ mod tests {
             "restored torrent did not use resume data: {status:?}"
         );
         engine.remove(id, false).expect("remove restored");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Mirrors the daemon restore: a torrent that was paused by the user has
+    /// resume data, and the resumed add must still come up paused.
+    #[test]
+    fn restore_with_resume_data_and_the_paused_flag_stays_paused() {
+        let dir = temp_dir("libtorrent-restore-paused-resume");
+        let data = payload();
+        fs::write(dir.join("payload.bin"), &data).expect("write payload");
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "payload.bin".to_owned(),
+                total_bytes: data.len() as u64,
+                source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+                save_path: dir.clone(),
+                resume_data: None,
+            })
+            .expect("add");
+        engine.request_resume_data(id).expect("request resume");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let resume = loop {
+            if let Some(data) = engine.take_resume_data(id).expect("take resume") {
+                break data;
+            }
+            assert!(Instant::now() < deadline, "no resume data");
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        engine.remove(id, false).expect("remove");
+        drop(engine);
+
+        let mut engine = LibtorrentEngine::new(EngineSettings::default());
+        engine
+            .restore_torrent(
+                id,
+                AddTorrent {
+                    name: "payload.bin".to_owned(),
+                    total_bytes: data.len() as u64,
+                    source: TorrentSource::Metainfo(FIXTURE.to_vec()),
+                    save_path: dir.clone(),
+                    resume_data: Some(resume),
+                },
+                true,
+            )
+            .expect("restore");
+        std::thread::sleep(Duration::from_secs(3));
+        let status = engine.status(id).expect("status");
+        assert_eq!(status.state, TorrentState::Paused, "{status:?}");
+        engine.remove(id, false).expect("remove");
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -19,7 +19,7 @@ use ferrent_daemon::store::{RedbStore, StateStore};
 use ferrent_engine::LibtorrentEngine;
 #[cfg(not(feature = "libtorrent"))]
 use ferrent_engine::MockEngine;
-use ferrent_engine::{EngineSettings, TorrentEngine};
+use ferrent_engine::{EngineSettings, TorrentEngine, TorrentId};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -134,6 +134,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let _mirror_task = spawn_mirror(Arc::clone(&mirror), events, watch.clone());
 
     let mut control = TorrentControl::default();
+    let mut restored_ids: Vec<TorrentId> = Vec::with_capacity(persisted.len());
     for torrent in persisted {
         let id = torrent.id;
         let paused_by_user = torrent.paused_by_user;
@@ -146,6 +147,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         if paused_by_user {
             control.set_user(id, true);
         }
+        restored_ids.push(id);
     }
 
     let store: Box<dyn StateStore> = Box::new(store);
@@ -160,6 +162,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
         token,
         data_dir.clone(),
     ));
+
+    // The table is seeded from the status captured right after each add, and a
+    // torrent added with the paused flag reports "downloading" for a moment
+    // before libtorrent applies it. Refresh once so a restored paused torrent
+    // is shown as paused (and a pause RPC is not needed just to fix the table).
+    if let Err(error) = state.refresh_mirror(restored_ids).await {
+        eprintln!("failed to refresh the restored state: {error}");
+    }
 
     let listener = TcpListener::bind(&bind).await?;
     let local = listener.local_addr()?;
