@@ -19,6 +19,23 @@ Description: Headless Ferrent BitTorrent daemon
  Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
  restart.
 
+Package: ferrent-gui
+Version: 0.1.3-1
+Architecture: amd64
+Maintainer: Gabor Deli <gabor.deli@gmail.com>
+Installed-Size: 241649
+Depends: ferrent, libc6 (>= 2.35), libglib2.0-0 (>= 2.12.0), libgtk-3-0 (>= 3.19.12), libssl3 (>= 3.0.0)
+Filename: pool/main/f/ferrent-gui/ferrent-gui_0.1.3-1_amd64.deb
+Size: 35797960
+MD5sum: 13b51a674760f60b309047acb8a1f454
+SHA1: fe11b51dfe76e9bc8ae12be6405b40bb03f12b0a
+SHA256: 03cf7ceec9785d93b53e0f8885184937269d590bea07f56cade8f47561af8547
+Section: net
+Priority: optional
+Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
+Description: Ferrent desktop thin client (iced)
+ Ferrent desktop thin client (iced).
+
 Package: ferrentd
 Version: 0.1.2-1
 Architecture: amd64
