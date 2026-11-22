@@ -96,7 +96,9 @@ webui-coverage:
 ci-tests:
   stage: quality
   script:
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" -w /src
+    # Mount at /usr/src, the scanner's base dir, so the cobertura <source>
+    # element maps without an "invalid directory path" warning.
+    - docker run --rm -v "$CI_PROJECT_DIR:/usr/src" -w /usr/src
         -u "$(id -u):$(id -g)"
         -e HOME=/tmp -e PIP_CACHE_DIR=/tmp/pip -e PYTHONDONTWRITEBYTECODE=1
         python:3.12-slim sh -c '
