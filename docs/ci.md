@@ -58,7 +58,7 @@ empty”** volt. A Rust minőséget a clippy adja (`clippy-report` →
 Amit a Sonar tényleg mér (`sonar.sources=.`): a `webui/` TypeScript/Vue/CSS
 frontend (`webui/src`, `webui/public/sw.js`, `index.html`), a CI- és
 packaging-YAML/JSON (`gitlab-ci.yml`, `.github/workflows/*`, `buf.yaml`), a
-`ci/*.py`. 2026-11-22-én ez **30 fájl / 6644 ncloc / 12 issue**, a kapu
+`ci/*.py`. 2026-11-22-én ez **30 fájl / ~6,6 ezer ncloc / 12 issue**, a kapu
 `OK`. Nyelv szerint 42 forrásfájl és 21 tesztfájl indexelődik (12 ts, 13 js,
 7 yaml, 5 json, 2 py, 1-1 css/html/Dockerfile); a 98 követett `.rs` és a
 `bridge.cpp` nyelv nélkül kerül be, tehát mérhetetlen.
@@ -74,10 +74,13 @@ Két Community-korlát, amit a beállítás nem tud megkerülni:
    **main branch** adatait írja felül; a merge utáni main futás állítja helyre.
 2. **A new code definíció `PREVIOUS_VERSION`.** A minőségi kapu feltételei
    (`new_violations = 0`, `new_coverage ≥ 80`, `new_duplicated_lines_density
-   ≤ 3`) csak a legutóbbi *verzióváltás* óti változásra futnak, ezért
-   verzióbump nélkül a kapu gyakorlatilag nem tud megbukni. A projekten a
-   **Settings → New Code → Previous analysis** (vagy 30 nap) beállítás kell
-   hozzá; ehhez admin token/UI kell, a CI-token nem tudja átállítani.
+   ≤ 3`) a *jelenlegi verzió előtti* verzió utolsó elemzése óta változott
+   sorokra futnak. Mivel minden kiadás emeli a `Cargo.toml` verzióját, ez a
+   kiadások között értelmes kaput ad; egy verziócikluson belül viszont a
+   bázis nem mozdul, tehát a kapu a legutóbbi kiadástól számít, nem az előző
+   futástól. Szigorúbb, pushonkénti kapuhoz a projekt **Settings → New Code**
+   definícióját `Previous analysis`-re kell állítani (admin UI/token; a
+   CI-token nem tudja átállítani).
 
 Ellenőrzés (token a GitLab `56` projekt CI-változóiból):
 
