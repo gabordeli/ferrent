@@ -471,17 +471,20 @@ impl FerrentService {
 
     /// Pauses a torrent the import just added and records the user intent.
     async fn pause_imported(&self, id: TorrentId) -> Result<(), Status> {
-        let (changed, paused) = {
+        let paused = {
             let mut control = self
                 .state
                 .control
                 .lock()
                 .expect("pause control mutex poisoned");
-            let changed = control.set_user(id, true);
-            (changed, control.is_paused(id))
+            control.set_user(id, true);
+            control.is_paused(id)
         };
-        if changed && paused {
-            if let Err(error) = self.with_engine(move |engine| engine.pause(id)).await {
+        if paused {
+            if let Err(error) = self
+                .with_engine(move |engine| pause_settled(engine, id))
+                .await
+            {
                 self.state
                     .control
                     .lock()
@@ -769,17 +772,23 @@ impl Ferrent for FerrentService {
     ) -> Result<Response<PauseTorrentResponse>, Status> {
         self.state.auth.check(request.metadata())?;
         let id = request.into_inner().id;
-        let (changed, paused) = {
+        let paused = {
             let mut control = self
                 .state
                 .control
                 .lock()
                 .expect("pause control mutex poisoned");
-            let changed = control.set_user(id, true);
-            (changed, control.is_paused(id))
+            control.set_user(id, true);
+            control.is_paused(id)
         };
-        if changed && paused {
-            if let Err(error) = self.with_engine(move |engine| engine.pause(id)).await {
+        if paused {
+            // Always ask the engine: a pause lost to the add path's
+            // `auto_managed` flag leaves the authority paused while the
+            // torrent keeps running, and a repeat pause used to be a no-op.
+            if let Err(error) = self
+                .with_engine(move |engine| pause_settled(engine, id))
+                .await
+            {
                 self.state
                     .control
                     .lock()
@@ -2003,6 +2012,24 @@ fn config_status(error: ConfigError) -> Status {
     }
 }
 
+/// Pauses a torrent and makes sure the engine agrees.
+///
+/// libtorrent applies the paused flag asynchronously and the add path sets
+/// `auto_managed`, so a pause issued right after an add or a restore can be
+/// lost: the pause authority then says "paused" while the torrent keeps
+/// running, and every later pause used to be a no-op. Verify the engine status
+/// and retry a few times before giving up.
+pub fn pause_settled(engine: &mut dyn TorrentEngine, id: TorrentId) -> Result<(), EngineError> {
+    for attempt in 0..4u64 {
+        engine.pause(id)?;
+        if engine.status(id)?.state == EngineState::Paused {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+    }
+    Ok(())
+}
+
 /// Resolves a client-supplied save path against the daemon download directory.
 ///
 /// An empty path means "the daemon default". Relative paths are anchored to
@@ -2197,6 +2224,33 @@ mod tests {
     use crate::labels::{Label, LabelState};
     use crate::state::StateMirror;
     use crate::store::MemoryStore;
+
+    #[test]
+    fn pause_settled_leaves_the_torrent_paused_and_is_idempotent() {
+        let mut engine = MockEngine::new();
+        let id = engine
+            .add_torrent(AddTorrent {
+                name: "probe".into(),
+                total_bytes: 0,
+                source: TorrentSource::Magnet("magnet:?xt=urn:btih:00".into()),
+                save_path: PathBuf::from("/tmp"),
+                resume_data: None,
+            })
+            .expect("add");
+
+        pause_settled(&mut engine, id).expect("pause");
+        assert_eq!(
+            engine.status(id).expect("status").state,
+            EngineState::Paused
+        );
+        // A repeat pause must reach the engine again, not short-circuit on the
+        // pause authority (that was the FERRENT-81 no-op).
+        pause_settled(&mut engine, id).expect("second pause");
+        assert_eq!(
+            engine.status(id).expect("status").state,
+            EngineState::Paused
+        );
+    }
 
     #[test]
     fn empty_save_path_uses_the_daemon_default() {

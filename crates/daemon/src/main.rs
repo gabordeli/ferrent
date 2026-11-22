@@ -143,7 +143,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
         if paused_by_user {
             control.set_user(id, true);
-            if let Err(error) = engine.pause(id) {
+            if let Err(error) = ferrent_daemon::rpc::pause_settled(&mut *engine, id) {
                 eprintln!("failed to pause restored torrent {id}: {error}");
             }
         }
