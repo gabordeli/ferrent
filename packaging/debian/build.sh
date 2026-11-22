@@ -109,8 +109,9 @@ RUN dpkg-deb -f /out/*.deb Depends Architecture
 EOF
 
 echo "== building $tag (libtorrent $LT_VERSION, static)"
-docker build -q -f "$work/Dockerfile" --build-arg DEB_VERSION="$deb_version" \
-    -t "$tag" "$root" >/dev/null
+# Plain progress: a failing RUN must leave the compiler output in the CI log.
+docker build --progress=plain -f "$work/Dockerfile" --build-arg DEB_VERSION="$deb_version" \
+    -t "$tag" "$root"
 
 cid=$(docker create "$tag")
 mkdir -p "$out"
