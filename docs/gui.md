@@ -41,6 +41,22 @@ hozzáadható; a save path ilyenkor a mező aktuális értéke.
 - Remove után a lap újratöltődik; pause/resume után a következő poll hozza
   a szerver igazságát.
 
+## Import (másik kliensből)
+
+Beállítások → **Importálás**. A forrás jelenleg a Deluge: a daemon hostján
+lévő `state/` könyvtár (pl. `/var/lib/deluge/.config/deluge/state`); a
+plugin-config könyvtár üresen hagyva a `state/` mellett keresendő.
+
+1. **Előnézet** — csak olvas: hány torrent van, mennyi van már meg (info-hash
+   szerint), milyen címkéket deklarál a forrás, és milyen figyelmeztetéseket ad
+   (pl. nem ezen a hoston lévő autoadd útvonalak).
+2. **Importálás szüneteltetve** — a hiányzó címkéket létrehozza, a torrenteket
+   **paused** állapotban adja hozzá; a meglévőket kihagyja. Az eredmény
+   torrentenként: hozzáadva / kihagyva / hiba.
+
+A művelet ismételhető (idempotens), és ugyanazt a kódot használja, mint a
+`ferrent-cli import-deluge`; a részletek: `docs/deluge-migration.md`.
+
 ## Billentyűparancsok
 
 | Billentyű | Művelet |

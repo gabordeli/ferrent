@@ -10,7 +10,8 @@ use ferrent_protocol::v1::{
     GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest, GetHookStatusRequest,
     GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest, GetStatusRequest,
     GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
-    Label, LabelEntry, ListLabelsRequest, ListTorrentsRequest, PreviewRssFeedRequest,
+    ImportPreviewRequest, ImportStateRequest, ImportStateResponse, ImportTorrentEntry, Label,
+    LabelEntry, ListLabelsRequest, ListTorrentsRequest, PreviewRssFeedRequest,
     RecheckTorrentRequest, RefreshBlocklistRequest, RemoveTrackerRequest, RenameTorrentFileRequest,
     RssPreviewItem, ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest,
     SetFilePrioritiesRequest, SetSequentialRequest, SetSuperSeedingRequest, SetTorrentLabelRequest,
@@ -373,6 +374,51 @@ pub async fn rss_status(client: &AuthClient) -> Result<Vec<ferrent_protocol::v1:
         .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
         .into_inner();
     Ok(response.feeds)
+}
+
+/// Reads a client's state directory without changing anything.
+pub async fn import_preview(
+    client: &AuthClient,
+    state_dir: &str,
+    config_dir: &str,
+) -> Result<(Vec<ImportTorrentEntry>, Vec<String>, Vec<String>, u32), String> {
+    let mut client = client.clone();
+    let response = client
+        .import_preview(ImportPreviewRequest {
+            source: "deluge".to_owned(),
+            state_dir: state_dir.to_owned(),
+            config_dir: config_dir.to_owned(),
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok((
+        response.torrents,
+        response.labels,
+        response.warnings,
+        response.present,
+    ))
+}
+
+/// Adds the torrents from a client's state, paused.
+pub async fn import_state(
+    client: &AuthClient,
+    state_dir: &str,
+    config_dir: &str,
+    paused: bool,
+) -> Result<ImportStateResponse, String> {
+    let mut client = client.clone();
+    let response = client
+        .import_state(ImportStateRequest {
+            source: "deluge".to_owned(),
+            state_dir: state_dir.to_owned(),
+            config_dir: config_dir.to_owned(),
+            paused,
+        })
+        .await
+        .map_err(|error| format!("{:?}: {}", error.code(), error.message()))?
+        .into_inner();
+    Ok(response)
 }
 
 /// What the daemon would add from one feed with the given title filter.

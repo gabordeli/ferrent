@@ -25,6 +25,14 @@ use ferrent_gui::table::{
 use ferrent_gui::theme;
 use ferrent_gui::tracker;
 use ferrent_protocol::client::AuthClient;
+/// The import preview tuple: torrents, labels, warnings, present count.
+type ImportPreviewData = (
+    Vec<ferrent_protocol::v1::ImportTorrentEntry>,
+    Vec<String>,
+    Vec<String>,
+    u32,
+);
+
 use ferrent_protocol::v1::{
     Label as ProtoLabel, SortField, Torrent, TorrentFile, TorrentPeer, TorrentState, TorrentTracker,
 };
@@ -251,6 +259,12 @@ enum Message {
     RssWatcherEnabled(bool),
     RssPreview,
     RssPreviewed(Result<(u32, Vec<ferrent_protocol::v1::RssPreviewItem>), String>),
+    ImportStateDir(String),
+    ImportConfigDir(String),
+    ImportPreview,
+    ImportPreviewed(Result<ImportPreviewData, String>),
+    ImportRun,
+    Imported(Result<ferrent_protocol::v1::ImportStateResponse, String>),
     HooksSelected(usize),
     HooksAdd,
     HooksRemove,
@@ -1334,6 +1348,100 @@ impl App {
                         self.settings.rss_preview_for = None;
                         self.settings.rss_preview_error = Some(error);
                     }
+                }
+                Task::none()
+            }
+            Message::ImportStateDir(value) => {
+                self.settings.import_state_dir = value;
+                Task::none()
+            }
+            Message::ImportConfigDir(value) => {
+                self.settings.import_config_dir = value;
+                Task::none()
+            }
+            Message::ImportPreview => {
+                let Some(client) = self.client.clone() else {
+                    self.settings.import_error = Some(i18n::t("Not connected").to_owned());
+                    return Task::none();
+                };
+                self.settings.import_loading = true;
+                self.settings.import_error = None;
+                let state_dir = self.settings.import_state_dir.trim().to_owned();
+                let config_dir = self.settings.import_config_dir.trim().to_owned();
+                Task::perform(
+                    async move { connection::import_preview(&client, &state_dir, &config_dir).await },
+                    Message::ImportPreviewed,
+                )
+            }
+            Message::ImportPreviewed(result) => {
+                self.settings.import_loading = false;
+                match result {
+                    Ok((torrents, labels, warnings, present)) => {
+                        self.settings.import_preview = Some(settings::ImportPreview {
+                            torrents,
+                            labels,
+                            warnings,
+                            present,
+                        });
+                        self.settings.import_error = None;
+                    }
+                    Err(error) => {
+                        self.settings.import_preview = None;
+                        self.settings.import_error = Some(error);
+                    }
+                }
+                Task::none()
+            }
+            Message::ImportRun => {
+                let Some(client) = self.client.clone() else {
+                    self.settings.import_error = Some(i18n::t("Not connected").to_owned());
+                    return Task::none();
+                };
+                self.settings.import_running = true;
+                self.settings.import_error = None;
+                let state_dir = self.settings.import_state_dir.trim().to_owned();
+                let config_dir = self.settings.import_config_dir.trim().to_owned();
+                Task::perform(
+                    async move {
+                        connection::import_state(&client, &state_dir, &config_dir, true).await
+                    },
+                    Message::Imported,
+                )
+            }
+            Message::Imported(result) => {
+                self.settings.import_running = false;
+                match result {
+                    Ok(response) => {
+                        let errors = response
+                            .outcomes
+                            .iter()
+                            .filter(|outcome| outcome.status == "error")
+                            .map(|outcome| format!("{}: {}", outcome.name, outcome.detail))
+                            .collect();
+                        self.settings.import_result = Some(settings::ImportResult {
+                            added: response.added,
+                            skipped: response.skipped,
+                            failed: response.failed,
+                            warnings: response.warnings,
+                            errors,
+                        });
+                        self.settings.import_error = None;
+                        // Refresh the preview so the "already present" flags
+                        // match what the daemon now holds.
+                        if let Some(client) = self.client.clone() {
+                            let state_dir = self.settings.import_state_dir.trim().to_owned();
+                            let config_dir = self.settings.import_config_dir.trim().to_owned();
+                            self.settings.import_loading = true;
+                            return Task::perform(
+                                async move {
+                                    connection::import_preview(&client, &state_dir, &config_dir)
+                                        .await
+                                },
+                                Message::ImportPreviewed,
+                            );
+                        }
+                    }
+                    Err(error) => self.settings.import_error = Some(error),
                 }
                 Task::none()
             }
@@ -3412,6 +3520,7 @@ impl App {
             Tab::Scheduler => self.settings_scheduler_view(),
             Tab::Notifications => self.settings_notifications_view(),
             Tab::Storage => self.settings_storage_view(),
+            Tab::Import => self.settings_import_view(),
             Tab::Labels => self.settings_labels_view(),
             Tab::Rss => self.settings_rss_view(),
             Tab::Appearance => self.settings_appearance_view(),
@@ -3460,6 +3569,7 @@ impl App {
             | Tab::Storage => Message::SettingsSave,
             Tab::Rss => Message::SettingsSave,
             Tab::Appearance => Message::SettingsSave,
+            Tab::Import => Message::ImportRun,
         };
         let can_save = !settings.loading
             && match settings.tab {
@@ -3473,11 +3583,27 @@ impl App {
                 | Tab::Storage => true,
                 Tab::Rss => true,
                 Tab::Appearance => false,
+                Tab::Import => settings.import_preview.is_some() && !settings.import_running,
             };
+        let (reload_label, reload_message) = if settings.tab == Tab::Import {
+            (i18n::t("Preview"), Message::ImportPreview)
+        } else {
+            ("Reload", Message::SettingsReload)
+        };
+        let reload_enabled = if settings.tab == Tab::Import {
+            !settings.import_loading && !settings.import_state_dir.trim().is_empty()
+        } else {
+            !settings.loading
+        };
+        let save_label = if settings.tab == Tab::Import {
+            i18n::t("Import paused")
+        } else {
+            "Save"
+        };
         let footer = row![
             summary,
-            action_button("Reload", Message::SettingsReload, !settings.loading),
-            action_button("Save", save, can_save),
+            action_button(reload_label, reload_message, reload_enabled),
+            action_button(save_label, save, can_save),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
@@ -5018,6 +5144,168 @@ impl App {
         .spacing(10);
 
         scrollable(body).height(Length::Fill).into()
+    }
+
+    fn settings_import_view(&self) -> Element<'_, Message> {
+        let settings = &self.settings;
+        let dim = theme::text_muted();
+
+        let field = |label: &'static str,
+                     value: &str,
+                     placeholder: &'static str,
+                     input: fn(String) -> Message| {
+            column![
+                text(label).size(11).color(dim),
+                text_input(placeholder, value)
+                    .style(muted_input_style)
+                    .padding([4, 8])
+                    .size(12)
+                    .on_input(input)
+                    .width(Length::Fill),
+            ]
+            .spacing(3)
+        };
+
+        let panel = column![
+            row![
+                text(i18n::t("Source")).size(11).color(dim),
+                text("Deluge").size(12),
+                horizontal_space(),
+                text(i18n::t("more clients later")).size(10).color(dim),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            field(
+                i18n::t("State directory on the daemon host"),
+                &settings.import_state_dir,
+                "/var/lib/deluge/.config/deluge/state",
+                Message::ImportStateDir,
+            ),
+            field(
+                i18n::t("Plugin config directory"),
+                &settings.import_config_dir,
+                i18n::t("empty: next to the state directory"),
+                Message::ImportConfigDir,
+            ),
+            text(i18n::t(
+                "The preview only reads the directory; the import adds the torrents paused.",
+            ))
+            .size(10)
+            .color(dim),
+        ]
+        .spacing(10)
+        .width(Length::Fixed(330.0));
+
+        let mut results = column![].spacing(6).width(Length::Fill);
+        if settings.import_loading {
+            results = results.push(text(i18n::t("Reading the source…")).size(11).color(dim));
+        }
+        if settings.import_running {
+            results = results.push(text(i18n::t("Importing…")).size(11).color(dim));
+        }
+        if let Some(error) = &settings.import_error {
+            results = results.push(
+                text(i18n::t_fmt("Import failed: {}", &[error]))
+                    .size(11)
+                    .color(theme::error()),
+            );
+        }
+        if let Some(result) = &settings.import_result {
+            results = results.push(
+                text(i18n::t_fmt(
+                    "Added {}, skipped {}, failed {}.",
+                    &[
+                        &result.added.to_string(),
+                        &result.skipped.to_string(),
+                        &result.failed.to_string(),
+                    ],
+                ))
+                .size(12)
+                .color(theme::text_secondary()),
+            );
+            for error in &result.errors {
+                results = results.push(text(error).size(10).color(theme::error()));
+            }
+        }
+        if let Some(preview) = &settings.import_preview {
+            results = results.push(
+                text(i18n::t_fmt(
+                    "{} torrents · {} already present · {} labels",
+                    &[
+                        &preview.torrents.len().to_string(),
+                        &preview.present.to_string(),
+                        &preview.labels.len().to_string(),
+                    ],
+                ))
+                .size(11)
+                .color(theme::text_secondary()),
+            );
+            let rows: Vec<Element<Message>> = preview
+                .torrents
+                .iter()
+                .map(|torrent| {
+                    row![
+                        text(&torrent.name).size(11).width(Length::Fill),
+                        text(if torrent.label.is_empty() {
+                            "—".to_owned()
+                        } else {
+                            format!("#{}", torrent.label)
+                        })
+                        .size(10)
+                        .color(dim)
+                        .width(Length::Fixed(90.0)),
+                        text(import_size(torrent.total_bytes))
+                            .size(10)
+                            .color(dim)
+                            .width(Length::Fixed(70.0)),
+                        text(if torrent.already_present {
+                            i18n::t("present")
+                        } else {
+                            ""
+                        })
+                        .size(10)
+                        .color(theme::queued())
+                        .width(Length::Fixed(60.0)),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+                })
+                .collect();
+            results = results.push(
+                container(scrollable(WidgetColumn::with_children(rows).spacing(2)))
+                    .height(Length::Fill),
+            );
+            if !preview.warnings.is_empty() {
+                let warnings: Vec<Element<Message>> = preview
+                    .warnings
+                    .iter()
+                    .map(|warning| text(warning).size(10).color(theme::queued()).into())
+                    .collect();
+                results = results.push(text(i18n::t("Warnings")).size(10).color(dim));
+                results = results.push(
+                    container(scrollable(WidgetColumn::with_children(warnings).spacing(1)))
+                        .height(Length::Fixed(80.0)),
+                );
+            }
+        } else if !settings.import_loading {
+            results = results.push(
+                text(i18n::t("Run the preview to see what the import would add."))
+                    .size(11)
+                    .color(dim),
+            );
+        }
+
+        row![
+            panel,
+            container(results)
+                .padding([0, 12])
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .spacing(12)
+        .height(Length::Fill)
+        .into()
     }
 
     fn settings_labels_view(&self) -> Element<'_, Message> {
@@ -7799,6 +8087,21 @@ fn main() -> iced::Result {
         }
     }
     result
+}
+
+fn import_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 #[cfg(test)]
