@@ -1,0 +1,32 @@
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Sun, 22 Nov 2026 10:49:43 +0000
+Description: Ferrent BitTorrent daemon packages
+Label: Ferrent
+Origin: Ferrent
+Suite: stable
+MD5Sum:
+ ce3405895646a289201e4bddd2a52d3d              192 Release
+ 2963b65e096b8ab6e19ef2d877ca6ee4              676 main/binary-amd64/Packages
+ ba0c7b5606cc0b6a3efd5fb04c985bd4              466 main/binary-amd64/Packages.gz
+ 6420d1f2c34572b417d8b10ecb6bd34a              674 main/binary-arm64/Packages
+ c712fb17505a8b14337ac6d21e009ba6              466 main/binary-arm64/Packages.gz
+SHA1:
+ d1a297f58d66d51c393d74db66b0ac847ced577e              192 Release
+ 3395c1048945b8b841ca36050eb80e0a4bf8b5bb              676 main/binary-amd64/Packages
+ 973d1a0bb4e3602c375253f21f95dd1215098ae8              466 main/binary-amd64/Packages.gz
+ d60f0a01127be27d70195c086f91821292e52702              674 main/binary-arm64/Packages
+ 70f4880218721ecfef9bc23bed4d09f5b624ac20              466 main/binary-arm64/Packages.gz
+SHA256:
+ 2b6b134ae89c210eb9289c4e8840c09aa679777230701d9ec275fd9f796162d0              192 Release
+ 95c8bf2627191531967bc83cd1a9df544d9de52b38fe3164f0dd375e9ba4bef5              676 main/binary-amd64/Packages
+ d99b31d77dd4049a3b9cfc9056c174c1554935d3bc6e1fc99c20bfc84075a93e              466 main/binary-amd64/Packages.gz
+ 98f093a8a841d3a92b87fa3e12db07fe322119bd447d0e4f4f27961f74d03edd              674 main/binary-arm64/Packages
+ 6a231cfb8bb1be7dfe26472f9d5c58dc551a5b989ee8f9f6d661993359ee28d2              466 main/binary-arm64/Packages.gz
+SHA512:
+ fdef32575a6315ae9dc0d3c89dbdba67ed57cdfdcb8f2a7509803d49b2be2c1733aba41ef9d9aa313faaeef58dc9f846870a6b9e4fd3ab11749f191ff30ea053              192 Release
+ f6ea7e626b9a6140050ed3fb9a1429d120ee3ac221326856a6ab0d8ca91835dc532c5eafbccc0d89a77a04a0af548bdf9fc58c707cf5b74f51920eb042e14fe1              676 main/binary-amd64/Packages
+ e85fe405ffc915e68b512d794a7b42506c543e07eb95770c2e7705bd196cdf15f5e0b4d5fc3baddd3f4813526aee15346f0882f7487dbf265b18283058f478bd              466 main/binary-amd64/Packages.gz
+ 66728220b0dc4b33669fb9275a72181068b71076930650ea5ab59ee768700f30ac19752e99b8c611c1a31def201c5aeb7e37c13823504c6c5f2cae195acb3af7              674 main/binary-arm64/Packages
+ 08d5609757ce4610b2defd0af103047a50db5b63e033574a163adeeb6c2a563327e19407e8452868477aa720398f01fab9d1b3d22336e5219ee03b3d27dbd411              466 main/binary-arm64/Packages.gz

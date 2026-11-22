@@ -1,0 +1,18 @@
+Package: ferrentd
+Version: 0.1.2-1
+Architecture: amd64
+Maintainer: Gabor Deli <gabor.deli@gmail.com>
+Installed-Size: 136149
+Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6 (>= 12)
+Filename: pool/main/f/ferrentd/ferrentd_0.1.2-1_amd64.deb
+Size: 21221492
+MD5sum: ba06a13e8f2905f0889724b6c6b9cf9c
+SHA1: d926b2ec049ef9afcb64e3d42bb62edcf186f2c9
+SHA256: f91ad071f316b2ba34c54f5ceca80605ce33720aa8052a214ab2e6cd3b5a06da
+Section: net
+Priority: optional
+Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
+Description: Headless Ferrent BitTorrent daemon
+ Headless Ferrent BitTorrent daemon with TLS gRPC, redb state and fastresume
+ restart.
+
