@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-cli"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "clap",
  "ferrent-daemon",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-daemon"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -1547,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-engine"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-gui"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "chrono",
  "ferrent-daemon",
@@ -1575,14 +1575,14 @@ dependencies = [
 
 [[package]]
 name = "ferrent-i18n"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "ferrent-import"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "serde_json",
  "sha1",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-protocol"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -1603,14 +1603,14 @@ dependencies = [
 
 [[package]]
 name = "ferrent-telemetry"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "sentry",
 ]
 
 [[package]]
 name = "ferrent-web"
-version = "0.1.3"
+version = "1.0.0-rc1"
 dependencies = [
  "axum",
  "axum-server",
