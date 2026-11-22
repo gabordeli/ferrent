@@ -1,11 +1,12 @@
 name: release-deb
 
-# Builds the static-libtorrent .deb (amd64 + arm64) and verifies it on every
-# supported suite. Publishing (apt repo, GHCR) is a later task; this workflow
-# only produces and checks artifacts.
+# Independent verification of the static-libtorrent packages. The canonical
+# build for a release happens on GitLab (release-deb), which also runs the
+# container test; this weekly rebuild checks that the mirror builds the same
+# package on a clean runner and verifies it on every supported suite.
 on:
-  push:
-    tags: ["v*"]
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -36,7 +37,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ferrentd-${{ matrix.arch }}
+          name: ferrent-${{ matrix.arch }}
           path: target/debian-dist/*.deb
           if-no-files-found: error
 
@@ -53,11 +54,11 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ferrentd-amd64
+          name: ferrent-amd64
           path: dist
 
       - name: Install into a throwaway systemd container
-        run: packaging/debian/container-test.sh "${{ matrix.suite }}" dist/ferrentd_*_amd64.deb
+        run: packaging/debian/container-test.sh "${{ matrix.suite }}" dist/ferrent_*_amd64.deb
 
   smoke-arm64:
     name: smoke arm64 (qemu)
@@ -68,8 +69,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ferrentd-arm64
+          name: ferrent-arm64
           path: dist
 
       - name: Run the arm64 binary under qemu-user
-        run: packaging/debian/qemu-smoke.sh dist/ferrentd_*_arm64.deb
+        run: packaging/debian/qemu-smoke.sh dist/ferrent_*_arm64.deb

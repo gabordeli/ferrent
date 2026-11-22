@@ -8,8 +8,8 @@ GitLab (fejlesztés, kanonikus repó)
 
 GitHub Actions (a tükör repón; cél: build/teszt és a nyilvános kiadás)
   ci.yml          minden push/PR: proto lint, fmt, clippy, crate-tesztek
-  release-deb.yml v* tag: .deb (amd64/arm64), systemd container-teszt, qemu smoke
-  release-apt.yml v* tag: aláírt APT repó a gh-pages ágra (GitHub Pages)
+  release-deb.yml heti / manuális: független .deb újraépítés + 3 suite + qemu smoke
+  release-apt.yml release published: a GitLab által feltöltött .deb-ek aláírása → gh-pages
 ```
 
 A fejlesztés a saját GitLabon folyik (`gabor/ferrent`, project 56); a GitHub
@@ -29,7 +29,7 @@ ci/check-libtorrent.sh # a cxx bridge clippy + teszt libtorrenttel
 | quality | `buf-lint` | MR és default branch; `buf lint` a protón (ugyanaz, mint a GitHub `proto` job) |
 | sonar | `sonarqube` | az előző artifactjára épül, blocking quality gate |
 | version | `release-version` | **manuális**: `Run pipeline` (web/api) a default branch-en |
-| release | `release-deb` | a version job után (vagy `v*` tagen): 2 arch, GitLab generic registry |
+| release | `release-deb` | a version job után (vagy `v*` tagen): 2 arch, container-teszt, GitLab generic registry + GitHub Release asset |
 
 A `LabelResponse` a `CreateLabel` és `UpdateLabel` közös response-a; a két
 RPC-névre vonatkozó lint-szabály (`RPC_REQUEST_RESPONSE_UNIQUE`,
@@ -48,6 +48,16 @@ A GitHub repó (`gabordeli/ferrent`) a privát GitLab repó **egyirányú,
 read-only tükre**; a GitLab `Settings → Repository → Mirroring repositories`
 push-mirrorja viszi a `main`-t és a tageket. Fejlesztés GitHubon nem folyik,
 a GitHub issue/PR portolása a maintainer dolga.
+
+A `.deb` **egyszer** épül: a GitLab `release-deb` konténerbuildje adja a
+`ferrent` és `ferrent-gui` csomagot, publikálja a GitLab registrybe, majd
+`packaging/apt/publish-github-release.sh`-val a GitHub Release assetbe teszi.
+A GitHub `release-apt` ezt a release-t figyeli (`release: published`), letölti a
+`.deb`-eket és csak aláír + `gh-pages`. Ehhez a GitLab CI-ban egy
+**`GITHUB_RELEASE_TOKEN`** változó kell (Contents: read and write a tükörre).
+
+A `release-deb` (GitHub) már nem tagenként fut: heti független újraépítés +
+3 suite/qemu ellenőrzés.
 
 A push-mirrorhoz használt GitHub fine-grained PAT (a repóra scope-olva) jogai:
 

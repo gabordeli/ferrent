@@ -1,7 +1,8 @@
 # Telepítés APT repóból
 
-A `ferrentd` csomag egy aláírt APT repóból telepíthető Debian 12/13-on és
-Ubuntu 24.04-on (amd64 és arm64). A repó a `gh-pages` ágon él, a Pages URL-je
+A `ferrent` csomag (daemon + CLI) és a `ferrent-gui` (desktop kliens) egy
+aláírt APT repóból telepíthető Debian 12/13-on és Ubuntu 24.04-on (a GUI
+amd64). A repó a `gh-pages` ágon él, a Pages URL-je
 `https://gabordeli.github.io/ferrent/`.
 
 > A GitHub repó a `v0.1.0` kiadásig **privát**, ezért a Pages URL addig
@@ -48,7 +49,8 @@ erre a repóra érvényes.
 
 ```bash
 sudo apt update
-sudo apt install ferrentd
+sudo apt install ferrent          # daemon + CLI
+sudo apt install ferrent-gui      # opcionális, a desktop kliens
 ```
 
 Utána:
@@ -68,16 +70,17 @@ ujjlenyomatát az első csatlakozáskor kell jóváhagyni.
 A repó minden korábbi verziót megtart:
 
 ```bash
-apt-cache policy ferrentd          # elérhető verziók
-sudo apt install ferrentd=0.1.0-1  # rögzítés
-sudo apt install --allow-downgrades ferrentd=0.0.9-1
+apt-cache policy ferrent           # elérhető verziók
+sudo apt install ferrent=0.1.0-1   # rögzítés
+sudo apt install --allow-downgrades ferrent=0.0.9-1
 ```
 
 ## Eltávolítás
 
 ```bash
-sudo apt remove ferrentd    # /etc/ferrent és /var/lib/ferrent megmarad
-sudo apt purge ferrentd     # az állapot, a token és a conffile is törlődik
+sudo apt remove ferrent     # /etc/ferrent és /var/lib/ferrent megmarad
+sudo apt purge ferrent     # az állapot, a token és a conffile is törlődik
+sudo apt purge ferrent-gui # a GUI-t külön kell eltávolítani
 ```
 
 A `ferrent` rendszerfelhasználó purge után is megmarad (újratelepítéskor

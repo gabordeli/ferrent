@@ -1,17 +1,22 @@
 name: release-apt
 
-# Builds the .deb files for a tag, adds them to the signed APT repository on the
-# gh-pages branch and lets GitHub Pages serve that branch. Old versions stay in
-# the pool, so they remain installable. Publishing only happens on a tag.
+# Signs the .deb files that the GitLab pipeline attached to the GitHub release
+# (packaging/apt/publish-github-release.sh) and publishes the signed APT
+# repository on the gh-pages branch. There is no build here: the canonical
+# build only runs once, on GitLab.
 #
 # Repository settings -> Pages -> Source: "Deploy from a branch", branch
 # gh-pages, folder "/". Secrets: GPG_PRIVATE_KEY (base64 of the armored secret
 # key), GPG_KEY_ID (the fingerprint) and GPG_PASSPHRASE (the key's passphrase);
 # see packaging/apt/README.md.
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (empty = the latest release)
+        default: ""
 
 permissions:
   contents: write
@@ -21,39 +26,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: build debs
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build amd64
-        run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; else tag=""; fi
-          TAG="$tag" packaging/debian/build.sh debian:12 amd64
-
-      - name: Build arm64
-        run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; else tag=""; fi
-          TAG="$tag" packaging/debian/build.sh debian:12 arm64
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: debs
-          path: target/debian-dist/*.deb
-          if-no-files-found: error
-
   publish:
     name: sign and publish the repository
-    needs: build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: debs
-          path: dist
+      - name: Resolve the release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -e
+          tag="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view --json tagName -q .tagName)
+          fi
+          echo "FERRENT_TAG=$tag" >> "$GITHUB_ENV"
+          echo "publishing $tag"
+
+      - name: Download the .deb assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p dist
+          gh release download "$FERRENT_TAG" --pattern '*.deb' --dir dist
+          ls -l dist
+          [ -n "$(ls -A dist)" ] || { echo "::error::no .deb assets on $FERRENT_TAG"; exit 1; }
 
       - name: Import the signing key
         env:
@@ -93,7 +94,7 @@ jobs:
             git -C site checkout --orphan gh-pages
           fi
 
-      - name: Add the packages and sign the repository
+      - name: Sign and publish the repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
@@ -112,6 +113,6 @@ jobs:
           else
             git -C site -c user.name="ferrent-bot" \
               -c user.email="ferrent-bot@users.noreply.github.com" \
-              commit -m "apt: publish ${GITHUB_REF_NAME:-manual}"
+              commit -m "apt: publish ${FERRENT_TAG}"
             git -C site push origin HEAD:gh-pages
           fi
