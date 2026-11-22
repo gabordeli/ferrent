@@ -6,7 +6,8 @@ name: release-apt
 #
 # Repository settings -> Pages -> Source: "Deploy from a branch", branch
 # gh-pages, folder "/". Secrets: GPG_PRIVATE_KEY (base64 of the armored secret
-# key) and GPG_KEY_ID (the fingerprint); see packaging/apt/README.md.
+# key), GPG_KEY_ID (the fingerprint) and GPG_PASSPHRASE (the key's passphrase);
+# see packaging/apt/README.md.
 on:
   push:
     tags: ["v*"]
@@ -65,6 +66,19 @@ jobs:
           fi
           printf '%s' "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
           gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}'
+
+      - name: Write the signing passphrase
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -e
+          if [ -z "${GPG_PASSPHRASE:-}" ]; then
+            echo "::error::the GPG_PASSPHRASE secret is missing; the repository cannot be signed"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$GPG_PASSPHRASE" > "$RUNNER_TEMP/gpg-passphrase"
+          echo "GPG_PASSPHRASE_FILE=$RUNNER_TEMP/gpg-passphrase" >> "$GITHUB_ENV"
 
       - name: Check out gh-pages (or start it empty)
         run: |

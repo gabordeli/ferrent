@@ -9,13 +9,16 @@ described in `docs/apt-install.md`.
 | | |
 |---|---|
 | UID | `Ferrent APT Repository <apt@ferrent.invalid>` |
-| Fingerprint | `DB161AB5A22473586AC52CEDD727691B9D3B58AA` |
-| Type | RSA 4096, sign only |
-| Valid until | 2031-11-19 |
+| Fingerprint | `3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431` |
+| Type | Ed25519 (sign) + cv25519 (encrypt), passphrase-protected |
+| Valid until | 2031-11-21 |
 
-The public key is tracked as `packaging/apt/keyring/ferrent.gpg` and is also
-served next to the repository (`/ferrent.gpg`), so `apt` can fetch it over
-HTTPS.
+The previous RSA 4096 key (`DB161AB5A22473586AC52CEDD727691B9D3B58AA`) stays in
+the keyring for the transition; new signatures use the Ed25519 key.
+
+The public keyring is tracked as `packaging/apt/keyring/ferrent.gpg` (both keys)
+and is also served next to the repository (`/ferrent.gpg`), so `apt` can fetch
+it over HTTPS.
 
 The private key lives **outside the repository**, in a dedicated keyring so it
 does not mix with the personal one:
@@ -24,20 +27,28 @@ does not mix with the personal one:
 export GNUPGHOME="$HOME/.config/ferrent/apt/gnupg"
 # armored secret key, mode 0600:
 #   $GNUPGHOME/../ferrent-apt-private.asc
+# passphrase, mode 0600:
+#   $GNUPGHOME/../passphrase
 ```
+
+The key is passphrase-protected. CI runners have no gpg-agent cache, so
+`build-repo.sh` reads the passphrase from `GPG_PASSPHRASE_FILE`, and falls back
+to `$GNUPGHOME/../passphrase` when the variable is unset.
 
 GitHub secrets (repository settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |---|---|
 | `GPG_PRIVATE_KEY` | `base64 -w0 ~/.config/ferrent/apt/ferrent-apt-private.asc` |
-| `GPG_KEY_ID` | `DB161AB5A22473586AC52CEDD727691B9D3B58AA` |
+| `GPG_KEY_ID` | `3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431` |
+| `GPG_PASSPHRASE` | `cat ~/.config/ferrent/apt/passphrase` |
 
 ## Build and test locally
 
 ```bash
 export GNUPGHOME="$HOME/.config/ferrent/apt/gnupg"
-export GPG_KEY_ID=DB161AB5A22473586AC52CEDD727691B9D3B58AA
+export GPG_KEY_ID=3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431
+export GPG_PASSPHRASE_FILE="$GNUPGHOME/../passphrase"   # optional fallback
 
 # 1. packages (one per arch)
 packaging/debian/build.sh debian:12 amd64
@@ -78,12 +89,14 @@ never publishes an unsigned repository silently.
 
 ## Key rotation
 
-1. generate a new key in the same keyring, export it over
-   `packaging/apt/keyring/ferrent.gpg`, update the fingerprint in this file and
-   in `docs/apt-install.md`;
-2. update the two secrets, run the workflow on a tag;
-3. clients must re-download the keyring (`/ferrent.gpg`) — `Signed-By` reads that
-   file, so until then `apt update` fails with `NO_PUBKEY`.
+1. generate a new key in the same keyring, export **both** public keys over
+   `packaging/apt/keyring/ferrent.gpg` (old + new, so old signatures still
+   verify), update the fingerprint in this file and in `docs/apt-install.md`;
+2. update the three secrets (`GPG_PRIVATE_KEY`, `GPG_KEY_ID`,
+   `GPG_PASSPHRASE`), run the workflow on a tag;
+3. clients must re-download the keyring (`/ferrent.gpg`) — `Signed-By` reads
+   that file, so until then `apt update` fails with `NO_PUBKEY`.
 
-Keep the old key in the keyring during the transition if both signatures are
-wanted; the current `build-repo.sh` signs with a single key (`GPG_KEY_ID`).
+`build-repo.sh` signs with a single key (`GPG_KEY_ID`); the old key is kept in
+the public keyring only for verification during the transition. Remove it once
+the clients have refreshed.

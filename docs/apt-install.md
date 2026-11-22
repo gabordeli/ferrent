@@ -20,8 +20,13 @@ Ellenőrzés (a fájl ujjlenyomata):
 
 ```bash
 gpg --show-keys --with-fingerprint /etc/apt/keyrings/ferrent.gpg
-# DB161AB5A22473586AC52CEDD727691B9D3B58AA
+# 3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431  (Ed25519, az aktuális aláíró)
+# DB161AB5A22473586AC52CEDD727691B9D3B58AA  (RSA 4096, átmeneti)
 ```
+
+A letöltött fájl a rotáció idején **két kulcsot** tartalmaz: az új Ed25519
+aláíró kulcsot és a régi RSA 4096-ot, hogy a korábbi aláírások is
+ellenőrizhetők legyenek.
 
 ## 2. Forrás (DEB822)
 

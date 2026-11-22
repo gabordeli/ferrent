@@ -56,12 +56,21 @@ EOF
 
 apt-ftparchive -c "$repo/apt-ftparchive.conf" release "$dist" > "$dist/Release"
 
-key_args=()
+key_args=(gpg --batch --yes)
 if [ -n "${GPG_KEY_ID:-}" ]; then
-    key_args=(--local-user "$GPG_KEY_ID")
+    key_args+=(--local-user "$GPG_KEY_ID")
 fi
-gpg --batch --yes "${key_args[@]}" --armor --detach-sign -o "$dist/Release.gpg" "$dist/Release"
-gpg --batch --yes "${key_args[@]}" --clearsign -o "$dist/InRelease" "$dist/Release"
+# The signing key is passphrase-protected; the agent cache is not available on
+# CI runners, so the passphrase comes from a file. Locally the dedicated
+# keyring keeps it next to GNUPGHOME (see packaging/apt/README.md).
+if [ -z "${GPG_PASSPHRASE_FILE:-}" ] && [ -f "${GNUPGHOME:-$HOME/.gnupg}/../passphrase" ]; then
+    GPG_PASSPHRASE_FILE="${GNUPGHOME:-$HOME/.gnupg}/../passphrase"
+fi
+if [ -n "${GPG_PASSPHRASE_FILE:-}" ]; then
+    key_args+=(--pinentry-mode loopback --passphrase-file "$GPG_PASSPHRASE_FILE")
+fi
+"${key_args[@]}" --armor --detach-sign -o "$dist/Release.gpg" "$dist/Release"
+"${key_args[@]}" --clearsign -o "$dist/InRelease" "$dist/Release"
 
 if command -v gpgv >/dev/null; then
     gpgv --keyring "$root/packaging/apt/keyring/ferrent.gpg" "$dist/InRelease" 2>/dev/null \

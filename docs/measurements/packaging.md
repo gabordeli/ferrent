@@ -131,8 +131,12 @@ végén `gpgv`-vel ellenőrzi a saját aláírását a repóban tárolt publikus
 | `Packages` / `Packages.gz` (amd64) | 674 B / 467 B |
 | Publikált fa mérete (3 .deb-fel) | 9,5 MB |
 
-Aláíró kulcs: RSA 4096, `DB161AB5A22473586AC52CEDD727691B9D3B58AA`, érvényes
-2031-11-19-ig; a privát kulcs a repón kívül (`~/.config/ferrent/apt/`, 0600).
+Aláíró kulcs (2026-11-22 óta): Ed25519 + cv25519,
+`3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431`, érvényes 2031-11-21-ig,
+jelszóval védve; a privát kulcs és a passphrase a repón kívül
+(`~/.config/ferrent/apt/`, 0600). A régi RSA 4096
+(`DB161AB5A22473586AC52CEDD727691B9D3B58AA`) átmenetileg a publikus
+keyringben marad.
 
 ### Telepítési teszt (`packaging/apt/repo-test.sh`)
 

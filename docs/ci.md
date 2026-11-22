@@ -125,7 +125,8 @@ lesz (`docs/apt-install.md`).
 | Secret | Érték |
 |---|---|
 | `GPG_PRIVATE_KEY` | `base64 -w0 ~/.config/ferrent/apt/ferrent-apt-private.asc` |
-| `GPG_KEY_ID` | `DB161AB5A22473586AC52CEDD727691B9D3B58AA` |
+| `GPG_KEY_ID` | `3E028C8A4521C1289117CCBE1F9CEB5C0BB1A431` |
+| `GPG_PASSPHRASE` | `cat ~/.config/ferrent/apt/passphrase` |
 
 A kulcs részletei és a rotáció: `packaging/apt/README.md`.
 
