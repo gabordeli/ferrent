@@ -51,10 +51,12 @@ a GitHub issue/PR portolása a maintainer dolga.
 
 A `.deb` **egyszer** épül: a GitLab `release-deb` konténerbuildje adja a
 `ferrent` és `ferrent-gui` csomagot, publikálja a GitLab registrybe, majd
-`packaging/apt/publish-github-release.sh`-val a GitHub Release assetbe teszi.
-A GitHub `release-apt` ezt a release-t figyeli (`release: published`), letölti a
-`.deb`-eket és csak aláír + `gh-pages`. Ehhez a GitLab CI-ban egy
-**`GITHUB_RELEASE_TOKEN`** változó kell (Contents: read and write a tükörre).
+`packaging/apt/publish-github-release.sh`-val a GitHub Release assetbe teszi,
+és a feltöltések **után** `workflow_dispatch`-csel indítja a GitHub
+`release-apt`-ot (a `release: published` esemény versenyezne a fájlonkénti
+feltöltéssel). A `release-apt` letölti a `.deb`-eket és csak aláír +
+`gh-pages`. Ehhez a GitLab CI-ban egy **`GITHUB_RELEASE_TOKEN`** változó kell
+(Contents: read and write **és Actions: read and write** a tükörre).
 
 A `release-deb` (GitHub) már nem tagenként fut: heti független újraépítés +
 3 suite/qemu ellenőrzés.

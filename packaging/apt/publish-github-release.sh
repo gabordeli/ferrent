@@ -5,7 +5,8 @@
 #   packaging/apt/publish-github-release.sh <tag> [deb-dir]
 #
 # Environment:
-#   GITHUB_TOKEN       required; Contents: read and write on the mirror repo
+#   GITHUB_TOKEN       required; Contents: read/write and Actions: read/write
+#                       (the latter for the release-apt dispatch)
 #   GITHUB_REPOSITORY  default gabordeli/ferrent
 #   RELEASE_COMMIT     optional target_commitish when the release is created
 #
@@ -91,3 +92,19 @@ sys.exit(0 if sys.argv[1] in names else 1)
 done
 
 echo "== ${#debs[@]} .deb asset(s) on release $tag ($uploaded uploaded now)"
+
+# Trigger the signing workflow only once every asset is in place. The
+# `release: published` event fires when the release is created, which races the
+# per-file uploads (a 30 MB deb takes seconds), so the GitLab job dispatches
+# the workflow explicitly.
+code=$(curl -sS -o /tmp/gh-dispatch.json -w '%{http_code}' -X POST "${auth[@]}" \
+    -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$tag\"}}" \
+    "$api/repos/$repo/actions/workflows/release-apt.yml/dispatches")
+case "$code" in
+204) echo "release-apt dispatched for $tag" ;;
+*)
+    cat /tmp/gh-dispatch.json >&2
+    echo "cannot dispatch release-apt (HTTP $code); the token needs Actions: read and write" >&2
+    exit 1
+    ;;
+esac

@@ -5,13 +5,14 @@ name: release-apt
 # repository on the gh-pages branch. There is no build here: the canonical
 # build only runs once, on GitLab.
 #
+# The GitLab job dispatches this workflow after the uploads; a `release:
+# published` trigger would race the per-file asset uploads.
+#
 # Repository settings -> Pages -> Source: "Deploy from a branch", branch
 # gh-pages, folder "/". Secrets: GPG_PRIVATE_KEY (base64 of the armored secret
 # key), GPG_KEY_ID (the fingerprint) and GPG_PASSPHRASE (the key's passphrase);
 # see packaging/apt/README.md.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
