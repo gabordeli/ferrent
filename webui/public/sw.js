@@ -10,6 +10,10 @@ const SHELL = [
   "/icons/apple-touch-icon.png",
 ];
 
+// Only these API endpoints are safe to serve from the cache when the daemon is
+// unreachable; the rest must fail loudly.
+const CACHEABLE_API = ["/api/torrents", "/api/session", "/api/labels"];
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -34,73 +38,56 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-self.addEventListener("fetch", (event) => {
-  const request = event.request;
-  if (request.method !== "GET") return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) {
-    if (
-      request.method === "GET" &&
-      (url.pathname.startsWith("/api/torrents") ||
-        url.pathname === "/api/session" ||
-        url.pathname === "/api/labels")
-    ) {
-      event.respondWith(apiResponse(request));
-    }
-    return;
-  }
+function isCacheableApi(pathname) {
+  return CACHEABLE_API.some(
+    (endpoint) =>
+      pathname === endpoint || pathname.startsWith(`${endpoint}/`),
+  );
+}
 
-  if (request.mode === "navigate") {
-    if (url.pathname === "/share") {
-      event.respondWith(
-        caches
-          .match("/index.html")
-          .then((cached) => cached || fetch("/index.html")),
-      );
-      return;
-    }
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put("/index.html", copy));
-          return response;
-        })
-        .catch(() => caches.match("/index.html")),
-    );
-    return;
-  }
+function isShellAsset(pathname) {
+  return (
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/icons/") ||
+    pathname === "/favicon.svg" ||
+    pathname === "/manifest.webmanifest"
+  );
+}
 
-  if (
-    url.pathname.startsWith("/assets/") ||
-    url.pathname.startsWith("/icons/") ||
-    url.pathname === "/favicon.svg" ||
-    url.pathname === "/manifest.webmanifest"
-  ) {
-    event.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ||
-          fetch(request).then((response) => {
-            if (response.ok) {
-              const copy = response.clone();
-              caches.open(CACHE).then((cache) => cache.put(request, copy));
-            }
-            return response;
-          }),
-      ),
-    );
+async function cachePut(cacheName, request, response) {
+  const cache = await caches.open(cacheName);
+  await cache.put(request, response);
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) await cachePut(CACHE, request, response.clone());
+  return response;
+}
+
+async function networkFirstShell(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) await cachePut(CACHE, "/index.html", response.clone());
+    return response;
+  } catch {
+    const cached = await caches.match("/index.html");
+    return cached || Response.error();
   }
-});
+}
+
+async function cachedShell() {
+  const cached = await caches.match("/index.html");
+  if (cached) return cached;
+  return fetch("/index.html");
+}
 
 async function apiResponse(request) {
   try {
     const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(API_CACHE);
-      cache.put(request, response.clone());
-    }
+    if (response.ok) await cachePut(API_CACHE, request, response.clone());
     return response;
   } catch {
     const cached = await caches.match(request);
@@ -115,11 +102,71 @@ async function apiResponse(request) {
   }
 }
 
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (url.pathname.startsWith("/api/")) {
+    if (isCacheableApi(url.pathname)) {
+      event.respondWith(apiResponse(request));
+    }
+    return;
+  }
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      url.pathname === "/share"
+        ? cachedShell()
+        : networkFirstShell(request),
+    );
+    return;
+  }
+
+  if (isShellAsset(url.pathname)) {
+    event.respondWith(cacheFirst(request));
+  }
+});
+
 self.addEventListener("message", (event) => {
+  // Only the app itself may clear the API cache.
+  if (event.origin !== self.location.origin) return;
   if (event.data?.type === "clear-api-cache") {
     event.waitUntil(caches.delete(API_CACHE));
   }
 });
+
+function notificationContent(payload, hu) {
+  const fallback = hu ? "Hiba" : "Error";
+  if (payload.kind === "finished") {
+    return {
+      title: hu ? "Torrent kész" : "Torrent finished",
+      body: payload.name || payload.body || "",
+    };
+  }
+  if (payload.kind === "error") {
+    const detail = payload.name
+      ? `${payload.name}: ${payload.message || fallback}`
+      : payload.body || "";
+    return {
+      title: hu ? "Torrent hiba" : "Torrent error",
+      body: detail,
+    };
+  }
+  if (payload.kind === "test") {
+    return {
+      title: hu ? "Deluge Mobile teszt" : "Deluge Mobile test",
+      body: hu
+        ? "A push értesítések működnek."
+        : "Push notifications are working.",
+    };
+  }
+  return {
+    title: payload.title || "Deluge Mobile",
+    body: payload.body || "",
+  };
+}
 
 self.addEventListener("push", (event) => {
   let payload = {};
@@ -128,27 +175,9 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data ? event.data.text() : "" };
   }
-  const language = (
-    (self.navigator && self.navigator.language) ||
-    "en"
-  ).toLowerCase();
+  const language = (self.navigator?.language || "en").toLowerCase();
   const hu = language.startsWith("hu");
-  let title = payload.title || "Deluge Mobile";
-  let body = payload.body || "";
-  if (payload.kind === "finished") {
-    title = hu ? "Torrent kész" : "Torrent finished";
-    body = payload.name || body;
-  } else if (payload.kind === "error") {
-    title = hu ? "Torrent hiba" : "Torrent error";
-    body = payload.name
-      ? `${payload.name}: ${payload.message || (hu ? "Hiba" : "Error")}`
-      : body;
-  } else if (payload.kind === "test") {
-    title = hu ? "Deluge Mobile teszt" : "Deluge Mobile test";
-    body = hu
-      ? "A push értesítések működnek."
-      : "Push notifications are working.";
-  }
+  const { title, body } = notificationContent(payload, hu);
   const url = payload.url || "/";
   event.waitUntil(
     self.registration.showNotification(title, {

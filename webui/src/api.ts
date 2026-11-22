@@ -507,23 +507,26 @@ export function addTorrentUrl(
   return addTorrentMagnet(url, options);
 }
 
-export function addTorrentFile(
+export async function addTorrentFile(
   file: File,
   options: AddTorrentOptions = {},
 ): Promise<{ id: string }> {
-  return file.arrayBuffer().then((buffer) => {
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return request<{ id: number }>("/api/torrents", {
-      method: "POST",
-      body: JSON.stringify({
-        metainfo: btoa(binary),
-        name: file.name,
-        ...addBody(options),
-      }),
-    }).then((result) => ({ id: String(result.id) }));
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // btoa() takes a binary string, and spreading the whole buffer at once can
+  // exceed the argument limit, so build it in 32 KiB chunks.
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCodePoint(...bytes.subarray(offset, offset + 0x8000));
+  }
+  const result = await request<{ id: number }>("/api/torrents", {
+    method: "POST",
+    body: JSON.stringify({
+      metainfo: btoa(binary),
+      name: file.name,
+      ...addBody(options),
+    }),
   });
+  return { id: String(result.id) };
 }
 
 export function pauseTorrent(id: string): Promise<{ state: string }> {

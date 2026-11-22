@@ -42,3 +42,8 @@ dist/
 
 # ci/perf.sh writes the current run here; the baseline is committed
 /perf-result.json
+
+# python coverage state from the ci helper tests
+/.coverage
+/ci/coverage.xml
+__pycache__/

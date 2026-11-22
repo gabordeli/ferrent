@@ -74,10 +74,50 @@ buf-lint:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
+# The web UI coverage feeds Sonar's new-coverage gate; the scanner does not run
+# npm itself, so the lcov report is produced here and passed as an artifact.
+webui-coverage:
+  stage: quality
+  script:
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -w /src/webui
+        -u "$(id -u):$(id -g)"
+        -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache
+        node:22-bookworm sh -c 'npm ci --no-audit --no-fund && npm run test:coverage'
+  artifacts:
+    paths:
+      - webui/coverage/lcov.info
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# Same contract for the CI helper scripts: the clippy→Sonar converter feeds
+# the quality gate, so it is unit tested and its coverage goes to Sonar too.
+ci-tests:
+  stage: quality
+  script:
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -w /src
+        -u "$(id -u):$(id -g)"
+        -e HOME=/tmp -e PIP_CACHE_DIR=/tmp/pip -e PYTHONDONTWRITEBYTECODE=1
+        python:3.12-slim sh -c '
+        pip install -q pytest coverage &&
+        python -m coverage run --source=ci -m pytest ci -q &&
+        python -m coverage report -m &&
+        python -m coverage xml -o ci/coverage.xml'
+  artifacts:
+    paths:
+      - ci/coverage.xml
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
 sonarqube:
   stage: sonar
   needs:
     - clippy-report
+    - webui-coverage
+    - ci-tests
   variables:
     GIT_DEPTH: "0"
   script:

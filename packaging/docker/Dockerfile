@@ -24,9 +24,8 @@ FROM debian:trixie-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libtorrent-rasterbar2.0 ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN useradd --system --uid 1000 --home-dir /var/lib/ferrent --shell /usr/sbin/nologin ferrent \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 1000 --home-dir /var/lib/ferrent --shell /usr/sbin/nologin ferrent \
     && install -d -o ferrent -g ferrent /var/lib/ferrent /var/lib/ferrent/downloads
 
 COPY --from=build /src/target/release/ferrentd /usr/bin/ferrentd

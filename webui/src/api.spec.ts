@@ -3,20 +3,67 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ForbiddenError,
   UnauthorizedError,
+  addLabel,
   addTorrentFile,
   addTorrentMagnet,
+  addTorrentUrl,
   bulkAction,
   eventsUrl,
+  getAuthInfo,
+  getHealth,
   getLabels,
+  getPushConfig,
+  getPushSubscriptions,
   getSession,
+  getToken,
+  getTorrent,
+  getTorrentFiles,
+  getTorrentOptions,
+  listDirs,
+  listTorrentIds,
   listTorrents,
   login,
+  logout,
+  moveTorrent,
+  pauseSession,
   pauseTorrent,
+  queueTorrent,
+  reannounceTorrent,
+  recheckTorrent,
+  removeLabel,
+  removePushSubscription,
   removeTorrent,
+  resumeSession,
+  resumeTorrent,
+  setFilePriorities,
   setLabel,
+  setSessionLimits,
+  setSessionQueue,
+  setToken,
+  setTorrentLimits,
+  setTorrentOptions,
   stateName,
+  subscribePush,
+  testPush,
+  unsubscribePush,
   updateTorrent,
 } from "./api";
+
+const ROW = {
+  id: 7,
+  name: "movie.mkv",
+  total_bytes: 1000,
+  state: 3,
+  progress: 0.5,
+  download_rate: 12,
+  upload_rate: 3,
+  seeds: 1,
+  peers: 2,
+  eta_seconds: 30,
+  save_path: "/data",
+  label: "movies",
+  error: "",
+};
 
 type Call = { url: string; init: RequestInit };
 
@@ -213,5 +260,160 @@ describe("mapping helpers", () => {
     expect(row.progress).toBe(25);
     expect(row.download_payload_rate).toBe(9);
     expect(row.label).toBe("movies");
+  });
+});
+
+describe("token", () => {
+  it("stores and reads the cookie marker", () => {
+    setToken("cookie");
+    expect(getToken()).toBe("cookie");
+    setToken("");
+    expect(getToken()).toBe("");
+  });
+});
+
+describe("gateway compatibility shims", () => {
+  it("reports health and the auth mode without a daemon round trip", async () => {
+    mockFetch({ ok: true });
+    await expect(getHealth()).resolves.toMatchObject({ ok: true, port: null });
+    await expect(getAuthInfo()).resolves.toMatchObject({
+      mode: "password",
+      modes: ["password"],
+    });
+    await expect(pauseSession()).resolves.toEqual({ paused: false });
+    await expect(resumeSession()).resolves.toEqual({ paused: false });
+    await expect(
+      setSessionLimits({ max_download_speed: 5, max_upload_speed: 2 }),
+    ).resolves.toEqual({ max_download_speed: 5, max_upload_speed: 2 });
+    await expect(setSessionQueue({ max_active_downloading: 3 })).resolves.toEqual({
+      max_active_downloading: 3,
+    });
+  });
+
+  it("adds and removes a label over the REST routes", async () => {
+    mockFetch({ name: "series" });
+    await expect(addLabel("series")).resolves.toEqual({ id: "series" });
+    expect(calls[0].url).toBe("/api/labels");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ name: "series" });
+
+    mockFetch({ removed: true });
+    await expect(removeLabel("series")).resolves.toEqual({
+      id: "series",
+      removed: true,
+    });
+    expect(calls[0].url).toBe("/api/labels/series");
+    expect(calls[0].init.method).toBe("DELETE");
+  });
+
+  it("clears the token on logout", async () => {
+    mockFetch({});
+    setToken("cookie");
+    await expect(logout()).resolves.toEqual({ ok: true, session: false });
+    expect(getToken()).toBe("");
+  });
+
+  it("resumes, queues and moves torrents", async () => {
+    mockFetch({});
+    await expect(resumeTorrent("7")).resolves.toEqual({ state: "Queued" });
+    expect(calls[0].url).toBe("/api/torrents/7/resume");
+    await expect(queueTorrent("7", "top")).resolves.toEqual({ action: "top" });
+    await expect(reannounceTorrent("7")).resolves.toEqual({
+      id: "7",
+      reannounced: false,
+    });
+    await expect(recheckTorrent("7")).resolves.toEqual({
+      id: "7",
+      rechecked: false,
+    });
+    await expect(moveTorrent("7", "/data")).resolves.toEqual({
+      id: "7",
+      destination: "/data",
+      moving: false,
+    });
+  });
+
+  it("only accepts magnet URLs from the URL field", async () => {
+    mockFetch({ id: 9 });
+    await expect(addTorrentUrl("http://example.test/x.torrent")).rejects.toThrow(
+      "magnet",
+    );
+    await expect(addTorrentUrl("magnet:?xt=urn:btih:aa")).resolves.toEqual({
+      id: "9",
+    });
+    expect(calls[0].url).toBe("/api/torrents");
+  });
+
+  it("maps a single torrent and its files", async () => {
+    mockFetch(ROW);
+    const detail = await getTorrent("7");
+    expect(detail).toMatchObject({ id: "7", progress: 50, num_peers: 2 });
+
+    mockFetch({
+      files: [
+        { path: "a.mkv", size: 10, progress: 1, priority: 4 },
+        { path: "b.srt", size: 5, progress: 1, priority: 0 },
+      ],
+    });
+    const files = await getTorrentFiles("7", 0, 10);
+    expect(files.total).toBe(2);
+    expect(files.files[1]).toMatchObject({ path: "b.srt", offset: 10 });
+    const filtered = await getTorrentFiles("7", 0, 10, "B.");
+    expect(filtered.total).toBe(1);
+  });
+
+  it("lists ids with the paging filters", async () => {
+    mockFetch({ torrents: [ROW], total: 1 });
+    await expect(
+      listTorrentIds({
+        q: "movie",
+        state: "Downloading",
+        label: "movies",
+        sort: "id",
+      }),
+    ).resolves.toEqual({ ids: ["7"], total: 1, limit: 1 });
+    const url = decodeURIComponent(calls[0].url);
+    expect(url).toContain("limit=1000");
+    expect(url).toContain("filter=movie");
+    expect(url).toContain("state=downloading");
+  });
+
+  it("keeps the unimplemented endpoints neutral", async () => {
+    await expect(listDirs("/data")).resolves.toMatchObject({
+      path: "/data",
+      parent: "/",
+      dirs: [],
+    });
+    await expect(listDirs("/")).resolves.toMatchObject({ parent: null });
+    await expect(
+      setFilePriorities("7", { files: [{ index: 0, priority: 7 }] }),
+    ).resolves.toEqual({ id: "7", priorities: [7] });
+    const options = await getTorrentOptions("7");
+    expect(options.options.auto_managed).toBe(true);
+    await expect(
+      setTorrentOptions("7", { sequential_download: true }),
+    ).resolves.toMatchObject({
+      options: { sequential_download: true, auto_managed: true },
+    });
+    await expect(
+      setTorrentLimits("7", { max_download_speed: 1 }),
+    ).resolves.toEqual({ id: "7", max_download_speed: 1, max_upload_speed: 0 });
+    await expect(getPushConfig()).resolves.toEqual({
+      enabled: false,
+      public_key: "",
+      subscriptions: 0,
+    });
+    await expect(subscribePush({ endpoint: "https://push.test/1" })).resolves.toEqual(
+      { count: 0 },
+    );
+    await expect(unsubscribePush("https://push.test/1")).resolves.toEqual({
+      unsubscribed: false,
+    });
+    await expect(testPush("https://push.test/1")).resolves.toEqual({
+      queued: false,
+    });
+    await expect(getPushSubscriptions()).resolves.toEqual({ subscriptions: [] });
+    await expect(removePushSubscription("s1")).resolves.toEqual({
+      unsubscribed: false,
+    });
   });
 });

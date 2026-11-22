@@ -27,7 +27,9 @@ ci/check-libtorrent.sh # a cxx bridge clippy + teszt libtorrenttel
 | cleanup | `cleanup-workspace` | mindig; a Dockeres futás root-owned fájljait javítja |
 | quality | `clippy-report` | MR és default branch; clippy JSON → Sonar generic issues |
 | quality | `buf-lint` | MR és default branch; `buf lint` a protón (ugyanaz, mint a GitHub `proto` job) |
-| sonar | `sonarqube` | az előző artifactjára épül, blocking quality gate |
+| quality | `webui-coverage` | MR és default branch; `npm ci` + `npm run test:coverage` → `webui/coverage/lcov.info` |
+| quality | `ci-tests` | MR és default branch; a `ci/` helperek pytestje + `ci/coverage.xml` |
+| sonar | `sonarqube` | a három artifactra épül (`clippy-report`, `webui-coverage`, `ci-tests`), blocking quality gate |
 | version | `release-version` | **manuális**: `Run pipeline` (web/api) a default branch-en |
 | release | `release-deb` | a version job után (vagy `v*` tagen): 2 arch, container-teszt, GitLab generic registry + GitHub Release asset |
 
@@ -58,14 +60,30 @@ empty”** volt. A Rust minőséget a clippy adja (`clippy-report` →
 Amit a Sonar tényleg mér (`sonar.sources=.`): a `webui/` TypeScript/Vue/CSS
 frontend (`webui/src`, `webui/public/sw.js`, `index.html`), a CI- és
 packaging-YAML/JSON (`gitlab-ci.yml`, `.github/workflows/*`, `buf.yaml`), a
-`ci/*.py`. 2026-11-22-én ez **30 fájl / ~6,6 ezer ncloc / 12 issue**, a kapu
-`OK`. Nyelv szerint 42 forrásfájl és 21 tesztfájl indexelődik (12 ts, 13 js,
+`ci/*.py`. 2026-11-22-én ez **30 fájl / ~6,7 ezer ncloc / 0 issue** (a
+kiinduló 12 issue-t a `sw.js` és az `api.ts` átírása szüntette meg), a kapu
+`OK`. Nyelv szerint 42 forrásfájl és 22 tesztfájl indexelődik (12 ts, 13 js,
 7 yaml, 5 json, 2 py, 1-1 css/html/Dockerfile); a 98 követett `.rs` és a
 `bridge.cpp` nyelv nélkül kerül be, tehát mérhetetlen.
 
-A `webui/**/*.spec.ts` tesztfájl (`sonar.tests=.` + `sonar.test.inclusions`),
-21 fájl. A `sonar.projectVersion` a `packaging/debian/version.sh --cargo`
-értéke (a propertiesben csak fallback van).
+A `webui/**/*.spec.ts` és a `ci/test_*.py` tesztfájl (`sonar.tests=.` +
+`sonar.test.inclusions`), 21 + 1 fájl. A `sonar.projectVersion` a
+`packaging/debian/version.sh --cargo` értéke (a propertiesben csak fallback
+van).
+
+**Lefedettség.** A scanner nem futtat sem `npm`-et, sem `pytest`-et, ezért a
+két lefedettségi riport artifactként érkezik:
+
+| Job | Riport | Sonar property |
+|---|---|---|
+| `webui-coverage` | `webui/coverage/lcov.info` (vitest + v8) | `sonar.javascript.lcov.reportPaths` |
+| `ci-tests` | `ci/coverage.xml` (cobertura, `ci/` source) | `sonar.python.coverage.reportPaths` |
+
+A `webui/public/**` (service worker) ki van véve a lefedettségből
+(`sonar.coverage.exclusions`): vitestből nem importálható, browser-kontextus
+kell hozzá. A `ci/make-logo.py` régi, teszt nélküli szkript, a sorai nem
+számítanak új kódnak. Mért állapot 2026-11-22: **coverage 82,4%**, a new code
+98,4%, a kapu `OK`, 0 issue.
 
 Két Community-korlát, amit a beállítás nem tud megkerülni:
 
