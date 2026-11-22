@@ -57,6 +57,10 @@ plugin-config könyvtár üresen hagyva a `state/` mellett keresendő.
 A művelet ismételhető (idempotens), és ugyanazt a kódot használja, mint a
 `ferrent-cli import-deluge`; a részletek: `docs/deluge-migration.md`.
 
+![Import fül](images/import-tab.png)
+
+![A tábla az import után](images/import-paused-table.png)
+
 ## Billentyűparancsok
 
 | Billentyű | Művelet |
