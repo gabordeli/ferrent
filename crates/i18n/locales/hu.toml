@@ -203,6 +203,8 @@
 "Cancel" = "Mégse"
 "None" = "Nincs"
 "{} torrent(s) selected" = "{} torrent kiválasztva"
+"All {} on this page are selected" = "{} kijelölve ezen az oldalon"
+"Select all {} torrents" = "Mind a {} torrent kijelölése"
 "Add" = "Hozzáadás"
 "Enabled" = "Engedélyezve"
 "Network" = "Hálózat"

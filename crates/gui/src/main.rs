@@ -162,6 +162,9 @@ enum Message {
         offset: usize,
         result: Result<Page, String>,
     },
+    /// Ctrl+A only reaches the loaded page; select every matching torrent.
+    SelectAllTorrents,
+    AllTorrentsLoaded(Result<Page, String>),
     Reconnect(u64),
     FilterChanged(String),
     FilterSettled(u64),
@@ -890,6 +893,8 @@ impl App {
                 offset,
                 result,
             } => self.page_loaded(request, offset, result),
+            Message::SelectAllTorrents => self.select_all_torrents(),
+            Message::AllTorrentsLoaded(result) => self.all_torrents_loaded(result),
             Message::Reconnect(generation) => {
                 if generation == self.generation && self.client.is_none() {
                     if let Some(config) = self.last_config.clone() {
@@ -2330,6 +2335,57 @@ impl App {
         }
         self.active = self.page.torrents.first().map(|torrent| torrent.id);
         self.status = format!("{} selected on this page", self.selected.len());
+        Task::none()
+    }
+
+    /// Selects every torrent matching the filter, not just the loaded page.
+    ///
+    /// The table keeps one page in memory, so Ctrl+A can only reach those
+    /// rows; the full match set comes from one oversized `ListTorrents`.
+    fn select_all_torrents(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let total = self.page.total;
+        if total == 0 {
+            return Task::none();
+        }
+        if total as usize <= self.page.torrents.len() {
+            return self.select_all_page();
+        }
+        let query = connection::ListQuery {
+            filter: self.filter.clone(),
+            state: self.state_filter,
+            label: self.label_filter.clone(),
+            sort: self.sort,
+            descending: self.descending,
+            offset: 0,
+            limit: total,
+        };
+        self.status = "Selecting every matching torrent...".to_owned();
+        Task::perform(
+            async move { connection::list(&client, &query).await },
+            Message::AllTorrentsLoaded,
+        )
+    }
+
+    fn all_torrents_loaded(&mut self, result: Result<Page, String>) -> Task<Message> {
+        match result {
+            Ok(page) => {
+                let active = self.active;
+                self.selected.clear();
+                self.selected_torrents.clear();
+                for torrent in page.torrents {
+                    self.selected.insert(torrent.id);
+                    self.selected_torrents.insert(torrent.id, torrent);
+                }
+                self.active = active
+                    .filter(|id| self.selected.contains(id))
+                    .or_else(|| self.selected.iter().next().copied());
+                self.status = format!("{} selected", self.selected.len());
+            }
+            Err(error) => self.status = format!("Select all failed: {error}"),
+        }
         Task::none()
     }
 
@@ -5964,9 +6020,14 @@ impl App {
     fn main_view(&self) -> Element<'_, Message> {
         row![
             self.sidebar_view(),
-            column![self.toolbar_view(), self.table_view(), self.details_panel()]
-                .width(Length::Fill)
-                .height(Length::Fill),
+            column![
+                self.toolbar_view(),
+                self.select_all_hint(),
+                self.table_view(),
+                self.details_panel()
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
         ]
         .width(Length::Fill)
         .height(Length::Fill)
@@ -6047,6 +6108,62 @@ impl App {
             Some(overlay) => iced::widget::stack![base, overlay].into(),
             None => base,
         }
+    }
+
+    /// Offers the full match set once the whole page is selected: Ctrl+A is
+    /// bounded by the loaded page, which is easy to miss on a long list.
+    fn select_all_hint(&self) -> Element<'_, Message> {
+        let loaded = self.page.torrents.len();
+        let total = self.page.total as usize;
+        if !offers_select_all(total, loaded, self.selected.len()) {
+            return iced::widget::Space::with_height(0).into();
+        }
+        container(
+            row![
+                text(i18n::t_fmt(
+                    "All {} on this page are selected",
+                    &[&loaded.to_string()]
+                ))
+                .size(11)
+                .color(theme::text_secondary()),
+                button(
+                    text(i18n::t_fmt("Select all {} torrents", &[&total.to_string()]))
+                        .size(11)
+                        .color(theme::primary()),
+                )
+                .on_press(Message::SelectAllTorrents)
+                .padding([2, 8])
+                .style(|_theme: &iced::Theme, status| button::Style {
+                    background: (status == button::Status::Hovered)
+                        .then(|| iced::Color {
+                            a: 0.12,
+                            ..theme::primary()
+                        })
+                        .map(iced::Background::Color),
+                    text_color: theme::primary(),
+                    border: iced::Border {
+                        color: theme::primary(),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..button::Style::default()
+                }),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 12])
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme| container::Style {
+            background: Some(theme::bg_secondary().into()),
+            border: iced::Border {
+                color: theme::border(),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
     }
 
     fn sidebar_view(&self) -> Element<'_, Message> {
@@ -7932,6 +8049,12 @@ fn status_numbers(
     }
 }
 
+/// Whether the "select all matching" offer belongs under the toolbar: the
+/// whole loaded page is selected, but the filter matches more than that page.
+fn offers_select_all(total: usize, loaded: usize, selected: usize) -> bool {
+    loaded > 0 && total > loaded && selected == loaded
+}
+
 fn state_style(state: ConnectionState) -> (&'static str, Color) {
     match state {
         ConnectionState::Idle => (i18n::t("idle"), theme::text_muted()),
@@ -8140,6 +8263,24 @@ mod status_bar_tests {
             active: 3,
             ..ServerStatus::default()
         }
+    }
+
+    #[test]
+    fn the_full_selection_offer_needs_a_bigger_match_set() {
+        assert!(
+            offers_select_all(916, 100, 100),
+            "a fully selected page of a longer list offers every match"
+        );
+        assert!(
+            !offers_select_all(100, 100, 100),
+            "nothing more to offer when the page is the whole list"
+        );
+        assert!(!offers_select_all(916, 100, 3), "partial selection");
+        assert!(!offers_select_all(0, 0, 0), "empty list");
+        assert!(
+            !offers_select_all(916, 100, 916),
+            "the offer retires once every match is selected"
+        );
     }
 
     #[test]
