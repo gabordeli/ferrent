@@ -42,6 +42,68 @@ A kiadás belépője a GitLab UI egy mezője (`release_version`, vagy
 megírja a `Cargo.toml`-t, commitol, tagel; a `release-deb` abból a commitból
 dolgozik. A CI-jobb-tokenes push nem indít új pipeline-t.
 
+## SonarQube (Community Build 26.11)
+
+A szerver a `.27`-en fut (`SONAR_HOST_URL`), a `SONAR_TOKEN` egy
+**project analysis token**: elemzést tud beküldeni, de nem tud böngészni
+(`canAdmin: false`, a `components/tree` és `ce/activity` 403).
+
+A Community Buildben **nincs Rust- (és C++-) elemző**, a nyelvlistában
+`rust` nem szerepel. Ezért a `.rs` fájlok „indexed with no language”
+státuszba kerülnek, nem adnak `ncloc`-ot, és amíg csak a `crates/` volt a
+`sonar.sources`, a projekt a dashboardon **„The main branch of this project is
+empty”** volt. A Rust minőséget a clippy adja (`clippy-report` →
+`ci/clippy_to_sonar.py` → `sonar-issues.json` → external issues).
+
+Amit a Sonar tényleg mér (`sonar.sources=.`): a `webui/` TypeScript/Vue/CSS
+frontend (`webui/src`, `webui/public/sw.js`, `index.html`), a CI- és
+packaging-YAML/JSON (`gitlab-ci.yml`, `.github/workflows/*`, `buf.yaml`), a
+`ci/*.py`. 2026-11-22-én ez **30 fájl / 6644 ncloc / 12 issue**, a kapu
+`OK`. Nyelv szerint 42 forrásfájl és 21 tesztfájl indexelődik (12 ts, 13 js,
+7 yaml, 5 json, 2 py, 1-1 css/html/Dockerfile); a 98 követett `.rs` és a
+`bridge.cpp` nyelv nélkül kerül be, tehát mérhetetlen.
+
+A `webui/**/*.spec.ts` tesztfájl (`sonar.tests=.` + `sonar.test.inclusions`),
+21 fájl. A `sonar.projectVersion` a `packaging/debian/version.sh --cargo`
+értéke (a propertiesben csak fallback van).
+
+Két Community-korlát, amit a beállítás nem tud megkerülni:
+
+1. **Nincs branch-elemzés.** A `-Dsonar.branch.name` a szkennert elhasalja:
+   `Developer Edition or above is required`. Tehát minden MR-szkennelés a
+   **main branch** adatait írja felül; a merge utáni main futás állítja helyre.
+2. **A new code definíció `PREVIOUS_VERSION`.** A minőségi kapu feltételei
+   (`new_violations = 0`, `new_coverage ≥ 80`, `new_duplicated_lines_density
+   ≤ 3`) csak a legutóbbi *verzióváltás* óti változásra futnak, ezért
+   verzióbump nélkül a kapu gyakorlatilag nem tud megbukni. A projekten a
+   **Settings → New Code → Previous analysis** (vagy 30 nap) beállítás kell
+   hozzá; ehhez admin token/UI kell, a CI-token nem tudja átállítani.
+
+Ellenőrzés (token a GitLab `56` projekt CI-változóiból):
+
+```bash
+SONAR_HOST=$(curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "https://cirice-gitlab.ddns.net/api/v4/projects/56/variables/SONAR_HOST_URL" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+SONAR_TOKEN=$(curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "https://cirice-gitlab.ddns.net/api/v4/projects/56/variables/SONAR_TOKEN" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+K=gabor_ferrent_dcc673cc-9b07-496b-8b48-ea24ebde06f8
+curl -s -u "$SONAR_TOKEN:" \
+  "$SONAR_HOST/api/measures/component?component=$K&metricKeys=ncloc,files,violations"
+```
+
+Helyi szkennelés ugyanazzal a képpel, mint a CI (a `--network host` kell, a
+tanúsítvány a hosztnévre szól):
+
+```bash
+docker run --rm --network host -u "$(id -u):$(id -g)" \
+  -v "$PWD:/usr/src" -w /usr/src \
+  -e SONAR_HOST_URL -e SONAR_TOKEN \
+  sonarsource/sonar-scanner-cli:latest \
+  -Dsonar.projectVersion="$(packaging/debian/version.sh --cargo)"
+```
+
 ## GitHub-tükör
 
 A GitHub repó (`gabordeli/ferrent`) a privát GitLab repó **egyirányú,

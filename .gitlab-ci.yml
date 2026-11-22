@@ -85,6 +85,7 @@ sonarqube:
         -v "$CI_PROJECT_DIR:/usr/src" -w /usr/src
         -e SONAR_HOST_URL -e SONAR_TOKEN
         sonarsource/sonar-scanner-cli:latest
+        -Dsonar.projectVersion="$(bash packaging/debian/version.sh --cargo)"
         -Dsonar.externalIssuesReportPaths=sonar-issues.json
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
