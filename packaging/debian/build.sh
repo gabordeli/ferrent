@@ -71,11 +71,14 @@ esac
 
 gui_apt=""
 gui_run=""
+gui_build=""
 if [ "$gui" = 1 ]; then
     gui_apt="libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libglib2.0-dev libgtk-3-dev"
-    gui_run='RUN cargo build --release -p ferrent-gui $cargo_target \
- && cargo deb -p ferrent-gui --no-build $cargo_target \
-      --deb-version "$DEB_VERSION" --output /out'
+    gui_build=" \\
+ && cargo build --release -p ferrent-gui $cargo_target"
+    gui_run=" \\
+ && cargo deb -p ferrent-gui --no-build $cargo_target \\
+      --deb-version \"\$DEB_VERSION\" --output /out"
 fi
 
 work=$(mktemp -d)
@@ -116,10 +119,15 @@ WORKDIR /src
 ENV PKG_CONFIG_PATH=$pkg_config_path FERRENT_LIBTORRENT_STATIC=1
 $link_env
 RUN cargo build --release -p ferrent-daemon --features libtorrent $cargo_target \\
- && cargo build --release -p ferrent-cli $cargo_target \\
+ && cargo build --release -p ferrent-cli $cargo_target$gui_build \\
  && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target \\
-      --deb-version "\$DEB_VERSION" --output /out
-$gui_run
+      --deb-version "\$DEB_VERSION" --output /out$gui_run \\
+ && rm -rf target/release/deps target/release/build target/release/incremental \\
+           target/release/.fingerprint \\
+           target/aarch64-unknown-linux-gnu/release/deps \\
+           target/aarch64-unknown-linux-gnu/release/build \\
+           target/aarch64-unknown-linux-gnu/release/incremental \\
+           target/aarch64-unknown-linux-gnu/release/.fingerprint
 RUN dpkg-deb -f /out/*.deb Package Version Architecture
 EOF
 
@@ -130,6 +138,9 @@ if [ -n "${FERRENT_DEB_PRINT_DOCKERFILE:-}" ]; then
 fi
 
 echo "== building $tag (libtorrent $LT_VERSION, static)"
+# The builder tag is disposable; dropping the previous image before the build
+# keeps the runner's disk free (the CI runner has ~8 GB of headroom).
+docker image rm -f "$tag" >/dev/null 2>&1 || true
 # Plain progress: a failing RUN must leave the compiler output in the CI log.
 docker build --progress=plain -f "$work/Dockerfile" --build-arg DEB_VERSION="$deb_version" \
     -t "$tag" "$root"
@@ -138,4 +149,6 @@ cid=$(docker create "$tag")
 mkdir -p "$out"
 docker cp "$cid:/out/." "$out" >/dev/null
 docker rm "$cid" >/dev/null
+# The image was only the transport; the .deb files are in target/debian-dist.
+docker image rm -f "$tag" >/dev/null 2>&1 || true
 echo "== $(ls -l "$out"/*.deb | awk '{print $5, $9}')"
