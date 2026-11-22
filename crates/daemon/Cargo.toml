@@ -43,10 +43,9 @@ license-file = ["../../LICENSE", "0"]
 extended-description = "Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume restart."
 section = "net"
 priority = "optional"
-# Keep the symbols: the SDK resolves panic frames in-process, so a stripped
-# binary reports `<unknown>` frames to Bugsink (see the panic-probe example in
-# crates/telemetry).
-strip = false
+# The symbols are kept by packaging/debian/build.sh (`cargo deb --no-strip`):
+# cargo-deb 3.8 has no `strip` metadata key, and the SDK resolves panic frames
+# in-process, so a stripped binary reports `<unknown>` frames to Bugsink.
 depends = "$auto, adduser, init-system-helpers"
 # The 0.1.x packages were named after the binary. A single transition entry
 # lets apt replace them on upgrade while the service and paths stay the same.

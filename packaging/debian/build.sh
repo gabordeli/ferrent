@@ -77,7 +77,7 @@ if [ "$gui" = 1 ]; then
     gui_build=" \\
  && cargo build --release -p ferrent-gui $cargo_target"
     gui_run=" \\
- && cargo deb -p ferrent-gui --no-build $cargo_target \\
+ && cargo deb -p ferrent-gui --no-build --no-strip $cargo_target \\
       --deb-version \"\$DEB_VERSION\" --output /out"
 fi
 
@@ -120,8 +120,8 @@ ENV PKG_CONFIG_PATH=$pkg_config_path FERRENT_LIBTORRENT_STATIC=1
 $link_env
 RUN cargo build --release -p ferrent-daemon --features libtorrent $cargo_target \\
  && cargo build --release -p ferrent-cli $cargo_target$gui_build \\
- && cargo deb -p ferrent-daemon --features libtorrent --no-build $cargo_target \\
-      --deb-version "\$DEB_VERSION" --output /out$gui_run \\
+ && cargo deb -p ferrent-daemon --features libtorrent --no-build --no-strip \\
+      $cargo_target --deb-version "\$DEB_VERSION" --output /out$gui_run \\
  && rm -rf target/release/deps target/release/build target/release/incremental \\
            target/release/.fingerprint \\
            target/aarch64-unknown-linux-gnu/release/deps \\
