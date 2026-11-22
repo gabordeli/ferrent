@@ -6,6 +6,14 @@ lint:
     - STANDARD
   except:
     - SERVICE_SUFFIX
+  # CreateLabel and UpdateLabel return the same LabelResponse by design; a
+  # per-RPC message would duplicate the field, and renaming it would be a
+  # breaking change for the generated clients.
+  ignore_only:
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - crates/protocol/proto/ferrent/v1/ferrent.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - crates/protocol/proto/ferrent/v1/ferrent.proto
 breaking:
   use:
     - FILE

@@ -1,0 +1,33 @@
+name: install-deps
+description: >-
+  Installs the system packages the workspace build needs on Ubuntu runners.
+  Keep this list in sync with the clippy-report job in .gitlab-ci.yml.
+
+inputs:
+  gui:
+    description: Install the iced/winit and rfd/GTK development packages.
+    default: "true"
+  libtorrent:
+    description: Install libtorrent-rasterbar (the daemon's default feature).
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: apt install
+      shell: bash
+      run: |
+        set -euo pipefail
+        packages=(build-essential pkg-config)
+        if [ "${{ inputs.gui }}" = "true" ]; then
+          packages+=(
+            libxkbcommon-dev libwayland-dev libx11-dev
+            libxcursor-dev libxrandr-dev libxi-dev
+            libglib2.0-dev libgtk-3-dev
+          )
+        fi
+        if [ "${{ inputs.libtorrent }}" = "true" ]; then
+          packages+=(libssl-dev libtorrent-rasterbar-dev libboost-dev)
+        fi
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "${packages[@]}"

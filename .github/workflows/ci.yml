@@ -9,12 +9,17 @@ permissions:
   contents: read
   pull-requests: read
 
+# A newer push supersedes the running one; mirrors the GitLab runner rule.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       protocol: ${{ steps.filter.outputs.protocol }}
       engine: ${{ steps.filter.outputs.engine }}
@@ -34,6 +39,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             engine:
               - 'crates/engine/**'
               - 'Cargo.toml'
@@ -41,6 +47,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             daemon:
               - 'crates/daemon/**'
               - 'Cargo.toml'
@@ -48,6 +55,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             cli:
               - 'crates/cli/**'
               - 'Cargo.toml'
@@ -55,6 +63,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             gui:
               - 'crates/gui/**'
               - 'Cargo.toml'
@@ -62,14 +71,17 @@ jobs:
               - 'rust-toolchain.toml'
               - 'rustfmt.toml'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
 
   proto:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - run: buf lint
       - name: Breaking check
         run: |
@@ -86,7 +98,7 @@ jobs:
           fi
 
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -95,58 +107,62 @@ jobs:
       - run: cargo fmt --all --check
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The workspace default features include the libtorrent daemon and the
+      # GTK-backed file dialog, so both package sets are required.
+      - uses: ./.github/actions/install-deps
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Install iced system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   build-no-cpp:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The GUI and the CLI do not link libtorrent; only the GTK file dialog
+      # needs the GUI packages.
+      - uses: ./.github/actions/install-deps
+        with:
+          libtorrent: "false"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install iced system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build -p ferrent-gui -p ferrent-cli
 
   test-protocol:
     needs: changes
     if: needs.changes.outputs.protocol == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p ferrent-protocol
 
   test-engine:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p ferrent-engine
 
   test-engine-libtorrent:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-deps
+        with:
+          gui: "false"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install libtorrent build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libtorrent-rasterbar-dev libboost-dev
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -p ferrent-engine --features libtorrent --all-targets -- -D warnings
       - run: cargo test -p ferrent-engine --features libtorrent
       - run: cargo build -p ferrent-daemon --features libtorrent
@@ -154,30 +170,40 @@ jobs:
   test-daemon:
     needs: changes
     if: needs.changes.outputs.daemon == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The daemon's default feature is libtorrent.
+      - uses: ./.github/actions/install-deps
+        with:
+          gui: "false"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p ferrent-daemon
 
   test-cli:
     needs: changes
     if: needs.changes.outputs.cli == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The CLI dev-dependency pulls in the daemon with its default features.
+      - uses: ./.github/actions/install-deps
+        with:
+          gui: "false"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p ferrent-cli
 
   test-gui:
     needs: changes
     if: needs.changes.outputs.gui == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The GUI tests start a daemon from the dev-dependency, so both package
+      # sets are needed.
+      - uses: ./.github/actions/install-deps
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install iced system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p ferrent-gui

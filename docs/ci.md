@@ -26,9 +26,16 @@ ci/check-libtorrent.sh # a cxx bridge clippy + teszt libtorrenttel
 |---|---|---|
 | cleanup | `cleanup-workspace` | mindig; a Dockeres futás root-owned fájljait javítja |
 | quality | `clippy-report` | MR és default branch; clippy JSON → Sonar generic issues |
+| quality | `buf-lint` | MR és default branch; `buf lint` a protón (ugyanaz, mint a GitHub `proto` job) |
 | sonar | `sonarqube` | az előző artifactjára épül, blocking quality gate |
 | version | `release-version` | **manuális**: `Run pipeline` (web/api) a default branch-en |
 | release | `release-deb` | a version job után (vagy `v*` tagen): 2 arch, GitLab generic registry |
+
+A `LabelResponse` a `CreateLabel` és `UpdateLabel` közös response-a; a két
+RPC-névre vonatkozó lint-szabály (`RPC_REQUEST_RESPONSE_UNIQUE`,
+`RPC_RESPONSE_STANDARD_NAME`) alól a `buf.yaml` `ignore_only`-jal kiveszi. A
+`buf breaking` kapu érintetlen — egy response-típus átnevezése továbbra is
+bukik.
 
 A kiadás belépője a GitLab UI egy mezője (`release_version`, vagy
 `release_type` = patch/minor/major) — nem kézi tag push. A `release-version`
@@ -53,6 +60,36 @@ A push-mirrorhoz használt GitHub fine-grained PAT (a repóra scope-olva) jogai:
 
 A GitHub Actions a repó saját `GITHUB_TOKEN`-jét használja
 (`permissions: contents: write`), oda nem kell külön PAT.
+
+### GitHub CI jobok rendszercsomagjai
+
+A GitHub jobok a `.github/actions/install-deps` composite actiont hívják, két
+kapcsolóval: `gui` (iced/winit + rfd/GTK) és `libtorrent` (a daemon default
+feature-e). Ugyanaz a csomagkészlet, mint a GitLab `clippy-report` jobjában —
+a kettőt együtt kell tartani.
+
+| Job | `gui` | `libtorrent` |
+|---|---|---|
+| `clippy` (workspace, default features) | igen | igen |
+| `build-no-cpp` (GUI + CLI) | igen | nem |
+| `test-gui` (dev-dep daemon) | igen | igen |
+| `test-daemon` | nem | igen |
+| `test-cli` (dev-dep daemon) | nem | igen |
+| `test-engine-libtorrent` | nem | igen |
+| `test-engine`, `test-protocol`, `fmt`, `proto` | nem | nem |
+
+A futás állapota API-ból is megnézhető (a gépen nincs `gh` CLI); a script a
+legfrissebb `main` futást, vagy egy megadott run id-t jelent:
+
+```bash
+ci/github-ci-status.sh                     # legfrissebb main futás
+ci/github-ci-status.sh gabordeli/ferrent 44957670322
+```
+
+A token a `GITHUB_TOKEN` env változóból vagy a
+`~/.config/ferrent/github.pat` fájlból jön; ehhez `Actions: read` jog kell (a
+tükör-PAT tudja). A script a bukott joboknál a log cleanup előtti részét és a
+hibasorokat írja ki.
 
 Ellenőrzés (a token a `~/.config/ferrent/github.pat` fájlban):
 
