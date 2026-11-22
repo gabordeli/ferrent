@@ -60,10 +60,14 @@ debian:12) a két arch után futnak.
 
 ## Ismert hibák (rc1)
 
-1. **Az import-pause nem tapad meg**: a 916 torrent egy része (mért 155)
-   `downloading` marad, és a `pause` után is visszaáll; restart után a
-   paused állapot nem őrződik meg (a visszaállítás auto-managed-ként indít).
-   Reprod: `ferrent-cli pause 1` → `paused 1`, majd `show 1` → `downloading`.
+1. **Az import-pause (#81) — javítva** (`1d98821` + `6d9ccc2`): a restore most a
+   hozzáadással együtt viszi a `paused` flaget (`auto_managed` nélkül), és a
+   daemon a listener előtt egy `refresh_mirror`-t futtat, mert a tábla a
+   hozzáadáskori pillanatképet tartotta. Igazolva: **916/916 paused** indítás
+   után, 30 s múlva és egy második restart után is; startup 4,0 s. Nyitva: egy
+   resume-olt torrent RPC-s pause-a után a `show` még a régi állapotot adja
+   (restart helyreállítja), és a store rendben volt
+   (`torrents=916 paused_by_user=916`).
 2. **Deluge plugin-configok**: a `label.conf`/`autoadd.conf`/`execute.conf`/
    `scheduler.conf` két JSON-dokumentum (fejléc + payload), ezért a
    beolvasó `trailing characters` figyelmeztetést ad, és a címkék nem
