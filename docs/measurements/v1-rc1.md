@@ -13,8 +13,11 @@ Mérve 2026-11-22. A kiadás a `v1.0.0-rc1` tagen készült (`Cargo.toml`
 | `Ferrent-1.0.0-rc1-x86_64.AppImage` | amd64 | 36,7 MB | GitHub Release + Registry (`ferrent-gui/1.0.0-rc1`) |
 
 A `.deb` a Debian-féle `~rc1` alakot használja, a registry útvonala `-rc1`
-(a GitLab nem fogadja el a `~`-t a verzióban). A helyi build byte-azonos
-méretű a CI-ével (27 449 928 B), tehát a konténeres recept reprodukálható.
+(a GitLab nem fogadja el a `~`-t a verzióban). **A GitHub Release a `~`-t
+`.`-ra cseréli a asset-névben** (`ferrent_1.0.0.rc1-1_amd64.deb`), ezért a
+letöltött fájl neve eltér a csomagban lévő verziótól — az `apt install`-t nem
+zavarja. A helyi build byte-azonos méretű a CI-ével (27 449 928 B), tehát a
+konténeres recept reprodukálható.
 
 **Build idő:** amd64 konténer ~13 perc (statikus libtorrent ~5 perc + cargo
 ~5 perc + csomagolás), arm64 ~12 perc; a csomagtesztek (33+ assert,
