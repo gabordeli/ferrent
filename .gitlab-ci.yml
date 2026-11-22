@@ -169,12 +169,11 @@ release-deb:
     - TAG="$tag" packaging/debian/build.sh debian:12 amd64
     - TAG="$tag" packaging/debian/build.sh debian:12 arm64
     - packaging/debian/container-test.sh debian:12 target/debian-dist/ferrent_*_amd64.deb
-    - bash packaging/apt/publish-gitlab.sh target/debian-dist
-    # The GitHub mirror only signs: this job attaches the same .deb files to
-    # the release, and release-apt downloads them from there. A missing token
-    # fails loudly instead of publishing an empty release.
+    # The GitHub release is the path the server and the APT repo consume, so it
+    # goes before the registry upload: a registry hiccup must not block it.
     - ': "${GITHUB_RELEASE_TOKEN:?set the GITHUB_RELEASE_TOKEN CI variable}"'
     - GITHUB_TOKEN="$GITHUB_RELEASE_TOKEN" packaging/apt/publish-github-release.sh "$tag" target/debian-dist
+    - bash packaging/apt/publish-gitlab.sh target/debian-dist
   artifacts:
     paths:
       - target/debian-dist/*.deb

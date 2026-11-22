@@ -30,7 +30,9 @@ for deb in "${debs[@]}"; do
     package=$(printf '%s' "$file" | cut -d_ -f1)
     version=$(printf '%s' "$file" | sed -E 's/^[^_]+_([^_]+)_.*/\1/')
     [ -n "$package" ] && [ -n "$version" ] || { echo "cannot read package/version from $file" >&2; exit 1; }
-    upload_generic "$deb" "$package" "$version"
+    # GitLab rejects Debian's "~rc1" marker in a package version
+    # ("package_version is invalid"); the file name keeps it, the path does not.
+    upload_generic "$deb" "$package" "$(printf '%s' "$version" | tr '~' '-')"
 done
 
 echo "== packages in the registry:"
