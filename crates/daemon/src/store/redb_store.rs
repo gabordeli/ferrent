@@ -305,9 +305,12 @@ mod tests {
         store.batch(ops).expect("batch");
         let batch_elapsed = start.elapsed();
         // The debug budget has slack for a busy workstation (a running daemon,
-        // GUI and browser add tens of milliseconds); release keeps the tight one.
+        // GUI and browser) and for the shared GitHub runner, which runs the
+        // other 148 tests in parallel on a few cores (measured 1.03 s there);
+        // release keeps the tight one. A regression that rewrites every
+        // record still lands far above this.
         let batch_budget = if cfg!(debug_assertions) {
-            Duration::from_millis(400)
+            Duration::from_secs(5)
         } else {
             Duration::from_millis(100)
         };
