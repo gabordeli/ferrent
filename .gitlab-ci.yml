@@ -179,3 +179,36 @@ release-deb:
     paths:
       - target/debian-dist/*.deb
     expire_in: 30 days
+
+# The GUI AppImage comes from the same release commit and lands next to the
+# .deb files: a separate job because it needs a GTK-capable builder, not the
+# static-libtorrent one.
+release-appimage:
+  stage: release
+  needs:
+    - job: release-version
+      artifacts: true
+      optional: true
+    - job: release-deb
+      artifacts: true
+      optional: true
+  rules:
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]/'
+  script:
+    - if [ -n "${RELEASE_COMMIT:-}" ]; then git fetch -q origin && git checkout -q "$RELEASE_COMMIT"; fi
+    - tag="${RELEASE_TAG:-$CI_COMMIT_TAG}"
+    - packaging/debian/version.sh "$tag" >/dev/null
+    - packaging/appimage/container-build.sh debian:12
+    # Smoke: install the daemon from the .deb, then let the AppImage connect to
+    # it under Xvfb. `rows=` in the output is the proof of the TLS profile.
+    - deb=$(ls target/debian-dist/ferrent_*_amd64.deb | head -1)
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -w /src debian:12
+        sh -c 'apt-get update -qq
+        && apt-get install -y -qq --no-install-recommends xvfb xauth
+        && packaging/appimage/smoke.sh dist/Ferrent-*.AppImage '"$deb"''
+    - packaging/appimage/publish.sh dist
+  artifacts:
+    paths:
+      - dist/Ferrent-*.AppImage
+    expire_in: 30 days

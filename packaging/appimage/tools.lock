@@ -1,0 +1,8 @@
+# sha256 of the AppImage tooling downloaded by packaging/appimage/build.sh.
+#
+# The upstream URLs are the "continuous" builds, so the hash is what pins them:
+# a changed artifact fails the build instead of silently altering the bundle.
+# Update a line only after checking the new tool works (build + smoke).
+df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5  linuxdeploy
+e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03  appimagetool
+b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171  linuxdeploy-plugin-gtk.sh

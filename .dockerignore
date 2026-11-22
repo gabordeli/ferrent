@@ -10,3 +10,6 @@ webui/node_modules/
 webui/dist/
 webui/coverage/
 webui/test-results/
+# the AppImage builder fetches its own tools and writes dist/ inside the image
+dist/
+.tools/

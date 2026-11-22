@@ -11,20 +11,14 @@
 # mounted on our GitLab (19.5.5) - measured 404 - so this uses the generic
 # registry. Apt installs keep using the signed repository built by
 # packaging/apt/build-repo.sh; this registry is the version history in the UI.
+#
+# The upload itself lives in publish-lib.sh; the AppImage publisher uses the
+# same helper instead of duplicating the curl call.
 set -euo pipefail
 
 debdir=${1:-target/debian-dist}
-api=${CI_API_V4_URL:-${GITLAB_URL:-https://cirice-gitlab.ddns.net}/api/v4}
-project=${CI_PROJECT_ID:-${GITLAB_PROJECT_ID:?set GITLAB_PROJECT_ID}}
-
-if [ -n "${CI_JOB_TOKEN:-}" ]; then
-    auth=(--header "JOB-TOKEN: $CI_JOB_TOKEN")
-    who="job token"
-else
-    : "${GITLAB_TOKEN:?set GITLAB_TOKEN or run inside CI}"
-    auth=(--header "PRIVATE-TOKEN: $GITLAB_TOKEN")
-    who="personal token"
-fi
+# shellcheck source=packaging/apt/publish-lib.sh
+. "$(dirname "$0")/publish-lib.sh"
 
 shopt -s nullglob
 debs=("$debdir"/*.deb)
@@ -36,17 +30,7 @@ for deb in "${debs[@]}"; do
     package=$(printf '%s' "$file" | cut -d_ -f1)
     version=$(printf '%s' "$file" | sed -E 's/^[^_]+_([^_]+)_.*/\1/')
     [ -n "$package" ] && [ -n "$version" ] || { echo "cannot read package/version from $file" >&2; exit 1; }
-    url="$api/projects/$project/packages/generic/$package/$version/$file"
-    code=$(curl -sS -o /tmp/ferrent-publish.json -w '%{http_code}' \
-        "${auth[@]}" --upload-file "$deb" "$url")
-    case "$code" in
-    200 | 201) echo "published $file ($who) as $package/$version" ;;
-    *)
-        cat /tmp/ferrent-publish.json >&2
-        echo "upload failed: $file (HTTP $code)" >&2
-        exit 1
-        ;;
-    esac
+    upload_generic "$deb" "$package" "$version"
 done
 
 echo "== packages in the registry:"

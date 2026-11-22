@@ -250,3 +250,26 @@ Fedora 42 konténer, Xvfb 1440×900, `ICED_BACKEND=tiny-skia`
 | 12 torrent listázva, logó a sidebaron | PASS (`docs/measurements/m3-appimage-fedora.png`) |
 
 A kép a Fedorán futó AppImage-et mutatja, a laptop daemonjához csatlakozva.
+
+### CI (M13-T3, #69)
+
+A `release-appimage` job ugyanabból a release commitból épít, mint a
+`release-deb`, és a Generic Registrybe tölti
+(`packages/generic/ferrent-gui/<ver>/Ferrent-<ver>-x86_64.AppImage`).
+
+- **Konténerben épül** (`packaging/appimage/container-build.sh`,
+  `debian:12-slim` + GTK/X dev + rustup): a runner shell executorán nincs
+  cargo/GTK, csak docker.
+- **A fájlnév verziós**: `Ferrent-<Cargo version>-x86_64.AppImage`
+  (pl. `Ferrent-1.0.0-rc1-x86_64.AppImage`), nem `continuous`.
+- **Az eszközök pinnelve**: `packaging/appimage/tools.lock` tartalmazza a
+  linuxdeploy / appimagetool / GTK plugin **sha256**-ját; eltérés esetén a
+  build elbukik (a felfelé mutató URL `continuous`, a hash a valódi pin).
+- **Csak x86_64**: az arm64-et a `.deb` fedi, és a runner amd64.
+- **Smoke** (`packaging/appimage/smoke.sh`): a `ferrent` .deb-ből telepített
+  daemonhoz csatlakozik az AppImage `--appimage-extract-and-run --measure`
+  módban Xvfb alatt; a `rows=<n>` sor a bizonyíték (csak csatlakozás után
+  íródik ki).
+- Helyben mérve 2026-11-22: build 1 m 11 s meleg targetből (`--no-build`),
+  **34 MB**, `rows=13`, `fps=117`, `rss_kb=51 380` a 13 torrentes élő
+  daemonon.
