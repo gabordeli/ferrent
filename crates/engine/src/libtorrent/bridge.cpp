@@ -852,10 +852,13 @@ FfiCreateResult make_torrent_from_path(rust::Str path, uint32_t piece_length,
 FfiCreateResult make_torrent_from_path_impl(FfiCreateResult &result, rust::Str path,
                                             uint32_t piece_length, rust::Str trackers) {
     std::string root(path);
-    lt::error_code ec;
-    bool const directory = std::filesystem::is_directory(root, ec);
-    if (ec) {
-        result.error = rust::String(ec.message());
+    // std::filesystem fills a std::error_code. lt::error_code is
+    // boost::system::error_code in the static build (/opt/lt), and passing it
+    // here would bind a temporary after the implicit conversion.
+    std::error_code fs_ec;
+    bool const directory = std::filesystem::is_directory(root, fs_ec);
+    if (fs_ec) {
+        result.error = rust::String(fs_ec.message());
         return result;
     }
 
@@ -867,9 +870,9 @@ FfiCreateResult make_torrent_from_path_impl(FfiCreateResult &result, rust::Str p
             return result;
         }
     } else {
-        auto size = std::filesystem::file_size(root, ec);
-        if (ec) {
-            result.error = rust::String(ec.message());
+        auto size = std::filesystem::file_size(root, fs_ec);
+        if (fs_ec) {
+            result.error = rust::String(fs_ec.message());
             return result;
         }
         files.add_file(std::filesystem::path(root).filename().string(),
