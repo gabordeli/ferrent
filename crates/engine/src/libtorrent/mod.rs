@@ -1094,6 +1094,14 @@ mod tests {
             engine.status(id).expect("paused status").state,
             TorrentState::Paused
         );
+        // The session queue used to resume an auto-managed torrent right after
+        // the pause; give it a couple of ticks to prove it sticks.
+        std::thread::sleep(std::time::Duration::from_secs(7));
+        assert_eq!(
+            engine.status(id).expect("paused status").state,
+            TorrentState::Paused,
+            "the pause must survive the queue tick"
+        );
 
         engine.resume(id).expect("resume");
         engine.remove(id, false).expect("remove");
