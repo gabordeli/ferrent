@@ -85,7 +85,9 @@ jobs:
           set -e
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
             git fetch --depth 1 origin gh-pages
-            git worktree add site origin/gh-pages
+            # A remote-tracking ref alone gives a detached worktree; -B makes
+            # the local gh-pages branch so the push below has a ref.
+            git worktree add -B gh-pages site origin/gh-pages
           else
             git worktree add --detach site
             git -C site checkout --orphan gh-pages
@@ -111,5 +113,5 @@ jobs:
             git -C site -c user.name="ferrent-bot" \
               -c user.email="ferrent-bot@users.noreply.github.com" \
               commit -m "apt: publish ${GITHUB_REF_NAME:-manual}"
-            git -C site push origin gh-pages
+            git -C site push origin HEAD:gh-pages
           fi
