@@ -46,10 +46,14 @@ impl CliError {
             Self::Config(_) => true,
             Self::Io(error) => error.kind() != std::io::ErrorKind::BrokenPipe,
             Self::Transport { .. } => false,
-            Self::Status(status) => matches!(
-                status.code(),
-                Code::Internal | Code::Unknown | Code::DataLoss | Code::Unimplemented
-            ),
+            // gRPC folds a dropped connection into Status with code Unknown, so
+            // the message itself decides whether it is a defect (FERRENT-12).
+            Self::Status(status) => {
+                matches!(
+                    status.code(),
+                    Code::Internal | Code::Unknown | Code::DataLoss | Code::Unimplemented
+                ) && !ferrent_telemetry::is_expected(status)
+            }
         }
     }
 }
@@ -114,6 +118,15 @@ mod tests {
         assert!(CliError::Status(tonic::Status::internal("boom")).reportable());
         assert!(CliError::Io(std::io::Error::from(std::io::ErrorKind::NotFound)).reportable());
         assert!(CliError::Config("bad config".into()).reportable());
+    }
+
+    #[test]
+    fn a_transport_failure_wrapped_in_status_is_expected() {
+        // gRPC reports a connection dropped mid-call as Unknown with the
+        // transport text; the daemon restarting is not a defect (FERRENT-12).
+        let status = tonic::Status::unknown("transport error");
+        assert!(!CliError::Status(status).reportable());
+        assert!(CliError::Status(tonic::Status::unknown("unexpected")).reportable());
     }
 
     #[test]

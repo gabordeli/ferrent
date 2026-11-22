@@ -40,6 +40,10 @@ license-file = ["../../LICENSE", "0"]
 extended-description = "Ferrent desktop thin client (iced)."
 section = "net"
 priority = "optional"
+# Keep the symbols: the SDK resolves panic frames in-process, so a stripped
+# binary reports `<unknown>` frames to Bugsink (see the panic-probe example in
+# crates/telemetry).
+strip = false
 # $auto resolves the GTK/iced runtime packages from the binary.
 depends = "$auto, ferrent"
 assets = [

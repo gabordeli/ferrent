@@ -96,12 +96,23 @@ Reprodukálás: `cargo audit` (a `~/.cargo/advisory-db`-t magától frissíti).
   forrásláncot bejárva; ezek nem lesznek issue-k.
 - **redb lock:** a `RedbStore::open` 40×250 ms-ig vár a korábbi példányra
   (`waiting for the state lock (n/40): …`), nem abortál.
-- **Release `debug = 1`:** a terepen bekövetkező panic szimbólumos
-  stacktrace-szel jön vissza (a korábbi `FERRENT-11` szimbólumok nélkül jött).
+- **Release `debug = "line-tables-only"` + `cargo-deb strip = false`:** a
+  terepen bekövetkező panic szimbólumos stacktrace-szel jön vissza. A
+  `FERRENT-11` (`Option::unwrap`) azért jött `<unknown>` keretekkel, mert a
+  `.deb`-et a cargo-deb alapból **strippelte**, és a SDK a folyamaton belül
+  oldja fel a címeket. Az ellenőrző eszköz:
+  `FERRENT_ENV=probe cargo run --release -p ferrent-telemetry --example panic-probe`
+  (a `ferrent` projektbe küld egy `service=panic-probe` panicet; a kereteknek
+  `fájl:sor in fn` alakúnak kell lenniük). A részletes mérés:
+  `docs/measurements/telemetry.md`.
+- **Config hint:** a szekcióba tartozó kulcs gyökér szinten (`temp_dir`,
+  `seed_mode`, …) `unknown field` hibát ad, mostantól „belongs to the
+  [session] section” útmutatással (`FERRENT-8`).
 - **`unwrap`/`expect` audit:** a daemonban ~412 találat, többségük
   `Mutex`-poison `.expect`; a felhasználói bemenetre `Err`-t adunk. A
-  `FERRENT-11` (`Option::unwrap`) forrása a következő előfordulásnál
-  azonosítható lesz a szimbólumokkal.
+  `FERRENT-11` (`Option::unwrap`) a GUI-n kívülről, függőségből jött (a
+  GUI saját kódjában nincs `unwrap`), ezért a következő előfordulás
+  szimbólumos kerete mondja meg a helyet.
 - Várt, lezárandó tételek: `FERRENT-10` (config hiba), `FERRENT-13`
   (`Unimplemented` — új CLI a régi daemonon).
 

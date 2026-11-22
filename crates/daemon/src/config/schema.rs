@@ -587,7 +587,13 @@ impl Default for QueueConfig {
 impl FileConfig {
     /// Parses and validates a configuration document.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        let file: Self = toml::from_str(text).map_err(ConfigError::Parse)?;
+        let file: Self = toml::from_str(text).map_err(|error| {
+            let message = error.to_string();
+            match misplaced_section_hint(&message) {
+                Some(hint) => ConfigError::invalid(format!("{message}\n{hint}")),
+                None => ConfigError::Parse(error),
+            }
+        })?;
         file.validate()?;
         Ok(file)
     }
@@ -751,6 +757,29 @@ fn env_path(env: &BTreeMap<String, String>, key: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Fields that live in a section but are easy to write at the document root.
+///
+/// `toml` reports `unknown field` without naming the section, which sends
+/// people looking for a missing feature instead of a misplaced line
+/// (FERRENT-8: a root-level `temp_dir`).
+const SECTION_SCOPED: &[(&str, &str)] = &[
+    ("temp_dir", "session"),
+    ("seed_mode", "session"),
+    ("default_trackers", "session"),
+    ("active_downloads", "session"),
+    ("active_seeds", "session"),
+    ("active_limit", "session"),
+];
+
+fn misplaced_section_hint(message: &str) -> Option<String> {
+    let field = message.split("unknown field `").nth(1)?.split('`').next()?;
+    let (_, section) = SECTION_SCOPED.iter().find(|(name, _)| *name == field)?;
+    Some(format!(
+        "hint: `{field}` belongs to the [{section}] section, for example\n\
+         [{section}]\n{field} = ..."
+    ))
+}
+
 fn validate_bind(bind: &str) -> Result<(), ConfigError> {
     let bind = bind.trim();
     if bind.is_empty() {
@@ -792,6 +821,22 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn a_misplaced_section_key_gets_a_hint() {
+        let error = FileConfig::parse("download_dir = \"/data\"\ntemp_dir = \"/tmp/x\"\n")
+            .expect_err("a root-level temp_dir is rejected");
+        let text = error.to_string();
+        assert!(text.contains("unknown field `temp_dir`"), "{text}");
+        assert!(
+            text.contains("[session]"),
+            "the hint should name the section: {text}"
+        );
+
+        let file = FileConfig::parse("[session]\ntemp_dir = \"/tmp/x\"\n")
+            .expect("the section-scoped key is accepted");
+        assert_eq!(file.session.temp_dir.as_deref(), Some("/tmp/x"));
     }
 
     #[test]

@@ -43,6 +43,10 @@ license-file = ["../../LICENSE", "0"]
 extended-description = "Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume restart."
 section = "net"
 priority = "optional"
+# Keep the symbols: the SDK resolves panic frames in-process, so a stripped
+# binary reports `<unknown>` frames to Bugsink (see the panic-probe example in
+# crates/telemetry).
+strip = false
 depends = "$auto, adduser, init-system-helpers"
 # The 0.1.x packages were named after the binary. A single transition entry
 # lets apt replace them on upgrade while the service and paths stay the same.
