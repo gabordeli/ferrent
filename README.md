@@ -81,7 +81,12 @@ A GUI-hoz ilyenkor `https://localhost:50051` és
 libtorrenttel); a telepített változat configja `/etc/ferrent/config.toml`,
 a tokenje `/etc/ferrent/token`.
 
-## Jelenlegi állapot (0.1.2)
+## Jelenlegi állapot (1.0.0-rc1)
+
+Az első kiadásjelölt elkészült: `.deb` (amd64 + arm64) és GUI AppImage a
+GitHub Release-en, a szerveren telepítve, a Deluge-ből importált 916
+torrenttel, a laptop GUI-ból menedzselve. A mérés és az ismert hibák:
+[docs/measurements/v1-rc1.md](docs/measurements/v1-rc1.md).
 
 - 4 000 torrent betölthető; a state mirror és a gRPC API a 4 000 soros
   terhelés alatt is a keretben marad
