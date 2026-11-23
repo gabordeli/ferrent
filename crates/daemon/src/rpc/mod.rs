@@ -730,6 +730,7 @@ impl Ferrent for FerrentService {
             }
         }
 
+        let mut paused_ids: Vec<TorrentId> = Vec::new();
         for torrent in report.torrents {
             let hash = torrent.info_hash.to_ascii_lowercase();
             if !selected.is_empty() && !selected.contains(&hash) {
@@ -774,6 +775,7 @@ impl Ferrent for FerrentService {
                                 outcomes.push(outcome("error", &error.to_string()));
                                 continue;
                             }
+                            paused_ids.push(response.id);
                         }
                         added += 1;
                         outcomes.push(outcome("added", ""));
@@ -783,6 +785,17 @@ impl Ferrent for FerrentService {
                     failed += 1;
                     outcomes.push(outcome("error", &error.to_string()));
                 }
+            }
+        }
+        // A complete torrent can be picked up by the session between the add
+        // and the per-torrent pause, so sweep once more: an imported torrent
+        // that keeps running without the user's word risks a tracker ban.
+        for id in paused_ids {
+            if let Err(error) = self
+                .with_engine(move |engine| pause_settled(engine, id))
+                .await
+            {
+                warnings.push(format!("torrent {id}: pause verification failed: {error}"));
             }
         }
         if !selected.is_empty() && matched.len() < selected.len() {
