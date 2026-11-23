@@ -8449,7 +8449,13 @@ fn main() -> iced::Result {
         .subscription(App::subscription)
         .window(iced::window::Settings {
             size: Size::new(1440.0, 900.0),
-            icon: iced::window::icon::from_file_data(theme::MARK_BYTES, None).ok(),
+            icon: iced::window::icon::from_file_data(theme::ICON_BYTES, None).ok(),
+            // The WM class (the desktop entry's StartupWMClass) is what lets
+            // GNOME group the window with its launcher and show its icon.
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "ferrent".to_owned(),
+                ..iced::window::settings::PlatformSpecific::default()
+            },
             ..iced::window::Settings::default()
         });
 

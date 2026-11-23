@@ -182,8 +182,12 @@ pub const SEMIBOLD_BYTES: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Se
 /// Rendered at 3× (338×90) so the sidebar lockup stays crisp; the widget
 /// scales it down to 113×30.
 pub const LOGO_BYTES: &[u8] = include_bytes!("../assets/logo.png");
-/// The square mark alone, for the collapsed sidebar and the window icon.
+/// The square mark alone, for the collapsed sidebar.
 pub const MARK_BYTES: &[u8] = include_bytes!("../assets/mark.png");
+
+/// The application icon: the hexagon mark, used for the window and the
+/// desktop entry. `icon-256.png` is a Lanczos upscale of `icon.png`.
+pub const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
 
 #[must_use]
 pub fn regular() -> Font {

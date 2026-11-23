@@ -86,7 +86,7 @@ rm -rf "$appdir"
 mkdir -p "$appdir/usr/share/applications" \
     "$appdir/usr/share/icons/hicolor/256x256/apps"
 install -m 0644 packaging/appimage/ferrent.desktop "$appdir/usr/share/applications/"
-install -m 0644 crates/gui/assets/mark.png \
+install -m 0644 crates/gui/assets/icon-256.png \
     "$appdir/usr/share/icons/hicolor/256x256/apps/ferrent.png"
 
 # linuxdeploy skips a few libraries a desktop distro always has; a minimal

@@ -1,8 +1,13 @@
 [Desktop Entry]
 Type=Application
 Name=Ferrent
+GenericName=Torrent client
+GenericName[hu]=Torrent kliens
 Comment=Control a Ferrent daemon
+Comment[hu]=A Ferrent daemon vezérlése
 Exec=ferrent-gui
 Icon=ferrent
 Terminal=false
-Categories=Network;FileTransfer;
+Categories=Network;FileTransfer;P2P;
+Keywords=torrent;bittorrent;magnet;download;letoltes;
+StartupWMClass=ferrent

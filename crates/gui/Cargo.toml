@@ -45,9 +45,13 @@ priority = "optional"
 # cargo-deb 3.8 has no `strip` metadata key, and the SDK resolves panic frames
 # in-process, so a stripped binary reports `<unknown>` frames to Bugsink.
 # $auto resolves the GTK/iced runtime packages from the binary.
-depends = "$auto, ferrent"
+depends = "$auto"
+# The client points at any daemon over TLS; a local one is the convenient case,
+# not a requirement (a laptop installs the GUI only).
+recommends = "ferrent"
 assets = [
     ["target/release/ferrent-gui", "usr/bin/", "755"],
     ["../../packaging/appimage/ferrent.desktop", "usr/share/applications/", "644"],
-    ["assets/mark.png", "usr/share/icons/hicolor/256x256/apps/ferrent.png", "644"],
+    ["assets/icon.png", "usr/share/icons/hicolor/128x128/apps/ferrent.png", "644"],
+    ["assets/icon-256.png", "usr/share/icons/hicolor/256x256/apps/ferrent.png", "644"],
 ]

@@ -65,6 +65,15 @@ benne. A daemon a `127.0.0.1:50051`-en hallgat TLS-sel; a GUI/CLI a
 `https://localhost:50051` címet használja, és az önaláírt tanúsítvány
 ujjlenyomatát az első csatlakozáskor kell jóváhagyni.
 
+A `ferrent-gui` a desktop indítót is telepíti
+(`/usr/share/applications/ferrent.desktop`, `Categories=Network;FileTransfer;P2P;`)
+és az ikont (`hicolor/{128x128,256x256}/apps/ferrent.png`), így az alkalmazás
+megjelenik a GNOME **Alkalmazások** rácsában / a dashben, és a
+`StartupWMClass=ferrent` miatt a futó ablak ugyanazt az ikont kapja a
+tálcán/dockban is. A kliens a saját `gui.toml`-jában tárolt szerverprofillal
+távoli daemonhoz is csatlakozhat, ezért a `ferrent` csomag nem kötelező
+mellette — a függőség csak a kényelmes egygépes telepítés miatt van.
+
 ## Verzió rögzítése, visszalépés
 
 A repó minden korábbi verziót megtart:
