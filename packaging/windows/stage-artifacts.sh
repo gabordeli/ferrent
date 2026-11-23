@@ -28,13 +28,13 @@ ls -l "$out"
 # A gate, not a report: the daemon must carry libtorrent statically. A dynamic
 # dependency would only show up as a missing DLL on the Windows box, so any
 # import outside the Windows API and the C++ runtime fails the build here.
+# Only the daemon is gated: the GUI is pure Rust and pulls the usual Win32
+# shell/OpenGL libraries.
 allow='^(kernel32|ntdll|msvcrt|advapi32|user32|api-ms-win[a-z0-9._-]*|bcrypt|bcryptprimitives|crypt32|iphlpapi|mswsock|ws2_32|secur32|userenv|ncrypt|libstdc\+\+-6)\.dll$'
-for exe in "$out"/*.exe; do
-  unexpected=$(x86_64-w64-mingw32-objdump -p "$exe" |
-    awk '/DLL Name/{print $3}' | sort -u | grep -viE "$allow" || true)
-  if [ -n "$unexpected" ]; then
-    echo "$exe imports unexpected libraries:" >&2
-    echo "$unexpected" >&2
-    exit 1
-  fi
-done
+unexpected=$(x86_64-w64-mingw32-objdump -p "$out/ferrentd.exe" |
+  awk '/DLL Name/{print $3}' | sort -u | grep -viE "$allow" || true)
+if [ -n "$unexpected" ]; then
+  echo "ferrentd.exe imports unexpected libraries:" >&2
+  echo "$unexpected" >&2
+  exit 1
+fi
