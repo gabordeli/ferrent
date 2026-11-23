@@ -439,3 +439,17 @@
 "Watch directories: configured folders and their scanner counters" = "Figyelt mappák: beállított könyvtárak és a vizsgáló számlálói"
 "Where to write the .torrent (default: <name>.torrent here)" = "Hova írja a .torrentet (alap: <név>.torrent itt)"
 "Zero-based file index (see `files`)" = "Nullától induló fájlindex (lásd `files`)"
+
+# --- Tracker status labels (GUI Trackers tab) ---
+"Working" = "Működik"
+"Announcing" = "Hirdetés"
+"Unknown" = "Ismeretlen"
+"Not announced yet" = "Még nem hirdetett"
+"waiting for the first announce" = "vár az első announce-ra"
+"answered" = "válaszolt"
+"answered: {}" = "válaszolt: {}"
+"answered, next announce in {}" = "válaszolt, következő announce: {}"
+"announce in flight" = "az announce folyamatban"
+"announce failed" = "az announce elbukott"
+" ({} failed attempts)" = " ({} sikertelen kísérlet)"
+"state {}" = "állapot: {}"

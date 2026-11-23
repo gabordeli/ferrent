@@ -1,5 +1,7 @@
 //! Human-readable tracker announce state.
 
+use crate::i18n;
+
 /// Turns the engine's announce state into a short label plus a description.
 ///
 /// The engine reports `working`, `updating`, `unverified` or `error` together
@@ -11,43 +13,46 @@ pub fn status_text(
     message: &str,
     next_announce: u32,
     fails: u32,
-) -> (&'static str, String) {
+) -> (String, String) {
     let message = message.trim();
     match status {
         "working" => {
             let detail = if next_announce > 0 {
-                format!("answered, next announce in {}", duration(next_announce))
+                i18n::t_fmt("answered, next announce in {}", &[&duration(next_announce)])
             } else if !message.is_empty() {
-                format!("answered: {message}")
+                i18n::t_fmt("answered: {}", &[message])
             } else {
-                "answered".to_owned()
+                i18n::t("answered").to_owned()
             };
-            ("Working", detail)
+            (i18n::t("Working").to_owned(), detail)
         }
         "updating" => {
             let detail = if message.is_empty() {
-                "announce in flight".to_owned()
+                i18n::t("announce in flight").to_owned()
             } else {
                 message.to_owned()
             };
-            ("Announcing", detail)
+            (i18n::t("Announcing").to_owned(), detail)
         }
         "unverified" => (
-            "Not announced yet",
-            "waiting for the first announce".to_owned(),
+            i18n::t("Not announced yet").to_owned(),
+            i18n::t("waiting for the first announce").to_owned(),
         ),
         "error" => {
             let mut detail = if message.is_empty() {
-                "announce failed".to_owned()
+                i18n::t("announce failed").to_owned()
             } else {
                 message.to_owned()
             };
             if fails > 1 {
-                detail.push_str(&format!(" ({fails} failed attempts)"));
+                detail.push_str(&i18n::t_fmt(" ({} failed attempts)", &[&fails.to_string()]));
             }
-            ("Error", detail)
+            (i18n::t("Error").to_owned(), detail)
         }
-        other => ("Unknown", format!("state {other:?}")),
+        other => (
+            i18n::t("Unknown").to_owned(),
+            i18n::t_fmt("state {}", &[other]),
+        ),
     }
 }
 
@@ -68,7 +73,10 @@ mod tests {
     fn working_says_when_the_next_announce_is_due() {
         assert_eq!(
             status_text("working", "", 125, 0),
-            ("Working", "answered, next announce in 2 min".to_owned())
+            (
+                i18n::t("Working").to_owned(),
+                i18n::t_fmt("answered, next announce in {}", &["2 min"])
+            )
         );
     }
 
@@ -76,7 +84,13 @@ mod tests {
     fn an_error_carries_the_reason_and_the_attempt_count() {
         assert_eq!(
             status_text("error", "Host not found", 0, 4),
-            ("Error", "Host not found (4 failed attempts)".to_owned())
+            (
+                i18n::t("Error").to_owned(),
+                format!(
+                    "Host not found{}",
+                    i18n::t_fmt(" ({} failed attempts)", &["4"])
+                )
+            )
         );
     }
 
@@ -84,7 +98,10 @@ mod tests {
     fn an_error_without_a_reason_still_reads_as_a_sentence() {
         assert_eq!(
             status_text("error", "", 0, 1),
-            ("Error", "announce failed".to_owned())
+            (
+                i18n::t("Error").to_owned(),
+                i18n::t("announce failed").to_owned()
+            )
         );
     }
 
@@ -93,8 +110,8 @@ mod tests {
         assert_eq!(
             status_text("unverified", "", 0, 0),
             (
-                "Not announced yet",
-                "waiting for the first announce".to_owned()
+                i18n::t("Not announced yet").to_owned(),
+                i18n::t("waiting for the first announce").to_owned()
             )
         );
     }
