@@ -86,7 +86,8 @@ torrenttel, a laptop GUI-ból menedzselve. A mérés és az ismert hibák:
   [docs/web-install.md](docs/web-install.md)
 - Deluge-migráció: [docs/deluge-migration.md](docs/deluge-migration.md)
 - Biztonság és telemetria: [docs/security.md](docs/security.md)
-- iOS kliens kutatás: [docs/research/ios.md](docs/research/ios.md)
+- Kliens-kutatás: [iOS](docs/research/ios.md) ·
+  [Windows](docs/research/windows.md)
 - CI, tükör és APT repó: [docs/ci.md](docs/ci.md)
 - Mérések: [docs/measurements/](docs/measurements/)
 
