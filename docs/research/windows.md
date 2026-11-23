@@ -130,7 +130,10 @@ Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
   artifact, `file`-lal ellenőrizve, hogy PE32+;
 - a daemon egyelőre `cargo check --no-default-features` (a `libtorrent`
   Windows buildje még nincs a pipeline-ban) — így minden Unix-izmus
-  megbuktatja a pipeline-t, mielőtt a Windows gépre kerülne.
+  megbuktatja a pipeline-t, mielőtt a Windows gépre kerülne;
+- a `file` kimenete az első futásnál „PE32+ executable (console)" volt: a
+  GUI release buildje `windows_subsystem = "windows"`-t kapott, hogy ne
+  nyíljon konzolablak (debugban marad, a pániküzenet miatt).
 
 ## Javaslat
 

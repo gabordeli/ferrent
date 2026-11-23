@@ -1,6 +1,10 @@
 //! Ferrent GUI shell: server profiles, TLS pinning, virtualized torrent
 //! table, server-side filtering/sorting, and optimistic actions.
 
+// A release build opens a window, not a console: the CI artifact was a
+// "PE32+ executable (console)" until this. Debug keeps the console for panics.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::Write as _;
