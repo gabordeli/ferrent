@@ -135,6 +135,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
     let mut control = TorrentControl::default();
     let mut restored_ids: Vec<TorrentId> = Vec::with_capacity(persisted.len());
+    let mut paused_ids: Vec<TorrentId> = Vec::new();
     for torrent in persisted {
         let id = torrent.id;
         let paused_by_user = torrent.paused_by_user;
@@ -146,8 +147,19 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
         if paused_by_user {
             control.set_user(id, true);
+            paused_ids.push(id);
         }
         restored_ids.push(id);
+    }
+
+    // A complete torrent can be picked up by the session right after the add,
+    // before the paused flag lands: uploading 489 restored torrents after an
+    // upgrade is exactly that race. Sweep once so a restart never leaves a
+    // torrent running while the pause authority says paused (FERRENT-81).
+    for id in &paused_ids {
+        if let Err(error) = ferrent_daemon::rpc::pause_settled(&mut *engine, *id) {
+            eprintln!("failed to keep restored torrent {id} paused: {error}");
+        }
     }
 
     let store: Box<dyn StateStore> = Box::new(store);
