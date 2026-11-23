@@ -25,6 +25,7 @@ import FilterBar from "./components/FilterBar.vue";
 import LabelsSheet from "./components/LabelsSheet.vue";
 import SelectionBar from "./components/SelectionBar.vue";
 import SessionSheet from "./components/SessionSheet.vue";
+import SettingsSheet from "./components/SettingsSheet.vue";
 import TokenGate from "./components/TokenGate.vue";
 import TorrentDetail from "./components/TorrentDetail.vue";
 import TorrentRow from "./components/TorrentRow.vue";
@@ -53,6 +54,7 @@ const addOpen = ref(false);
 const pendingMagnet = ref("");
 const pendingTorrent = ref("");
 const sessionOpen = ref(false);
+const settingsOpen = ref(false);
 const labelsOpen = ref(false);
 const downHistory = ref<number[]>([]);
 const upHistory = ref<number[]>([]);
@@ -705,6 +707,14 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="icon-button"
+        :aria-label="t('header.settings')"
+        :title="t('header.settings')"
+        @click="settingsOpen = true"
+      >
+        ⚙
+      </button>
+      <button
+        class="icon-button"
         :aria-label="t('header.token')"
         :title="t('header.token')"
         @click="showGate"
@@ -782,6 +792,13 @@ onBeforeUnmount(() => {
       @toggle="toggleSession"
       @limits="applySessionLimits"
       @queue="applySessionQueue"
+    />
+
+    <SettingsSheet
+      v-if="settingsOpen"
+      :can-write="canWrite"
+      @close="settingsOpen = false"
+      @toast="showToast"
     />
 
     <LabelsSheet

@@ -2166,3 +2166,42 @@ button:disabled {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* Settings sheet: the daemon's TOML document (M13-T10). */
+.settings-sheet {
+  max-height: min(86vh, 720px);
+}
+
+.settings-locked {
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-editor span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-editor textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
