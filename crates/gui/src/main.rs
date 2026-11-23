@@ -3212,12 +3212,16 @@ impl App {
         };
         Task::perform(
             async move {
-                let config = connection::config(&client).await;
-                let labels = connection::labels(&client)
-                    .await
+                // One round trip each, so the four calls run together; run
+                // sequentially the modal sat on its placeholders for seconds.
+                let (config, labels, auto_add, hooks) = tokio::join!(
+                    connection::config(&client),
+                    connection::labels(&client),
+                    connection::auto_add_status(&client),
+                    connection::hook_status(&client, 30),
+                );
+                let labels = labels
                     .map(|entries| entries.into_iter().map(settings::LabelRow::from).collect());
-                let auto_add = connection::auto_add_status(&client).await;
-                let hooks = connection::hook_status(&client, 30).await;
                 (request, config, labels, auto_add, hooks)
             },
             |(request, config, labels, auto_add, hooks)| Message::SettingsLoaded {
@@ -8329,7 +8333,20 @@ fn action_button<'a>(label: &'a str, message: Message, enabled: bool) -> Element
     if enabled {
         button.on_press(message).into()
     } else {
-        button.into()
+        // A disabled action must look disabled: without this it kept the
+        // primary style and read as clickable (e.g. Save while loading).
+        button
+            .style(|_theme, _status| iced::widget::button::Style {
+                background: Some(theme::bg().into()),
+                text_color: theme::text_muted(),
+                border: iced::Border {
+                    color: theme::border(),
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..iced::widget::button::Style::default()
+            })
+            .into()
     }
 }
 
