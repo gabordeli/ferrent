@@ -2055,12 +2055,15 @@ fn config_status(error: ConfigError) -> Status {
 /// running, and every later pause used to be a no-op. Verify the engine status
 /// and retry a few times before giving up.
 pub fn pause_settled(engine: &mut dyn TorrentEngine, id: TorrentId) -> Result<(), EngineError> {
-    for attempt in 0..4u64 {
+    // The session applies a flag change on its next tick, and an auto-managed
+    // torrent can be resumed by the queue in between, so one call is not
+    // enough: keep asking for up to a second.
+    for _ in 0..10u64 {
         engine.pause(id)?;
         if engine.status(id)?.state == EngineState::Paused {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     Ok(())
 }

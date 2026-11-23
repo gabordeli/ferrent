@@ -335,10 +335,12 @@ bool Session::pause(uint64_t id) {
     if (it == impl_->handles.end()) {
         return false;
     }
-    // An auto-managed torrent is resumed again by the session's queue on the
-    // next tick, so clear the flag and set paused in one call: doing it in two
-    // steps leaves a window where the queue resumes the torrent.
-    it->second.set_flags(lt::torrent_flags::paused, lt::torrent_flags::auto_managed);
+    // libtorrent 2.0's set_flags(flags, mask) only touches the bits named in
+    // the mask: setting `paused` while masking on `auto_managed` was a no-op.
+    // Name both bits so paused is set and auto_managed cleared in one call,
+    // otherwise the session's queue resumes the torrent again.
+    it->second.set_flags(lt::torrent_flags::paused,
+                         lt::torrent_flags::paused | lt::torrent_flags::auto_managed);
     return true;
 }
 
@@ -347,7 +349,8 @@ bool Session::resume(uint64_t id) {
     if (it == impl_->handles.end()) {
         return false;
     }
-    it->second.set_flags(lt::torrent_flags::auto_managed, lt::torrent_flags::paused);
+    it->second.set_flags(lt::torrent_flags::auto_managed,
+                         lt::torrent_flags::paused | lt::torrent_flags::auto_managed);
     return true;
 }
 
