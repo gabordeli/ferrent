@@ -1679,6 +1679,8 @@ impl Ferrent for FerrentService {
             blocklist_ranges: blocklist.ranges,
             blocklist_refreshed_unix: blocklist.refreshed_unix,
             blocklist_error: blocklist.error.clone().unwrap_or_default(),
+            daemon_version: crate::VERSION.to_owned(),
+            uptime_secs: (chrono::Utc::now().timestamp() - self.state.started_unix).max(0),
         }))
     }
 

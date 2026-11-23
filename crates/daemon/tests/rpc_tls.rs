@@ -557,11 +557,11 @@ async fn file_priorities_are_validated_against_the_file_count() {
         .expect("add")
         .into_inner();
 
-    // The mock engine reports no files, so any priority entry is a mismatch.
+    // The mock engine reports one file, so a two-entry list is a mismatch.
     let error = client
         .set_file_priorities(SetFilePrioritiesRequest {
             id: added.id,
-            priorities: vec![4],
+            priorities: vec![4, 4],
         })
         .await
         .expect_err("a mismatched list must be rejected");
@@ -570,13 +570,13 @@ async fn file_priorities_are_validated_against_the_file_count() {
     let files = client
         .set_file_priorities(SetFilePrioritiesRequest {
             id: added.id,
-            priorities: Vec::new(),
+            priorities: vec![7],
         })
         .await
-        .expect("an empty list matches zero files")
+        .expect("a one-entry list matches the mock's single file")
         .into_inner()
         .files;
-    assert!(files.is_empty());
+    assert_eq!(files.len(), 1);
 
     server.shutdown();
 }

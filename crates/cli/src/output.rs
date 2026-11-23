@@ -337,7 +337,7 @@ fn short(name: &str, max: usize) -> String {
     text
 }
 
-fn format_rate(bytes: u64) -> String {
+pub fn format_rate(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B/s".to_owned();
     }
@@ -363,4 +363,21 @@ pub fn format_bytes(bytes: u64) -> String {
         unit += 1;
     }
     format!("{value:.1} {}", UNITS[unit])
+}
+
+/// Uptime with the two most significant units, e.g. `2d 3h` or `52m 16s`.
+pub fn format_duration(secs: i64) -> String {
+    let secs = secs.max(0);
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    let (hours, rest) = (rest / 3_600, rest % 3_600);
+    let (minutes, seconds) = (rest / 60, rest % 60);
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
 }

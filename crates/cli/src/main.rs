@@ -9,14 +9,17 @@ use std::path::PathBuf;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, AddTrackerRequest, CreateTorrentRequest, GetConfigRequest, GetDisksRequest,
-    GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest, GetStatusRequest,
-    GetTorrentFilesRequest, GetTorrentRequest, GetTorrentTrackersRequest, GetWebSeedsRequest,
-    ImportStateRequest, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
+    AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, CreateTorrentRequest,
+    DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest,
+    GetHookStatusRequest, GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentRequest,
+    GetTorrentTrackersRequest, GetWebSeedsRequest, ImportStateRequest, Label, ListLabelsRequest,
+    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, PreviewRssFeedRequest,
     QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest, RemoveTorrentRequest,
-    RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetWebSeedsRequest,
-    SortField, WatchRequest,
+    RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest, ScanAutoAddRequest,
+    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
+    SetSuperSeedingRequest, SetTorrentLabelRequest, SetTorrentLimitsRequest, SetWebSeedsRequest,
+    SortField, UpdateLabelRequest, WatchRequest,
 };
 use serde_json::json;
 
@@ -100,6 +103,8 @@ enum Command {
     },
     /// Show the storage payload: filesystems, zones and free space.
     Disks,
+    /// One-shot health summary: version, uptime, torrents, free space, pin.
+    Status,
     /// Import a Deluge state directory (torrents and plugin configs).
     ImportDeluge {
         /// Deluge state directory, the one holding the `.torrent` files.
@@ -118,6 +123,11 @@ enum Command {
         /// Torrent id.
         id: u64,
     },
+    /// List the peers of one torrent.
+    Peers {
+        /// Torrent id.
+        id: u64,
+    },
     /// Build a .torrent from a file or directory on the daemon host.
     Create {
         /// File or directory on the daemon host.
@@ -132,8 +142,30 @@ enum Command {
         #[arg(long = "output")]
         out: Option<PathBuf>,
     },
-    /// Show the RSS watcher status.
-    Rss,
+    /// Show the RSS watcher status; `--preview` fetches one feed.
+    Rss {
+        /// Feed URL to fetch with the watcher's user agent and timeout.
+        #[arg(long)]
+        preview: Option<String>,
+        /// Title regex applied to the preview; empty means every torrent item.
+        #[arg(long, default_value = "")]
+        filter: String,
+    },
+    /// Watch directories: configured folders and their scanner counters.
+    Autoadd {
+        /// Scan now instead of only printing the counters.
+        #[arg(long)]
+        scan: bool,
+        /// Limit the scan to one watch path (default: every enabled folder).
+        #[arg(long, requires = "scan")]
+        path: Option<String>,
+    },
+    /// Hook journal: pending events and the most recent runs.
+    Hooks {
+        /// Number of recent runs to show (server default: 20).
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
     /// Ask the daemon to verify the existing data against the hashes.
     Recheck {
         /// Torrent id.
@@ -168,6 +200,11 @@ enum Command {
         #[arg(long)]
         set: Option<String>,
     },
+    /// Labels: list, create, update, delete, or assign one to a torrent.
+    Labels {
+        #[command(subcommand)]
+        command: Option<LabelsCommand>,
+    },
     /// Show the IP blocklist status; `--refresh` reloads the sources.
     Blocklist {
         /// Reload the configured sources before printing.
@@ -184,6 +221,43 @@ enum Command {
         /// (skip | low | normal | high, or 0-7).
         #[arg(long)]
         set: Option<String>,
+    },
+    /// Set per-torrent limits; zero inherits the label or session policy.
+    Limits {
+        /// Torrent id.
+        id: u64,
+        /// Download limit in bytes per second.
+        #[arg(long, default_value_t = 0)]
+        download: u64,
+        /// Upload limit in bytes per second.
+        #[arg(long, default_value_t = 0)]
+        upload: u64,
+        /// Maximum peer connections.
+        #[arg(long, default_value_t = 0)]
+        connections: u32,
+        /// Maximum upload slots.
+        #[arg(long, default_value_t = 0)]
+        upload_slots: u32,
+        /// Drop the manual override.
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Toggle sequential download or super seeding on one torrent.
+    Set {
+        /// Torrent id.
+        id: u64,
+        /// Download the pieces in order.
+        #[arg(long, overrides_with = "no_sequential")]
+        sequential: bool,
+        /// Turn sequential download off.
+        #[arg(long = "no-sequential", overrides_with = "sequential")]
+        no_sequential: bool,
+        /// Seed without advertising a full copy.
+        #[arg(long = "super-seeding", overrides_with = "no_super_seeding")]
+        super_seeding: bool,
+        /// Turn super seeding off.
+        #[arg(long = "no-super-seeding", overrides_with = "super_seeding")]
+        no_super_seeding: bool,
     },
     /// Pause a torrent.
     Pause {
@@ -222,10 +296,149 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Saved daemons in cli.toml: list, add, remove, or select one.
+    Servers {
+        #[command(subcommand)]
+        command: Option<ServersCommand>,
+    },
     /// Notifications: outbox status and a test delivery.
     Notify {
         #[command(subcommand)]
         command: NotifyCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum LabelsCommand {
+    /// List labels with their assignment counts.
+    List,
+    /// Create a label.
+    Create {
+        /// Lowercase name; unique.
+        name: String,
+        #[command(flatten)]
+        fields: LabelFields,
+    },
+    /// Update a label, keeping the fields that are not given.
+    Update {
+        /// Label to update.
+        name: String,
+        #[command(flatten)]
+        fields: LabelFields,
+    },
+    /// Delete a label and clear its assignments.
+    Delete {
+        /// Label to delete.
+        name: String,
+    },
+    /// Assign a label to a torrent; an empty name clears it.
+    Set {
+        /// Torrent id.
+        id: u64,
+        /// Label name; empty clears the assignment.
+        name: String,
+    },
+}
+
+/// The mutable label attributes; every CLI flag is optional so an update can
+/// leave the rest of the label untouched.
+#[derive(clap::Args, Clone, Default)]
+struct LabelFields {
+    /// #RRGGBB or #RRGGBBAA colour.
+    #[arg(long)]
+    color: Option<String>,
+    /// Move the payload here when the torrent completes.
+    #[arg(long)]
+    move_completed: Option<String>,
+    /// Download limit in bytes per second; zero inherits the session limit.
+    #[arg(long)]
+    download_limit: Option<u64>,
+    /// Upload limit in bytes per second; zero inherits the session limit.
+    #[arg(long)]
+    upload_limit: Option<u64>,
+    /// Maximum peer connections.
+    #[arg(long)]
+    connections: Option<u32>,
+    /// Maximum upload slots.
+    #[arg(long)]
+    upload_slots: Option<u32>,
+    /// Tracker URL substring for auto-assignment; repeatable.
+    #[arg(long = "match-tracker")]
+    match_trackers: Vec<String>,
+    /// Name regex for auto-assignment.
+    #[arg(long)]
+    match_name: Option<String>,
+}
+
+impl LabelFields {
+    /// Applies the given flags over `label`; an absent flag keeps the value.
+    fn apply(&self, label: &mut Label) {
+        if let Some(color) = &self.color {
+            label.color.clone_from(color);
+        }
+        if let Some(path) = &self.move_completed {
+            label.move_completed_path.clone_from(path);
+        }
+        if let Some(limit) = self.download_limit {
+            label.download_rate_limit = limit;
+        }
+        if let Some(limit) = self.upload_limit {
+            label.upload_rate_limit = limit;
+        }
+        if let Some(limit) = self.connections {
+            label.connections_limit = limit;
+        }
+        if let Some(limit) = self.upload_slots {
+            label.upload_slots_limit = limit;
+        }
+        if !self.match_trackers.is_empty() {
+            label.match_trackers.clone_from(&self.match_trackers);
+        }
+        if let Some(pattern) = &self.match_name {
+            label.match_name.clone_from(pattern);
+        }
+    }
+
+    fn into_label(self, name: &str) -> Label {
+        let mut label = Label {
+            name: name.to_owned(),
+            ..Label::default()
+        };
+        self.apply(&mut label);
+        label
+    }
+}
+
+#[derive(Subcommand, Clone)]
+enum ServersCommand {
+    /// List the saved daemons.
+    List,
+    /// Save a daemon under a name (replaces an existing entry).
+    Add {
+        /// Profile name, usable as `--server <name>`.
+        name: String,
+        /// Daemon URL, e.g. https://192.168.2.27:50051.
+        #[arg(long)]
+        server: String,
+        /// CA certificate used to pin the daemon.
+        #[arg(long)]
+        ca: Option<PathBuf>,
+        /// Bearer token stored in the config (mode 0600).
+        #[arg(long)]
+        token: Option<String>,
+        /// Also make it the default for later commands.
+        #[arg(long = "use")]
+        use_it: bool,
+    },
+    /// Remove a saved daemon.
+    Remove {
+        /// Profile name.
+        name: String,
+    },
+    /// Make a saved daemon the default for later commands.
+    Use {
+        /// Profile name.
+        name: String,
     },
 }
 
@@ -417,6 +630,15 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         return import_deluge_report(state_dir, config_dir.as_deref(), json);
     }
 
+    // `servers` edits the local config, so it runs before the daemon resolves.
+    if let Command::Servers { command } = &command {
+        return servers_report(
+            command.clone().unwrap_or(ServersCommand::List),
+            config_path,
+            json,
+        );
+    }
+
     let resolved = config::resolve(server, ca, token, config_path)?;
 
     let ca_pem = std::fs::read_to_string(&resolved.ca).map_err(|error| {
@@ -425,10 +647,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             resolved.ca.display()
         ))
     })?;
+    let ca_path = resolved.ca.clone();
     let server = resolved.server.clone();
     let mut client = ferrent_protocol::client::connect(&server, &ca_pem, &resolved.token)
         .await
-        .map_err(|error| CliError::Transport { server, error })?;
+        .map_err(|error| CliError::Transport {
+            server: server.clone(),
+            error,
+        })?;
 
     match command {
         Command::Add {
@@ -582,6 +808,45 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 output::print_torrent(&torrent);
             }
         }
+        Command::Peers { id } => {
+            let peers = client
+                .get_torrent_peers(GetTorrentPeersRequest { id })
+                .await?
+                .into_inner()
+                .peers;
+            if json {
+                let peers: Vec<_> = peers
+                    .iter()
+                    .map(|peer| {
+                        json!({
+                            "endpoint": peer.endpoint,
+                            "client": peer.client,
+                            "progress": peer.progress,
+                            "download_rate": peer.download_rate,
+                            "upload_rate": peer.upload_rate,
+                        })
+                    })
+                    .collect();
+                output::print_json(&json!({ "id": id, "peers": peers }));
+            } else if peers.is_empty() {
+                println!("no connected peers");
+            } else {
+                for peer in &peers {
+                    println!(
+                        "{:<24} {:<20} {:>6.1}%  {} down  {} up",
+                        peer.endpoint,
+                        if peer.client.is_empty() {
+                            "unknown"
+                        } else {
+                            &peer.client
+                        },
+                        peer.progress * 100.0,
+                        output::format_rate(peer.download_rate),
+                        output::format_rate(peer.upload_rate)
+                    );
+                }
+            }
+        }
         Command::Create {
             path,
             trackers,
@@ -619,16 +884,192 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 );
             }
         }
-        Command::Rss => {
-            let feeds = client
-                .get_rss_status(GetRssStatusRequest {})
-                .await?
-                .into_inner()
-                .feeds;
-            if json {
-                output::print_json(&output::rss_json(&feeds));
+        Command::Rss { preview, filter } => {
+            if let Some(url) = preview {
+                let response = client
+                    .preview_rss_feed(PreviewRssFeedRequest { url, filter })
+                    .await?
+                    .into_inner();
+                if json {
+                    let items: Vec<_> = response
+                        .items
+                        .iter()
+                        .map(|item| {
+                            json!({
+                                "title": item.title,
+                                "torrent_url": item.torrent_url,
+                                "matched": item.matched,
+                                "reason": item.reason,
+                            })
+                        })
+                        .collect();
+                    output::print_json(&json!({
+                        "total": response.total,
+                        "items": items,
+                    }));
+                } else {
+                    println!(
+                        "{} items, {} matched",
+                        response.total,
+                        response.items.iter().filter(|item| item.matched).count()
+                    );
+                    for item in &response.items {
+                        println!(
+                            "  {}  {}{}",
+                            if item.matched { "yes" } else { "no " },
+                            item.title,
+                            if item.reason.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  ({})", item.reason)
+                            }
+                        );
+                    }
+                }
             } else {
-                output::print_rss(&feeds);
+                let feeds = client
+                    .get_rss_status(GetRssStatusRequest {})
+                    .await?
+                    .into_inner()
+                    .feeds;
+                if json {
+                    output::print_json(&output::rss_json(&feeds));
+                } else {
+                    output::print_rss(&feeds);
+                }
+            }
+        }
+        Command::Autoadd { scan, path } => {
+            if scan {
+                let response = client
+                    .scan_auto_add(ScanAutoAddRequest {
+                        path: path.unwrap_or_default(),
+                    })
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({
+                        "added": response.added,
+                        "duplicates": response.duplicates,
+                        "failed": response.failed,
+                        "invalid": response.invalid,
+                        "deferred": response.deferred,
+                    }));
+                } else {
+                    println!(
+                        "added {}, duplicates {}, deferred {}, invalid {}, failed {}",
+                        response.added,
+                        response.duplicates,
+                        response.deferred,
+                        response.invalid,
+                        response.failed
+                    );
+                }
+            } else {
+                let dirs = client
+                    .get_auto_add_status(GetAutoAddStatusRequest {})
+                    .await?
+                    .into_inner()
+                    .dirs;
+                if json {
+                    let dirs: Vec<_> = dirs
+                        .iter()
+                        .map(|dir| {
+                            json!({
+                                "path": dir.path,
+                                "enabled": dir.enabled,
+                                "label": dir.label,
+                                "move_to": dir.move_to,
+                                "pending": dir.pending,
+                                "added": dir.added,
+                                "duplicates": dir.duplicates,
+                                "invalid": dir.invalid,
+                                "deferred": dir.deferred,
+                                "last_error": dir.last_error,
+                                "last_scan_unix": dir.last_scan_unix,
+                            })
+                        })
+                        .collect();
+                    output::print_json(&json!({ "dirs": dirs }));
+                } else if dirs.is_empty() {
+                    println!("no watch directories configured");
+                } else {
+                    for dir in &dirs {
+                        println!(
+                            "{}{}  {}  pending {}  added {}  duplicates {}{}",
+                            if dir.enabled { "" } else { "(off) " },
+                            dir.path,
+                            if dir.label.is_empty() {
+                                "-"
+                            } else {
+                                &dir.label
+                            },
+                            dir.pending,
+                            dir.added,
+                            dir.duplicates,
+                            if dir.move_to.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  move {}", dir.move_to)
+                            }
+                        );
+                    }
+                }
+            }
+        }
+        Command::Hooks { limit } => {
+            let response = client
+                .get_hook_status(GetHookStatusRequest { limit })
+                .await?
+                .into_inner();
+            if json {
+                let runs: Vec<_> = response
+                    .runs
+                    .iter()
+                    .map(|run| {
+                        json!({
+                            "event": run.event,
+                            "torrent_id": run.torrent_id,
+                            "torrent_name": run.torrent_name,
+                            "command": run.command,
+                            "succeeded": run.succeeded,
+                            "exit_code": run.exit_code,
+                            "timed_out": run.timed_out,
+                            "duration_ms": run.duration_ms,
+                            "stdout": run.stdout,
+                            "stderr": run.stderr,
+                            "at_unix": run.at_unix,
+                        })
+                    })
+                    .collect();
+                output::print_json(&json!({
+                    "pending": response.pending,
+                    "runs": runs,
+                }));
+            } else {
+                println!("pending events: {}", response.pending);
+                if response.runs.is_empty() {
+                    println!("no hook runs yet");
+                }
+                for run in &response.runs {
+                    println!(
+                        "{}  {}  {}  {}  {}ms{}",
+                        run.event,
+                        run.torrent_name,
+                        run.command,
+                        if run.timed_out {
+                            "timeout".to_owned()
+                        } else {
+                            format!("exit {}", run.exit_code)
+                        },
+                        run.duration_ms,
+                        if run.stderr.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  stderr: {}", run.stderr.trim())
+                        }
+                    );
+                }
             }
         }
         Command::Recheck { id } => {
@@ -700,6 +1141,212 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 for url in urls {
                     println!("{url}");
                 }
+            }
+        }
+        Command::Labels { command } => match command.unwrap_or(LabelsCommand::List) {
+            LabelsCommand::List => {
+                let entries = client
+                    .list_labels(ListLabelsRequest {})
+                    .await?
+                    .into_inner()
+                    .labels;
+                if json {
+                    let labels: Vec<_> = entries
+                        .iter()
+                        .map(|entry| {
+                            let label = entry.label.clone().unwrap_or_default();
+                            json!({
+                                "name": label.name,
+                                "color": label.color,
+                                "move_completed_path": label.move_completed_path,
+                                "download_rate_limit": label.download_rate_limit,
+                                "upload_rate_limit": label.upload_rate_limit,
+                                "connections_limit": label.connections_limit,
+                                "upload_slots_limit": label.upload_slots_limit,
+                                "match_trackers": label.match_trackers,
+                                "match_name": label.match_name,
+                                "torrents": entry.torrent_count,
+                            })
+                        })
+                        .collect();
+                    output::print_json(&json!({ "labels": labels }));
+                } else if entries.is_empty() {
+                    println!("no labels");
+                } else {
+                    for entry in &entries {
+                        let label = entry.label.clone().unwrap_or_default();
+                        println!(
+                            "{:<16} {:>5}  {}{}{}",
+                            label.name,
+                            entry.torrent_count,
+                            if label.color.is_empty() {
+                                ""
+                            } else {
+                                &label.color
+                            },
+                            if label.move_completed_path.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  move {}", label.move_completed_path)
+                            },
+                            if label.match_name.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  match /{}/", label.match_name)
+                            }
+                        );
+                    }
+                }
+            }
+            LabelsCommand::Create { name, fields } => {
+                let label = fields.into_label(&name);
+                let created = client
+                    .create_label(CreateLabelRequest { label: Some(label) })
+                    .await?
+                    .into_inner()
+                    .label
+                    .unwrap_or_default();
+                if json {
+                    output::print_json(&json!({ "name": created.name, "color": created.color }));
+                } else {
+                    println!("created label {}", created.name);
+                }
+            }
+            LabelsCommand::Update { name, fields } => {
+                let entries = client
+                    .list_labels(ListLabelsRequest {})
+                    .await?
+                    .into_inner()
+                    .labels;
+                let mut label = entries
+                    .into_iter()
+                    .find_map(|entry| entry.label.filter(|label| label.name == name))
+                    .ok_or_else(|| {
+                        CliError::Status(tonic::Status::not_found(format!(
+                            "label {name} not found"
+                        )))
+                    })?;
+                fields.apply(&mut label);
+                let updated = client
+                    .update_label(UpdateLabelRequest { label: Some(label) })
+                    .await?
+                    .into_inner()
+                    .label
+                    .unwrap_or_default();
+                if json {
+                    output::print_json(&json!({ "name": updated.name, "color": updated.color }));
+                } else {
+                    println!("updated label {}", updated.name);
+                }
+            }
+            LabelsCommand::Delete { name } => {
+                let response = client
+                    .delete_label(DeleteLabelRequest { name: name.clone() })
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({
+                        "name": name,
+                        "removed": response.removed,
+                        "cleared_assignments": response.cleared_assignments,
+                    }));
+                } else if response.removed {
+                    println!(
+                        "removed label {name} ({} assignments cleared)",
+                        response.cleared_assignments
+                    );
+                } else {
+                    println!("label {name} not found");
+                }
+            }
+            LabelsCommand::Set { id, name } => {
+                let response = client
+                    .set_torrent_label(SetTorrentLabelRequest { id, label: name })
+                    .await?
+                    .into_inner();
+                if json {
+                    output::print_json(&json!({ "id": id, "label": response.label }));
+                } else if response.label.is_empty() {
+                    println!("torrent {id}: label cleared");
+                } else {
+                    println!("torrent {id}: label {}", response.label);
+                }
+            }
+        },
+        Command::Limits {
+            id,
+            download,
+            upload,
+            connections,
+            upload_slots,
+            clear,
+        } => {
+            client
+                .set_torrent_limits(SetTorrentLimitsRequest {
+                    id,
+                    download_rate_limit: if clear { 0 } else { download },
+                    upload_rate_limit: if clear { 0 } else { upload },
+                    connections_limit: if clear { 0 } else { connections },
+                    upload_slots_limit: if clear { 0 } else { upload_slots },
+                    clear,
+                })
+                .await?;
+            if json {
+                output::print_json(&json!({ "ok": true, "id": id, "cleared": clear }));
+            } else if clear {
+                println!("torrent {id}: limits cleared");
+            } else {
+                println!("torrent {id}: limits set");
+            }
+        }
+        Command::Set {
+            id,
+            sequential,
+            no_sequential,
+            super_seeding,
+            no_super_seeding,
+        } => {
+            let sequential = match (sequential, no_sequential) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            let super_seeding = match (super_seeding, no_super_seeding) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            if sequential.is_none() && super_seeding.is_none() {
+                return Err(CliError::Config(
+                    "nothing to set: pass --sequential/--no-sequential or \
+                     --super-seeding/--no-super-seeding"
+                        .to_owned(),
+                ));
+            }
+            let mut applied = serde_json::Map::new();
+            if let Some(on) = sequential {
+                client
+                    .set_sequential(SetSequentialRequest { id, on })
+                    .await?;
+                applied.insert("sequential".to_owned(), json!(on));
+            }
+            if let Some(on) = super_seeding {
+                client
+                    .set_super_seeding(SetSuperSeedingRequest { id, on })
+                    .await?;
+                applied.insert("super_seeding".to_owned(), json!(on));
+            }
+            if json {
+                output::print_json(&json!({ "ok": true, "id": id, "set": applied }));
+            } else {
+                let mut parts = Vec::new();
+                if let Some(on) = sequential {
+                    parts.push(format!("sequential {}", if on { "on" } else { "off" }));
+                }
+                if let Some(on) = super_seeding {
+                    parts.push(format!("super seeding {}", if on { "on" } else { "off" }));
+                }
+                println!("torrent {id}: {}", parts.join(", "));
             }
         }
         Command::Blocklist { refresh } => {
@@ -838,6 +1485,62 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             }
         }
+        Command::Status => {
+            let status = client.get_status(GetStatusRequest {}).await?.into_inner();
+            let fingerprint =
+                ferrent_protocol::tls::fingerprint_from_pem(&ca_pem).map_err(|error| {
+                    CliError::Config(format!(
+                        "invalid CA certificate {}: {error}",
+                        ca_path.display()
+                    ))
+                })?;
+            if json {
+                output::print_json(&json!({
+                    "server": server,
+                    "daemon_version": status.daemon_version,
+                    "uptime_secs": status.uptime_secs,
+                    "torrent_count": status.torrent_count,
+                    "active_count": status.active_count,
+                    "downloading_count": status.downloading_count,
+                    "seeding_count": status.seeding_count,
+                    "paused_count": status.paused_count,
+                    "error_count": status.error_count,
+                    "free_space_bytes": status.free_space_bytes,
+                    "download_rate": status.download_rate,
+                    "upload_rate": status.upload_rate,
+                    "fingerprint": fingerprint,
+                }));
+            } else {
+                let version = if status.daemon_version.is_empty() {
+                    "unknown".to_owned()
+                } else {
+                    status.daemon_version
+                };
+                println!("server:      {server}");
+                println!("daemon:      ferrent {version}");
+                println!(
+                    "uptime:      {}",
+                    output::format_duration(status.uptime_secs)
+                );
+                println!(
+                    "torrents:    {} ({} active, {} paused, {} error)",
+                    status.torrent_count,
+                    status.active_count,
+                    status.paused_count,
+                    status.error_count
+                );
+                println!(
+                    "rate:        {} down / {} up",
+                    output::format_rate(status.download_rate),
+                    output::format_rate(status.upload_rate)
+                );
+                println!(
+                    "free space:  {}",
+                    output::format_bytes(status.free_space_bytes)
+                );
+                println!("tls sha256:  {fingerprint}");
+            }
+        }
         Command::Disks => {
             let response = client.get_disks(GetDisksRequest {}).await?.into_inner();
             if json {
@@ -957,6 +1660,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             }
         },
+        Command::Servers { .. } => {
+            // Answered before the connection; kept for exhaustiveness.
+        }
     }
 
     Ok(())
@@ -986,6 +1692,100 @@ async fn simple_action(
         output::print_json(&json!({ "ok": true, "id": id }));
     } else {
         println!("{} {id}", action.past());
+    }
+    Ok(())
+}
+
+/// `servers`: the saved daemons live in cli.toml, not on the daemon.
+fn servers_report(
+    command: ServersCommand,
+    config_path: Option<PathBuf>,
+    json: bool,
+) -> Result<(), CliError> {
+    match command {
+        ServersCommand::List => {
+            let (servers, active) = config::profiles(config_path)?;
+            if json {
+                let servers: Vec<_> = servers
+                    .iter()
+                    .map(|entry| {
+                        json!({
+                            "name": entry.name,
+                            "server": entry.server,
+                            "ca": entry.ca,
+                            "token_set": entry.token.is_some(),
+                            "active": active.as_deref() == Some(entry.name.as_str()),
+                        })
+                    })
+                    .collect();
+                output::print_json(&json!({ "active": active, "servers": servers }));
+            } else if servers.is_empty() {
+                println!(
+                    "no saved servers; add one with `ferrent-cli servers add <name> --server <url>`"
+                );
+            } else {
+                for entry in &servers {
+                    println!(
+                        "{}{:<12} {}{}",
+                        if active.as_deref() == Some(entry.name.as_str()) {
+                            "* "
+                        } else {
+                            "  "
+                        },
+                        entry.name,
+                        entry.server,
+                        if entry.token.is_some() { "  token" } else { "" }
+                    );
+                }
+            }
+        }
+        ServersCommand::Add {
+            name,
+            server,
+            ca,
+            token,
+            use_it,
+        } => {
+            let path = config::add_profile(
+                config_path,
+                config::ServerEntry {
+                    name: name.clone(),
+                    server: server.clone(),
+                    ca,
+                    token,
+                },
+                use_it,
+            )?;
+            if json {
+                output::print_json(&json!({
+                    "name": name, "server": server, "active": use_it, "config": path
+                }));
+            } else {
+                println!(
+                    "saved {name} -> {server}{} ({})",
+                    if use_it { " (active)" } else { "" },
+                    path.display()
+                );
+            }
+        }
+        ServersCommand::Remove { name } => {
+            let (path, removed) = config::remove_profile(config_path, &name)?;
+            if json {
+                output::print_json(&json!({ "name": name, "removed": removed, "config": path }));
+            } else if removed {
+                println!("removed {name} ({})", path.display());
+            } else {
+                println!("no saved server named {name}");
+            }
+        }
+        ServersCommand::Use { name } => {
+            let path = config::use_profile(config_path, &name)?;
+            if json {
+                output::print_json(&json!({ "active": name, "config": path }));
+            } else {
+                println!("active server: {name} ({})", path.display());
+            }
+        }
     }
     Ok(())
 }
@@ -1070,6 +1870,109 @@ mod tests {
             "english help missing: {english}"
         );
         ferrent_i18n::install(ferrent_i18n::Lang::Hu);
+    }
+
+    fn command_strings(command: &clap::Command, out: &mut Vec<String>) {
+        for text in [command.get_about(), command.get_long_about()]
+            .into_iter()
+            .flatten()
+        {
+            out.push(text.to_string());
+        }
+        for arg in command.get_arguments() {
+            for text in [arg.get_help(), arg.get_long_help()].into_iter().flatten() {
+                out.push(text.to_string());
+            }
+        }
+        for sub in command.get_subcommands() {
+            command_strings(sub, out);
+        }
+    }
+
+    #[test]
+    fn every_help_string_has_a_translation() {
+        let known: std::collections::HashSet<&str> = ferrent_i18n::keys().collect();
+        let mut strings = Vec::new();
+        command_strings(&Cli::command(), &mut strings);
+        strings.sort();
+        strings.dedup();
+        let missing: Vec<&String> = strings
+            .iter()
+            .filter(|text| !known.contains(text.as_str()))
+            .collect();
+        assert!(missing.is_empty(), "missing translations: {missing:#?}");
+    }
+
+    #[test]
+    fn docs_list_every_subcommand() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/cli.md");
+        let docs = std::fs::read_to_string(path).expect("docs/cli.md");
+        let mut documented = std::collections::HashSet::new();
+        for line in docs.lines().filter(|line| line.starts_with("### ")) {
+            let mut rest = line;
+            while let Some(position) = rest.find("ferrent-cli ") {
+                let after = &rest[position + "ferrent-cli ".len()..];
+                let name = after
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches('`');
+                if !name.is_empty() {
+                    documented.insert(name);
+                }
+                rest = after;
+            }
+        }
+        let commands: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_owned())
+            .collect();
+        for command in &commands {
+            assert!(
+                documented.contains(command.as_str()),
+                "docs/cli.md is missing a `### `ferrent-cli {command}`` section"
+            );
+        }
+        for name in &documented {
+            assert!(
+                commands.iter().any(|command| command == name),
+                "docs/cli.md documents the unknown command {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_man_page_lists_every_subcommand() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packaging/debian/ferrent-cli.1"
+        );
+        let man = std::fs::read_to_string(path).expect("ferrent-cli.1");
+        let mut documented = std::collections::HashSet::new();
+        let mut in_commands = false;
+        for line in man.lines() {
+            if line.starts_with(".SH ") {
+                in_commands = line.trim() == ".SH COMMANDS";
+                continue;
+            }
+            if in_commands && let Some(name) = line.strip_prefix(".B ") {
+                let name = name.trim();
+                if name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-') {
+                    documented.insert(name);
+                }
+            }
+        }
+        let commands: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_owned())
+            .collect();
+        for command in &commands {
+            assert!(
+                documented.contains(command.as_str()),
+                "ferrent-cli.1 is missing {command}"
+            );
+        }
+        assert_eq!(documented.len(), commands.len(), "man page drift");
     }
 
     #[test]

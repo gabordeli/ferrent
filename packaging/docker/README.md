@@ -20,8 +20,8 @@ docker run -d --name ferrent \
 - **Token:** `FERRENT_TOKEN` is required; the entrypoint refuses to start
   without it, so the daemon never listens with an empty secret.
 - **User:** uid/gid 1000 (`ferrent`); make sure the volume is writable by it.
-- **Healthcheck:** every 30 s the image runs `ferrent-cli list --limit 1` over
-  TLS against the daemon; two failures mark the container unhealthy.
+- **Healthcheck:** every 30 s the image runs `ferrent-cli status` over TLS
+  against the daemon; two failures mark the container unhealthy.
 - **Downloads:** `/var/lib/ferrent/downloads` unless the config says otherwise;
   mount the media path you actually want.
 - **libtorrent:** the runtime stage installs `libtorrent-rasterbar2.0` from

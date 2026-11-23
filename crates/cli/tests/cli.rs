@@ -327,6 +327,417 @@ async fn watch_ctrl_c_exits_zero() {
 }
 
 #[tokio::test]
+async fn version_matches_the_workspace_and_bad_transport_is_clear() {
+    let raw = Command::new(env!("CARGO_BIN_EXE_ferrent-cli"))
+        .arg("--version")
+        .output()
+        .await
+        .expect("run ferrent-cli");
+    assert!(raw.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&raw.stdout).trim(),
+        format!("ferrent-cli {}", env!("CARGO_PKG_VERSION"))
+    );
+
+    let server = start_server().await;
+    let down = Command::new(env!("CARGO_BIN_EXE_ferrent-cli"))
+        .env("FERRENT_BUGSINK_DSN", "")
+        .args([
+            "--server",
+            "https://127.0.0.1:1",
+            "--ca",
+            server.cert_path().to_str().expect("ca"),
+            "--config",
+            server.config_path().to_str().expect("config"),
+            "--token",
+            "secret",
+            "status",
+        ])
+        .output()
+        .await
+        .expect("run ferrent-cli");
+    assert_eq!(down.status.code(), Some(5), "{}", stderr(&down));
+    let message = stderr(&down);
+    assert!(
+        message.contains("cannot connect to https://127.0.0.1:1"),
+        "{message}"
+    );
+    assert!(!message.contains("panicked"), "{message}");
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn every_read_command_answers_json() {
+    let server = start_server().await;
+    let state = server.dir.join("deluge").join("state");
+    std::fs::create_dir_all(&state).expect("state dir");
+    let state_arg = state.to_str().expect("state path").to_owned();
+
+    let commands: Vec<Vec<String>> = vec![
+        vec!["--json".into(), "status".into()],
+        vec!["--json".into(), "stats".into()],
+        vec!["--json".into(), "disks".into()],
+        vec!["--json".into(), "list".into()],
+        vec!["--json".into(), "rss".into()],
+        vec!["--json".into(), "autoadd".into()],
+        vec!["--json".into(), "autoadd".into(), "--scan".into()],
+        vec!["--json".into(), "hooks".into()],
+        vec!["--json".into(), "labels".into()],
+        vec!["--json".into(), "labels".into(), "list".into()],
+        vec!["--json".into(), "blocklist".into()],
+        vec!["--json".into(), "notify".into(), "status".into()],
+        vec!["--json".into(), "config".into(), "get".into()],
+        vec!["--json".into(), "servers".into()],
+        vec![
+            "--json".into(),
+            "import-deluge".into(),
+            "--state-dir".into(),
+            state_arg,
+            "--dry-run".into(),
+        ],
+    ];
+    for args in &commands {
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = run_cli(&server, &borrowed).await;
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            borrowed.join(" "),
+            stderr(&output)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{} did not print JSON ({error}): {}",
+                borrowed.join(" "),
+                String::from_utf8_lossy(&output.stdout)
+            )
+        });
+    }
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn every_torrent_command_runs() {
+    let server = start_server().await;
+    let torrent = server.torrent_path();
+    let torrent = torrent.to_str().expect("torrent path").to_owned();
+    let add = run_cli(
+        &server,
+        &[
+            "--json",
+            "add",
+            &torrent,
+            "--name",
+            "commands",
+            "--save-path",
+            "/tmp",
+        ],
+    )
+    .await;
+    assert!(add.status.success(), "add failed: {}", stderr(&add));
+    let added: Value = serde_json::from_slice(&add.stdout).expect("add JSON");
+    let id = added["id"].as_u64().expect("id").to_string();
+
+    let commands: Vec<Vec<String>> = vec![
+        vec!["peers".into(), id.clone()],
+        vec!["files".into(), id.clone()],
+        vec![
+            "rename-file".into(),
+            id.clone(),
+            "0".into(),
+            "renamed.bin".into(),
+        ],
+        vec!["trackers".into(), id.clone()],
+        vec![
+            "trackers".into(),
+            id.clone(),
+            "--add".into(),
+            "udp://tracker.example:6969".into(),
+        ],
+        vec!["webseeds".into(), id.clone()],
+        vec![
+            "webseeds".into(),
+            id.clone(),
+            "--set".into(),
+            "https://mirror.example/file".into(),
+        ],
+        vec![
+            "limits".into(),
+            id.clone(),
+            "--download".into(),
+            "1048576".into(),
+        ],
+        vec!["limits".into(), id.clone(), "--clear".into()],
+        vec!["set".into(), id.clone(), "--sequential".into()],
+        vec!["set".into(), id.clone(), "--no-super-seeding".into()],
+        vec!["recheck".into(), id.clone()],
+        vec!["pause".into(), id.clone()],
+        vec!["resume".into(), id.clone()],
+        vec!["move".into(), id.clone()],
+        vec!["move".into(), id.clone(), "--down".into()],
+    ];
+    for args in &commands {
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = run_cli(&server, &borrowed).await;
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            borrowed.join(" "),
+            stderr(&output)
+        );
+    }
+
+    let peers = run_cli(&server, &["--json", "peers", &id]).await;
+    assert!(peers.status.success(), "peers failed: {}", stderr(&peers));
+
+    let create_src = server.dir.join("payload.bin");
+    std::fs::write(&create_src, vec![0_u8; 40 * 1024]).expect("payload");
+    let created = run_cli(
+        &server,
+        &[
+            "--json",
+            "create",
+            create_src.to_str().expect("payload path"),
+            "--output",
+            server.dir.join("built.torrent").to_str().expect("out"),
+        ],
+    )
+    .await;
+    assert!(
+        created.status.success(),
+        "create failed: {}",
+        stderr(&created)
+    );
+
+    let removed = run_cli(&server, &["--json", "remove", &id]).await;
+    assert!(
+        removed.status.success(),
+        "remove failed: {}",
+        stderr(&removed)
+    );
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn labels_round_trip_with_an_assignment() {
+    let server = start_server().await;
+    let created = run_cli(
+        &server,
+        &[
+            "--json",
+            "labels",
+            "create",
+            "movies",
+            "--color",
+            "#3ba55d",
+            "--move-completed",
+            "/mnt/usbhdd1/library",
+            "--download-limit",
+            "1048576",
+        ],
+    )
+    .await;
+    assert!(
+        created.status.success(),
+        "create failed: {}",
+        stderr(&created)
+    );
+
+    let listed = run_cli(&server, &["--json", "labels", "list"]).await;
+    assert!(listed.status.success(), "list failed: {}", stderr(&listed));
+    let body: Value = serde_json::from_slice(&listed.stdout).expect("labels JSON");
+    let label = &body["labels"][0];
+    assert_eq!(label["name"].as_str(), Some("movies"));
+    assert_eq!(label["color"].as_str(), Some("#3ba55d"));
+    assert_eq!(label["download_rate_limit"].as_u64(), Some(1_048_576));
+
+    let updated = run_cli(
+        &server,
+        &["--json", "labels", "update", "movies", "--color", "#ff0000"],
+    )
+    .await;
+    assert!(
+        updated.status.success(),
+        "update failed: {}",
+        stderr(&updated)
+    );
+
+    let torrent = server.torrent_path();
+    let add = run_cli(
+        &server,
+        &[
+            "--json",
+            "add",
+            torrent.to_str().expect("path"),
+            "--name",
+            "l",
+        ],
+    )
+    .await;
+    let added: Value = serde_json::from_slice(&add.stdout).expect("add JSON");
+    let id = added["id"].as_u64().expect("id").to_string();
+
+    let assigned = run_cli(&server, &["--json", "labels", "set", &id, "movies"]).await;
+    assert!(
+        assigned.status.success(),
+        "set failed: {}",
+        stderr(&assigned)
+    );
+    let body: Value = serde_json::from_slice(&assigned.stdout).expect("set JSON");
+    assert_eq!(body["label"].as_str(), Some("movies"));
+
+    let cleared = run_cli(&server, &["--json", "labels", "set", &id, ""]).await;
+    assert!(
+        cleared.status.success(),
+        "clear failed: {}",
+        stderr(&cleared)
+    );
+
+    let removed = run_cli(&server, &["--json", "labels", "delete", "movies"]).await;
+    assert!(
+        removed.status.success(),
+        "delete failed: {}",
+        stderr(&removed)
+    );
+    let body: Value = serde_json::from_slice(&removed.stdout).expect("delete JSON");
+    assert_eq!(body["removed"].as_bool(), Some(true));
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn servers_are_stored_in_the_cli_config() {
+    let server = start_server().await;
+    let added = run_cli(
+        &server,
+        &[
+            "--json",
+            "servers",
+            "add",
+            "lab",
+            "--server",
+            "https://192.168.2.28:50051",
+            "--ca",
+            "/tmp/ca.pem",
+            "--token",
+            "lab-token",
+            "--use",
+        ],
+    )
+    .await;
+    assert!(added.status.success(), "add failed: {}", stderr(&added));
+    let text = std::fs::read_to_string(server.config_path()).expect("cli.toml");
+    assert!(text.contains("[[servers]]"), "{text}");
+    assert!(text.contains("active = \"lab\""), "{text}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(server.config_path())
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "the token file must stay private");
+    }
+
+    let listed = run_cli(&server, &["--json", "servers", "list"]).await;
+    assert!(listed.status.success(), "list failed: {}", stderr(&listed));
+    let body: Value = serde_json::from_slice(&listed.stdout).expect("servers JSON");
+    assert_eq!(body["active"].as_str(), Some("lab"));
+    assert_eq!(body["servers"][0]["token_set"].as_bool(), Some(true));
+
+    let used = run_cli(&server, &["servers", "use", "lab"]).await;
+    assert!(used.status.success(), "use failed: {}", stderr(&used));
+
+    let removed = run_cli(&server, &["--json", "servers", "remove", "lab"]).await;
+    assert!(
+        removed.status.success(),
+        "remove failed: {}",
+        stderr(&removed)
+    );
+    let body: Value = serde_json::from_slice(&removed.stdout).expect("remove JSON");
+    assert_eq!(body["removed"].as_bool(), Some(true));
+    let text = std::fs::read_to_string(server.config_path()).expect("cli.toml");
+    assert!(!text.contains("[[servers]]"), "{text}");
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn rss_preview_reads_a_local_feed() {
+    use tokio::io::AsyncWriteExt;
+
+    let server = start_server().await;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind feed listener");
+    let addr = listener.local_addr().expect("feed addr");
+    let feed = tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let body = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<item><title>Some.Release.1080p</title><enclosure url="http://example/a.torrent" type="application/x-bittorrent"/></item>
+<item><title>Some.Release.720p</title><enclosure url="http://example/b.torrent" type="application/x-bittorrent"/></item>
+</channel></rss>"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    let url = format!("http://{addr}/feed.xml");
+    let output = run_cli(
+        &server,
+        &["--json", "rss", "--preview", &url, "--filter", "1080p"],
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "preview failed: {}",
+        stderr(&output)
+    );
+    let body: Value = serde_json::from_slice(&output.stdout).expect("preview JSON");
+    assert_eq!(body["total"].as_u64(), Some(2));
+    let matched: Vec<&Value> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|item| item["matched"] == true)
+        .collect();
+    assert_eq!(matched.len(), 1, "{body}");
+    assert!(
+        matched[0]["title"]
+            .as_str()
+            .is_some_and(|title| title.contains("1080p"))
+    );
+    feed.abort();
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn cli_status_reports_the_daemon_identity() {
+    let server = start_server().await;
+    let output = run_cli(&server, &["--json", "status"]).await;
+    assert!(output.status.success(), "{}", stderr(&output));
+    let body: Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(
+        body["daemon_version"].as_str(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(body["server"].as_str(), Some(server.uri().as_str()));
+    assert!(body["uptime_secs"].as_i64().expect("uptime") >= 0);
+    let fingerprint = body["fingerprint"].as_str().expect("fingerprint");
+    assert_eq!(fingerprint.split(':').count(), 32, "{fingerprint}");
+    assert_eq!(body["torrent_count"].as_u64(), Some(0));
+
+    let human = run_cli(&server, &["status"]).await;
+    assert!(human.status.success(), "{}", stderr(&human));
+    let text = String::from_utf8_lossy(&human.stdout).into_owned();
+    assert!(text.contains("daemon:      ferrent "), "{text}");
+    assert!(text.contains("tls sha256:  "), "{text}");
+    server.shutdown();
+}
+
+#[tokio::test]
 async fn cli_disks_reports_the_store_volume() {
     let server = start_server().await;
     let output = run_cli(&server, &["--json", "disks"]).await;

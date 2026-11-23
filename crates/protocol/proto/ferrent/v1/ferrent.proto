@@ -212,6 +212,10 @@ message GetStatusResponse {
   int64 blocklist_refreshed_unix = 17;
   // Last blocklist load error; empty when the filter is healthy.
   string blocklist_error = 18;
+  // Version of the daemon answering, e.g. "1.0.0-rc1".
+  string daemon_version = 19;
+  // Seconds since the daemon started.
+  int64 uptime_secs = 20;
 }
 
 // Request to add a torrent.

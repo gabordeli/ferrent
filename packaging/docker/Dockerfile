@@ -46,6 +46,6 @@ EXPOSE 50129
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD ferrent-cli --server https://localhost:50129 \
         --ca /var/lib/ferrent/tls-cert.pem --token "$FERRENT_TOKEN" \
-        list --limit 1 >/dev/null || exit 1
+        status >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -1,5 +1,8 @@
 //! Ferrent daemon library: persistence and, later, the RPC server.
 
+/// Version reported over `GetStatus`, so a client can tell which build answers.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod autoadd;
 pub mod automation;
 pub mod blocklist;

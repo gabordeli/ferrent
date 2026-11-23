@@ -300,6 +300,33 @@ impl TorrentEngine for MockEngine {
         Ok(())
     }
 
+    /// A minimal bencoded metainfo so mock-mode clients can exercise the
+    /// create flow; it carries no pieces and is not a loadable torrent.
+    fn create_torrent(
+        &mut self,
+        spec: crate::CreateTorrentSpec,
+    ) -> Result<crate::CreatedTorrent, EngineError> {
+        let name = spec.path.file_name().map_or_else(
+            || "mock".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let metainfo = format!("d4:infod4:name{}:{}ee", name.len(), name).into_bytes();
+        Ok(crate::CreatedTorrent {
+            metainfo,
+            infohash: format!("mock-{name}"),
+        })
+    }
+
+    fn files(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentFileInfo>, EngineError> {
+        let status = self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        Ok(vec![crate::TorrentFileInfo {
+            path: status.name.clone(),
+            size: status.total_bytes,
+            progress: status.progress,
+            priority: 4,
+        }])
+    }
+
     fn remove(&mut self, id: TorrentId, delete_files: bool) -> Result<(), EngineError> {
         let _ = delete_files;
         let status = self
