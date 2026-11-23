@@ -6421,12 +6421,9 @@ impl App {
         };
         let expanded = !self.sidebar_collapsed;
 
-        let mark = iced::widget::image(iced::widget::image::Handle::from_bytes(theme::MARK_BYTES))
+        let mark = iced::widget::image(iced::widget::image::Handle::from_bytes(theme::ICON_BYTES))
             .width(Length::Fixed(24.0))
             .height(Length::Fixed(24.0));
-        let logo = iced::widget::image(iced::widget::image::Handle::from_bytes(theme::LOGO_BYTES))
-            .width(Length::Fixed(113.0))
-            .height(Length::Fixed(30.0));
         let toggle = icon_button(
             if expanded {
                 glyph::CHEVRON_LEFT
@@ -6437,22 +6434,18 @@ impl App {
         );
 
         let header: Element<Message> = if expanded {
-            // The bundled lockup is white; on a light palette the word is
-            // drawn as text next to the mark instead.
-            let title: Element<Message> = if theme::is_light() {
-                row![
-                    mark,
-                    text("Ferrent")
-                        .size(20)
-                        .font(theme::semibold())
-                        .color(theme::text())
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into()
-            } else {
-                logo.into()
-            };
+            // The icon carries its own colour, so the word is text in both
+            // palettes instead of a bundled white-only lockup.
+            let title: Element<Message> = row![
+                mark,
+                text("Ferrent")
+                    .size(20)
+                    .font(theme::semibold())
+                    .color(theme::text())
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into();
             row![title, horizontal_space(), toggle]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)

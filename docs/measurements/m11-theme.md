@@ -44,7 +44,9 @@ világos téma minden szövegszerepe ≥ 4,5:1.
 - `docs/measurements/m11-theme-dark.png` — sötét téma, az Appearance füllel.
 
 A világos témában a sidebar wordmarkja szövegként jelenik meg
-(`theme::is_light()`), mert a csomagolt `logo.png` fehér betűs.
+(`theme::is_light()`), mert a csomagolt `logo.png` fehér betűs. (2026-11-23
+óta a fejléc mindkét palettán az új hexagon ikon + `Ferrent` szöveg, a fehér
+wordmark PNG kikerült.)
 
 ## Ismert korlát
 
