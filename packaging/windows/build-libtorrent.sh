@@ -14,7 +14,17 @@ jobs=${JOBS:-$(nproc)}
 src=${LT_SRC:-/tmp/libtorrent-rasterbar-$version}
 build=${LT_BUILD:-/tmp/lt-build}
 
-if [ -f "$prefix/lib/libtorrent-rasterbar.a" ]; then
+# Boost is header-only here. Pointing the compiler at /usr/include directly
+# would shadow the mingw headers with glibc's (wchar.h →
+# bits/libc-header-start.h), so only boost/ is exposed, and it is exposed
+# inside the prefix: the .pc file records this path, which must still exist
+# when a cached prefix is reused on a later run.
+mkdir -p "$prefix/include"
+boost_link=$prefix/include/boost
+[ -e "$boost_link" ] || ln -sfn "${BOOST_SOURCE_INCLUDE:-/usr/include/boost}" "$boost_link"
+
+if [ -f "$prefix/lib/libtorrent-rasterbar.a" ] &&
+   grep -q -- "-I$prefix/include" "$prefix/lib/pkgconfig/libtorrent-rasterbar.pc" 2>/dev/null; then
   echo "libtorrent $version: $prefix/lib/libtorrent-rasterbar.a exists, skipping"
   exit 0
 fi
@@ -26,20 +36,13 @@ if [ ! -d "$src" ]; then
   tar -C /tmp -xf "$tarball"
 fi
 
-# Boost is header-only here. Pointing the compiler at /usr/include directly
-# would shadow the mingw headers with glibc's (wchar.h → bits/libc-header-start.h),
-# so only the boost/ directory is exposed on a separate include root.
-boost_include=${BOOST_INCLUDE_DIR:-/tmp/boost-include}
-mkdir -p "$boost_include"
-[ -e "$boost_include/boost" ] || ln -sfn /usr/include/boost "$boost_include/boost"
-
 cmake -S "$src" -B "$build" -G "Unix Makefiles" \
   -DCMAKE_TOOLCHAIN_FILE="$(cd "$(dirname "$0")" && pwd)/toolchain-mingw.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
   -Dbuild_tests=OFF -Dbuild_examples=OFF -Dbuild_tools=OFF -Dpython-bindings=OFF \
   -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON -DCMAKE_DISABLE_FIND_PACKAGE_GnuTLS=ON \
-  -DBoost_INCLUDE_DIR="$boost_include" \
+  -DBoost_INCLUDE_DIR="$prefix/include" \
   -DCMAKE_INSTALL_PREFIX="$prefix"
 cmake --build "$build" -j"$jobs"
 cmake --install "$build"
