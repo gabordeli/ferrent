@@ -664,8 +664,16 @@ impl canvas::Program<TableMessage> for Table<'_> {
 
         let range = visible_range(self.scroll, self.total);
         let page_end = self.page_offset + self.rows.len();
+        // A canvas layer grows to the painted primitives; without this bound
+        // the rows below the canvas run into whatever sits under it (the
+        // details panel) and show through.
+        let max_y = bounds.height;
         for index in range {
             let y = HEADER_HEIGHT + index as f32 * ROW_HEIGHT - self.scroll;
+            if y >= max_y {
+                break;
+            }
+            let row_height = ROW_HEIGHT.min(max_y - y);
             let torrent = (index >= self.page_offset && index < page_end)
                 .then(|| &self.rows[index - self.page_offset]);
             let selected = torrent.is_some_and(|torrent| self.selected.contains(&torrent.id));
@@ -680,7 +688,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
             };
             frame.fill_rectangle(
                 Point::new(0.0, y),
-                Size::new(bounds.width, ROW_HEIGHT),
+                Size::new(bounds.width, row_height),
                 background,
             );
 

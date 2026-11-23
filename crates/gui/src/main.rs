@@ -5314,7 +5314,7 @@ impl App {
                     .on_input(Message::ImportConfigDir)
                     .padding([4, 8])
                     .size(12)
-                    .width(Length::Fixed(300.0)),
+                    .width(Length::Fixed(220.0)),
                     action_button(
                         i18n::t("Preview"),
                         Message::ImportPreview,
@@ -6264,7 +6264,9 @@ impl App {
             View::Torrents => column![
                 self.toolbar_view(),
                 self.select_all_hint(),
-                self.table_view(),
+                // The table canvas paints every loaded row; without a clip the
+                // rows run under the details panel and show through it.
+                container(self.table_view()).height(Length::Fill).clip(true),
                 self.details_panel()
             ]
             .width(Length::Fill)
