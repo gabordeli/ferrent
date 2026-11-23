@@ -48,6 +48,9 @@ amd64)
     # The GUI is amd64-only for now: cross-building GTK for arm64 needs the
     # whole -dev:arm64 pkg-config set, and the server side does not run it.
     gui=1
+    # FERRENT_SKIP_GUI=1 builds just the daemon + CLI, which is what a server
+    # install needs (and it keeps a GUI-only build break out of the way).
+    [ -n "${FERRENT_SKIP_GUI:-}" ] && gui=0
     ;;
 arm64)
     arch_pre="RUN dpkg --add-architecture arm64"
