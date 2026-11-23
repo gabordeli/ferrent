@@ -183,6 +183,42 @@ async fn run() -> Result<(), Box<dyn Error>> {
         eprintln!("failed to refresh the restored state: {error}");
     }
 
+    // libtorrent processes the adds asynchronously, so a complete torrent can
+    // still pop up as seeding long after the one-shot sweep above: keep
+    // checking the user-paused ones for the first two minutes of uptime.
+    {
+        let sweep_state = Arc::clone(&state);
+        let sweep_ids = paused_ids.clone();
+        tokio::spawn(async move {
+            for pass in 0..12u32 {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                let state = Arc::clone(&sweep_state);
+                let ids = sweep_ids.clone();
+                let running = tokio::task::spawn_blocking(move || {
+                    let mut engine = state.engine.lock().expect("engine mutex poisoned");
+                    let mut running = 0usize;
+                    for id in ids {
+                        let paused = matches!(
+                            engine.status(id),
+                            Ok(status) if status.state == ferrent_engine::TorrentState::Paused
+                        );
+                        if !paused {
+                            running += 1;
+                        }
+                        let _ = ferrent_daemon::rpc::pause_settled(&mut **engine, id);
+                    }
+                    running
+                })
+                .await
+                .unwrap_or(0);
+                if running == 0 {
+                    break;
+                }
+                eprintln!("pause sweep {pass}: re-paused {running} restored torrents");
+            }
+        });
+    }
+
     let listener = TcpListener::bind(&bind).await?;
     let local = listener.local_addr()?;
     println!("ferrentd listening on https://{local}");
