@@ -24,3 +24,17 @@ dll=$(x86_64-w64-mingw32-g++ -print-file-name=libstdc++-6.dll)
 "$strip_tool" --strip-all -o "$out/libstdc++-6.dll" "$dll"
 
 ls -l "$out"
+
+# A gate, not a report: the daemon must carry libtorrent statically. A dynamic
+# dependency would only show up as a missing DLL on the Windows box, so any
+# import outside the Windows API and the C++ runtime fails the build here.
+allow='^(kernel32|ntdll|msvcrt|advapi32|user32|api-ms-win[a-z0-9._-]*|bcrypt|bcryptprimitives|crypt32|iphlpapi|mswsock|ws2_32|secur32|userenv|ncrypt|libstdc\+\+-6)\.dll$'
+for exe in "$out"/*.exe; do
+  unexpected=$(x86_64-w64-mingw32-objdump -p "$exe" |
+    awk '/DLL Name/{print $3}' | sort -u | grep -viE "$allow" || true)
+  if [ -n "$unexpected" ]; then
+    echo "$exe imports unexpected libraries:" >&2
+    echo "$unexpected" >&2
+    exit 1
+  fi
+done
