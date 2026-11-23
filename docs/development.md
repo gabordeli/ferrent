@@ -57,8 +57,9 @@ cargo build -p ferrent-gui
 ```
 
 Fej nélküli (Xvfb) ellenőrzéshez `ICED_BACKEND=tiny-skia`, és a Wayland
-kikapcsolása kell: `env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 …` (a
-részletek: `docs/measurements/m11-gui.md`).
+kikapcsolása kell: `env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 …`;
+a teljes, mért recept (xauth, ablak-offset a kattintásnál, teljes
+felbontású crop): [docs/headless-gui.md](headless-gui.md).
 
 ## Demo adatok
 
