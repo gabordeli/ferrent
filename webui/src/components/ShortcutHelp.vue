@@ -44,7 +44,6 @@ onBeforeUnmount(() => releaseFocus?.());
         class="sheet shortcut-sheet"
         aria-modal="true"
         :aria-label="t('shortcuts.title')"
-        @keydown.esc="emit('close')"
       >
         <div class="sheet-handle" aria-hidden="true" />
         <header class="sheet-head">

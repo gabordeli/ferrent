@@ -13,7 +13,7 @@ function close(): void {
 </script>
 
 <template>
-  <output v-if="visible" class="install-hint" role="status">
+  <output v-if="visible" class="install-hint">
     <span>{{ t("install.hint") }}</span>
     <button
       class="icon-button compact"

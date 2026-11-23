@@ -740,6 +740,7 @@ onBeforeUnmount(() => {
                 v-model="trackerUrl"
                 type="url"
                 :placeholder="t('detail.trackerUrl')"
+                :aria-label="t('detail.trackerUrl')"
                 :disabled="trackerBusy"
               />
               <button
@@ -810,6 +811,7 @@ onBeforeUnmount(() => {
                   v-model="webSeedUrl"
                   type="url"
                   :placeholder="t('detail.webSeedUrl')"
+                  :aria-label="t('detail.webSeedUrl')"
                   :disabled="webSeedsBusy"
                 />
                 <button

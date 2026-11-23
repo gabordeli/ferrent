@@ -61,6 +61,8 @@ vi.mock("./api", () => {
     setFilePriorities: vi.fn(),
     addTorrentMagnet: vi.fn(),
     addTorrentFile: vi.fn(),
+    getDaemonConfig: vi.fn(),
+    setDaemonConfig: vi.fn(),
   };
 });
 
@@ -107,6 +109,7 @@ class FakeEventSource {
 
 const RecycleScrollerStub = {
   props: ["items"],
+  methods: { scrollToItem: vi.fn() },
   template: `<div class="scroller"><template v-for="item in items" :key="item.id"><slot :item="item" /></template></div>`,
 };
 
@@ -177,11 +180,18 @@ beforeEach(() => {
     limit: 100,
     files,
   });
+  vi.mocked(api.getDaemonConfig).mockResolvedValue({
+    revision: 1,
+    env_locked: [],
+    toml: '[general]\ndata_dir = "/data"\n',
+  });
+  vi.mocked(api.setDaemonConfig).mockResolvedValue({ revision: 2 });
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  localStorage.clear();
   window.history.replaceState({}, "", "/");
 });
 
@@ -567,5 +577,101 @@ describe("App", () => {
     await flushPromises();
     expect(api.getTorrent).toHaveBeenCalledWith(torrent.id);
     expect(wrapper.get(`dialog[aria-label="${t("detail.title")}"]`)).toBeTruthy();
+  });
+
+  it("opens the settings sheet from the header", async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    await wrapper
+      .get(`button[aria-label="${t("header.settings")}"]`)
+      .trigger("click");
+    await flushPromises();
+
+    const selector = `dialog[aria-label="${t("settings.title")}"]`;
+    const textarea = wrapper.get(`${selector} textarea`).element as HTMLTextAreaElement;
+    expect(textarea.value).toContain("data_dir");
+
+    await wrapper
+      .get(`${selector} button[aria-label="${t("sheet.close")}"]`)
+      .trigger("click");
+    expect(wrapper.find(selector).exists()).toBe(false);
+  });
+
+  it("opens the shortcut help with ? and closes it with Escape", async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+    const help = () => wrapper.find(`dialog[aria-label="${t("shortcuts.title")}"]`);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    await nextTick();
+    expect(help().exists()).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await nextTick();
+    expect(help().exists()).toBe(false);
+  });
+
+  it("pauses the selection from the keyboard and warns without one", async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
+    await nextTick();
+    expect(wrapper.text()).toContain(t("shortcuts.noSelection"));
+
+    await selectFirstRow(wrapper);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
+    await flushPromises();
+
+    expect(api.bulkAction).toHaveBeenCalledWith({
+      action: "pause",
+      torrent_ids: [torrent.id],
+    });
+  });
+
+  it("removes the selection from the keyboard after a confirmation", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const wrapper = mountApp();
+    await flushPromises();
+
+    await selectFirstRow(wrapper);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete" }));
+    await flushPromises();
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(api.bulkAction).toHaveBeenCalledWith({
+      action: "remove",
+      torrent_ids: [torrent.id],
+      remove_data: false,
+    });
+  });
+
+  it("moves the selection with the arrow, home and end keys", async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+    const bar = () => wrapper.get(`section[aria-label="${t("bulk.title")}"]`);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    await nextTick();
+    expect(bar().text()).toContain(t("bulk.selected", { count: 1 }));
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    await nextTick();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Home" }));
+    await nextTick();
+    expect(bar().text()).toContain(t("bulk.selected", { count: 1 }));
+  });
+
+  it("dismisses the install hint", async () => {
+    window.history.replaceState({}, "", "/?install=1");
+    const wrapper = mountApp();
+    await flushPromises();
+
+    await wrapper.get("output.install-hint button").trigger("click");
+    await nextTick();
+
+    expect(wrapper.find("output.install-hint").exists()).toBe(false);
+    expect(localStorage.getItem("ferrent.install.dismissed")).toBe("1");
   });
 });
