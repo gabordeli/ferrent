@@ -29,6 +29,11 @@ vi.mock("../api", () => ({
   getTorrentTrackers: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
   addTracker: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
   removeTracker: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
+  getWebSeeds: vi.fn(async () => ({ id: "7", web_seeds: [] })),
+  setWebSeeds: vi.fn(async (_id: string, urls: string[]) => ({
+    id: "7",
+    web_seeds: urls,
+  })),
   setTorrentOptions: vi.fn(),
   listDirs: vi.fn(),
   setFilePriorities: vi.fn(),
@@ -363,6 +368,25 @@ describe("TorrentDetail", () => {
     await wrapper.get(".tracker-list .action.tiny").trigger("click");
     await flushPromises();
     expect(api.removeTracker).toHaveBeenCalledWith(detail.id, firstUrl);
+  });
+
+  it("edits the web seed list", async () => {
+    const wrapper = factory();
+    await flushPromises();
+
+    await wrapper.get(".web-seeds .tracker-bar").trigger("click");
+    await wrapper
+      .get(".web-seeds .tracker-add input")
+      .setValue("https://mirror.example/file.mkv");
+    await wrapper.get(".web-seeds .tracker-add").trigger("submit");
+    await flushPromises();
+    expect(wrapper.text()).toContain("https://mirror.example/file.mkv");
+
+    await wrapper.get(".web-seeds .sheet-actions .primary").trigger("click");
+    await flushPromises();
+    expect(api.setWebSeeds).toHaveBeenCalledWith(detail.id, [
+      "https://mirror.example/file.mkv",
+    ]);
   });
 
   it("starts a recheck", async () => {

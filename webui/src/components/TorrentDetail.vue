@@ -60,6 +60,14 @@ const movePath = ref("");
 const moveBusy = ref(false);
 const pickerOpen = ref(false);
 const peers = ref<PeerInfo[]>([]);
+const webSeeds = ref<string[]>([]);
+const savedWebSeeds = ref<string[]>([]);
+const webSeedsOpen = ref(false);
+const webSeedUrl = ref("");
+const webSeedsBusy = ref(false);
+const webSeedsDirty = computed(
+  () => webSeeds.value.join("\n") !== savedWebSeeds.value.join("\n"),
+);
 const trackerUrl = ref("");
 const trackerBusy = ref(false);
 const backButton = ref<HTMLButtonElement | null>(null);
@@ -113,7 +121,7 @@ async function loadDetail(): Promise<void> {
     selectedLabel.value = detail.value.label;
     downLimit.value = detail.value.max_download_speed;
     upLimit.value = detail.value.max_upload_speed;
-    await Promise.all([loadFiles(true), loadTrackers(), loadPeers()]);
+    await Promise.all([loadFiles(true), loadTrackers(), loadPeers(), loadWebSeeds()]);
   } catch (err) {
     error.value = messageOf(err);
   } finally {
@@ -138,6 +146,42 @@ async function loadPeers(): Promise<void> {
     peers.value = result.peers;
   } catch {
     peers.value = [];
+  }
+}
+
+async function loadWebSeeds(): Promise<void> {
+  try {
+    const result = await api.getWebSeeds(props.torrentId);
+    webSeeds.value = [...result.web_seeds];
+    savedWebSeeds.value = [...result.web_seeds];
+  } catch {
+    webSeeds.value = [];
+    savedWebSeeds.value = [];
+  }
+}
+
+function addWebSeed(): void {
+  const url = webSeedUrl.value.trim();
+  if (!url || webSeeds.value.includes(url)) return;
+  webSeeds.value = [...webSeeds.value, url];
+  webSeedUrl.value = "";
+}
+
+function removeWebSeed(url: string): void {
+  webSeeds.value = webSeeds.value.filter((seed) => seed !== url);
+}
+
+async function saveWebSeeds(): Promise<void> {
+  webSeedsBusy.value = true;
+  try {
+    const result = await api.setWebSeeds(props.torrentId, webSeeds.value);
+    webSeeds.value = [...result.web_seeds];
+    savedWebSeeds.value = [...result.web_seeds];
+    emit("toast", t("detail.webSeedsSaved"));
+  } catch (err) {
+    actionError.value = messageOf(err);
+  } finally {
+    webSeedsBusy.value = false;
   }
 }
 
@@ -726,6 +770,66 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-else class="hint">{{ t("detail.noPeers") }}</p>
+          </section>
+
+          <section class="web-seeds">
+            <button
+              class="tracker-bar"
+              type="button"
+              :aria-expanded="webSeedsOpen"
+              @click="webSeedsOpen = !webSeedsOpen"
+            >
+              <span class="tracker-icon" aria-hidden="true">🌐</span>
+              <span class="tracker-name">{{ t("detail.webSeeds") }}</span>
+              <span class="tracker-count">{{ webSeeds.length }}</span>
+              <span class="tracker-chevron" aria-hidden="true">
+                {{ webSeedsOpen ? "▾" : "▸" }}
+              </span>
+            </button>
+            <template v-if="webSeedsOpen">
+              <ul v-if="webSeeds.length" class="tracker-list">
+                <li v-for="seed in webSeeds" :key="seed">
+                  <span class="tracker-url" :title="seed">{{ seed }}</span>
+                  <button
+                    v-if="canWrite"
+                    class="action tiny"
+                    :disabled="webSeedsBusy"
+                    @click="removeWebSeed(seed)"
+                  >
+                    ×
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="hint">{{ t("detail.noWebSeeds") }}</p>
+              <form
+                v-if="canWrite"
+                class="tracker-add"
+                @submit.prevent="addWebSeed"
+              >
+                <input
+                  v-model="webSeedUrl"
+                  type="url"
+                  :placeholder="t('detail.webSeedUrl')"
+                  :disabled="webSeedsBusy"
+                />
+                <button
+                  class="action"
+                  type="submit"
+                  :disabled="webSeedsBusy || !webSeedUrl.trim()"
+                >
+                  {{ t("detail.addWebSeed") }}
+                </button>
+              </form>
+              <div v-if="canWrite" class="sheet-actions">
+                <button
+                  class="action primary"
+                  :disabled="webSeedsBusy || !webSeedsDirty"
+                  @click="saveWebSeeds"
+                >
+                  {{ webSeedsBusy ? t("settings.saving") : t("sheet.save") }}
+                </button>
+              </div>
+            </template>
           </section>
 
           <p v-if="actionError" class="detail-error" role="alert">{{ actionError }}</p>

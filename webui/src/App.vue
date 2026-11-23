@@ -6,6 +6,7 @@ import * as api from "./api";
 import { formatRate } from "./format";
 import { locale, t, toggleLocale } from "./i18n";
 import { extractMagnet } from "./share";
+import { installShortcuts } from "./shortcuts";
 import { theme, toggleTheme } from "./theme";
 import type {
   AuthInfo,
@@ -26,6 +27,7 @@ import LabelsSheet from "./components/LabelsSheet.vue";
 import SelectionBar from "./components/SelectionBar.vue";
 import SessionSheet from "./components/SessionSheet.vue";
 import SettingsSheet from "./components/SettingsSheet.vue";
+import ShortcutHelp from "./components/ShortcutHelp.vue";
 import TokenGate from "./components/TokenGate.vue";
 import TorrentDetail from "./components/TorrentDetail.vue";
 import TorrentRow from "./components/TorrentRow.vue";
@@ -55,6 +57,10 @@ const pendingMagnet = ref("");
 const pendingTorrent = ref("");
 const sessionOpen = ref(false);
 const settingsOpen = ref(false);
+const helpOpen = ref(false);
+const filterBar = ref<{ focusSearch: () => void } | null>(null);
+const scroller = ref<{ scrollToItem: (index: number) => void } | null>(null);
+const activeIndex = ref(0);
 const labelsOpen = ref(false);
 const downHistory = ref<number[]>([]);
 const upHistory = ref<number[]>([]);
@@ -599,6 +605,63 @@ function markStale(): void {
   staleData.value = true;
 }
 
+function toggleSelectedPause(): void {
+  if (selectedIds.value.size === 0) {
+    showToast(t("shortcuts.noSelection"));
+    return;
+  }
+  const first = torrents.value.find((row) => selectedIds.value.has(row.id));
+  const paused = first?.state === "Paused";
+  void runBulk({ kind: paused ? "resume" : "pause" });
+}
+
+function removeSelected(): void {
+  if (selectedIds.value.size === 0) {
+    showToast(t("shortcuts.noSelection"));
+    return;
+  }
+  const count = selectedIds.value.size;
+  if (!window.confirm(t("shortcuts.confirmRemove", { count }))) return;
+  void runBulk({ kind: "remove", removeData: false });
+}
+
+function moveSelection(delta: number): void {
+  if (!torrents.value.length) return;
+  const next = Math.min(
+    Math.max(0, activeIndex.value + delta),
+    torrents.value.length - 1,
+  );
+  activeIndex.value = next;
+  startSelection(torrents.value[next]);
+  scroller.value?.scrollToItem(next);
+}
+
+function jumpSelection(last: boolean): void {
+  if (!torrents.value.length) return;
+  const index = last ? torrents.value.length - 1 : 0;
+  activeIndex.value = index;
+  startSelection(torrents.value[index]);
+  scroller.value?.scrollToItem(index);
+}
+
+function onEscape(): void {
+  if (detail.value) {
+    detail.value = null;
+    return;
+  }
+  if (addOpen.value) {
+    addOpen.value = false;
+    return;
+  }
+  if (helpOpen.value) {
+    helpOpen.value = false;
+    return;
+  }
+  clearSelection();
+}
+
+let disposeShortcuts: (() => void) | null = null;
+
 function markFresh(): void {
   staleData.value = false;
 }
@@ -630,6 +693,26 @@ onMounted(() => {
   void loadPluginVersion();
   void loadAuthInfo();
   void bootstrap();
+  disposeShortcuts = installShortcuts({
+    pauseResume: toggleSelectedPause,
+    remove: removeSelected,
+    focusSearch: () => filterBar.value?.focusSearch(),
+    refresh: resetList,
+    selectAll: () => {
+      selectedIds.value = new Set(torrents.value.map((row) => row.id));
+      selectionMode.value = selectedIds.value.size > 0;
+    },
+    addTorrent: () => {
+      addOpen.value = true;
+    },
+    escape: onEscape,
+    help: () => {
+      helpOpen.value = true;
+    },
+    move: moveSelection,
+    home: () => jumpSelection(false),
+    end: () => jumpSelection(true),
+  });
 });
 
 onBeforeUnmount(() => {
@@ -640,6 +723,7 @@ onBeforeUnmount(() => {
   closeEvents();
   if (toastTimer !== null) clearTimeout(toastTimer);
   if (searchTimer !== null) clearTimeout(searchTimer);
+  disposeShortcuts?.();
 });
 </script>
 
@@ -731,6 +815,7 @@ onBeforeUnmount(() => {
     </output>
 
     <FilterBar
+      ref="filterBar"
       :filters="filters"
       :labels="labels"
       :no-label-count="noLabelCount"
@@ -746,6 +831,7 @@ onBeforeUnmount(() => {
         <button class="action" @click="resetList">{{ t("list.retry") }}</button>
       </div>
       <RecycleScroller
+        ref="scroller"
         :key="listKey"
         class="scroller"
         :items="torrents"
@@ -793,6 +879,8 @@ onBeforeUnmount(() => {
       @limits="applySessionLimits"
       @queue="applySessionQueue"
     />
+
+    <ShortcutHelp v-if="helpOpen" @close="helpOpen = false" />
 
     <SettingsSheet
       v-if="settingsOpen"

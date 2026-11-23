@@ -21,6 +21,8 @@ pub struct MockEngine {
     torrents: BTreeMap<TorrentId, TorrentStatus>,
     infohash_index: BTreeMap<String, TorrentId>,
     limits: BTreeMap<TorrentId, TorrentLimits>,
+    trackers: BTreeMap<TorrentId, Vec<String>>,
+    web_seeds: BTreeMap<TorrentId, Vec<String>>,
     finished: BTreeSet<TorrentId>,
     settings: EngineSettings,
     events: broadcast::Sender<EngineEvent>,
@@ -42,6 +44,8 @@ impl MockEngine {
             torrents: BTreeMap::new(),
             infohash_index: BTreeMap::new(),
             limits: BTreeMap::new(),
+            trackers: BTreeMap::new(),
+            web_seeds: BTreeMap::new(),
             finished: BTreeSet::new(),
             settings: EngineSettings::default(),
             events,
@@ -315,6 +319,57 @@ impl TorrentEngine for MockEngine {
             metainfo,
             infohash: format!("mock-{name}"),
         })
+    }
+
+    fn add_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        let list = self.trackers.entry(id).or_default();
+        if !list.iter().any(|entry| entry == url) {
+            list.push(url.to_owned());
+        }
+        Ok(())
+    }
+
+    fn remove_tracker(&mut self, id: TorrentId, url: &str) -> Result<(), EngineError> {
+        self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        if let Some(list) = self.trackers.get_mut(&id) {
+            list.retain(|entry| entry != url);
+        }
+        Ok(())
+    }
+
+    /// Every stored announce URL, reported as "unverified": the mock never
+    /// announces, but the list has to survive an edit.
+    fn trackers(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentTrackerInfo>, EngineError> {
+        self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        Ok(self
+            .trackers
+            .get(&id)
+            .map(|list| {
+                list.iter()
+                    .map(|url| crate::TorrentTrackerInfo {
+                        url: url.clone(),
+                        status: "unverified".to_owned(),
+                        seeds: 0,
+                        leechers: 0,
+                        message: String::new(),
+                        next_announce: 0,
+                        fails: 0,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn web_seeds(&mut self, id: TorrentId) -> Result<Vec<String>, EngineError> {
+        self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        Ok(self.web_seeds.get(&id).cloned().unwrap_or_default())
+    }
+
+    fn set_web_seeds(&mut self, id: TorrentId, urls: &[String]) -> Result<(), EngineError> {
+        self.torrents.get(&id).ok_or(EngineError::NotFound { id })?;
+        self.web_seeds.insert(id, urls.to_vec());
+        Ok(())
     }
 
     fn files(&mut self, id: TorrentId) -> Result<Vec<crate::TorrentFileInfo>, EngineError> {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { stateLabel, t } from "../i18n";
 import type { LabelInfo, TorrentFilters } from "../types";
@@ -36,6 +36,15 @@ const sorts = [
   { value: "-total_size", key: "sort.size" },
 ];
 
+const searchInput = ref<HTMLInputElement | null>(null);
+
+/// Ctrl+F target: the search field.
+function focusSearch(): void {
+  searchInput.value?.focus();
+  searchInput.value?.select();
+}
+defineExpose({ focusSearch });
+
 const q = computed({
   get: () => props.filters.q,
   set: (value: string) => emit("update", { q: value }),
@@ -57,6 +66,7 @@ const sort = computed({
 <template>
   <section class="filters">
     <input
+      ref="searchInput"
       v-model="q"
       class="search"
       type="search"
