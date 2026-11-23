@@ -1,0 +1,16 @@
+# Ferrent daemon configuration (Windows).
+#
+# The service installer writes %ProgramData%\ferrent\config.toml with the
+# resolved paths; this copy is the reference for a manual run:
+#   set FERRENT_CONFIG=C:\ProgramData\ferrent\config.toml
+#   ferrentd.exe
+#
+# Forward slashes work everywhere in Windows paths.
+data_dir = "C:/ProgramData/ferrent/data"
+bind = "127.0.0.1:50051"
+token_file = "C:/ProgramData/ferrent/token"
+
+# Everything below is optional; a partial file keeps the defaults.
+#
+# [network]
+# listen_interfaces = "0.0.0.0:6881"

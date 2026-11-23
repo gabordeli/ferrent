@@ -112,10 +112,13 @@ A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
 A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 `windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
 
-**Ami még hátra van** (a forrás-port után): ZIP csomag + `ferrent.ico`,
-Windows service wrapper (`Ctrl-C` átadással a fastresume mentéshez),
-`%ProgramData%`/`%APPDATA%` útvonalak, és a 11 `#![cfg(unix)]` teszt Windows
-változatai. A libtorrent cross-build **kész** (`packaging/windows/`).
+**Ami még hátra van:** `ferrent.ico` (a ZIP-ben még nincs), a GUI
+`%APPDATA%\ferrent\gui.toml` útvonala, a daemon `%ProgramData%` alapértékei
+(a service-generált config már ott él), és a 11 `#![cfg(unix)]` teszt Windows
+változatai. A libtorrent cross-build, a ZIP és a service wrapper **kész**
+(`packaging/windows/`); a service a daemont NSSM-mel futtatja, és
+`AppStopMethodConsole`-lal adja át a Ctrl-C-t, hogy a fastresume mentés
+lefusson.
 
 ### CI: `windows-cross` a saját runneren
 
@@ -132,7 +135,9 @@ Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
   binárist (daemon a valódi engine-nel, nem mock);
 - `packaging/windows/stage-artifacts.sh` strippel és kimásolja a
   `libstdc++-6.dll`-t (a `cxx` bridge miatt a daemon dinamikusan köti a C++
-  runtimet), az artifact `target/windows/`;
+  runtimet), majd a `make-zip.sh` összeállítja a
+  `Ferrent-<ver>-windows-x86_64.zip`-et (binárisok + DLL + `nssm.exe` +
+  `service.ps1` + minta config); mindkettő artifact;
 - a `file` kimenete az első futásnál „PE32+ executable (console)" volt: a
   GUI release buildje `windows_subsystem = "windows"`-t kapott, hogy ne
   nyíljon konzolablak (debugban marad, a pániküzenet miatt).
@@ -183,9 +188,9 @@ felhasználónak WSL kell.
 | Forrás-port (9 hiba → 0) + cross-check hurok | 1 nap | **kész** (2026-11-23) |
 | CI cross-build (CLI + GUI + daemon) a runneren | 1 nap | **kész** (2026-11-23) |
 | libtorrent cross-build mingw-vel (beépített crypto) | 2–3 nap | **kész** (2026-11-23, ~4 perc) |
-| `%ProgramData%`/`%APPDATA%` útvonalak + token ACL | 1 nap | hátra |
-| Windows service (WinSW/NSSM) + `Ctrl-C` átadás | 1–2 nap | hátra |
-| ZIP csomag + `ferrent.ico` (majd MSI/winget) | 1–2 nap | hátra |
+| ZIP csomag (binárisok + DLL + NSSM + service.ps1) | 1–2 nap | **kész** (2026-11-23) |
+| Windows service (NSSM) + `Ctrl-C` átadás | 1–2 nap | **kész** (2026-11-23) |
+| `ferrent.ico` + `%APPDATA%`/`%ProgramData%` alapértékek + token ACL | 1 nap | hátra |
 | Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
 
