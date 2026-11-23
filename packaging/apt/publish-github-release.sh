@@ -96,7 +96,8 @@ echo "== ${#debs[@]} .deb asset(s) on release $tag ($uploaded uploaded now)"
 # Trigger the signing workflow only once every asset is in place. The
 # `release: published` event fires when the release is created, which races the
 # per-file uploads (a 30 MB deb takes seconds), so the GitLab job dispatches
-# the workflow explicitly.
+# the workflow explicitly. A token without Actions: write must not fail the
+# release: the assets are already uploaded, only the APT refresh needs a nudge.
 code=$(curl -sS -o /tmp/gh-dispatch.json -w '%{http_code}' -X POST "${auth[@]}" \
     -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$tag\"}}" \
     "$api/repos/$repo/actions/workflows/release-apt.yml/dispatches")
@@ -104,7 +105,7 @@ case "$code" in
 204) echo "release-apt dispatched for $tag" ;;
 *)
     cat /tmp/gh-dispatch.json >&2
-    echo "cannot dispatch release-apt (HTTP $code); the token needs Actions: read and write" >&2
-    exit 1
+    echo "warning: cannot dispatch release-apt (HTTP $code); the token needs Actions: read and write." >&2
+    echo "warning: the release assets are in place; run the release-apt workflow by hand to refresh the APT repo." >&2
     ;;
 esac
