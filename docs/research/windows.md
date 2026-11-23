@@ -112,10 +112,10 @@ A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
 A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 `windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
 
-**Ami még hátra van** (a forrás-port után): libtorrent Windows build
-(vcpkg vagy mingw), ZIP/MSI csomag + `ferrent.ico`, Windows service wrapper
-(`Ctrl-C` átadással a fastresume mentéshez), `%ProgramData%`/`%APPDATA%`
-útvonalak, és a 11 `#![cfg(unix)]` teszt Windows változatai.
+**Ami még hátra van** (a forrás-port után): ZIP csomag + `ferrent.ico`,
+Windows service wrapper (`Ctrl-C` átadással a fastresume mentéshez),
+`%ProgramData%`/`%APPDATA%` útvonalak, és a 11 `#![cfg(unix)]` teszt Windows
+változatai. A libtorrent cross-build **kész** (`packaging/windows/`).
 
 ### CI: `windows-cross` a saját runneren
 
@@ -123,14 +123,16 @@ A runner az egyetlen CI-host, a Windows VM kézi teszt-gép lesz, ezért a
 Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
 `.gitlab-ci.yml`-ben):
 
-- a job a `rust:1.100-slim` konténerben telepíti a mingw-t és a
-  `x86_64-pc-windows-gnu` targetet (a hoston is ott van a kézi buildhez:
-  `infra` → `gitlab_runner_toolchain` role);
-- `cargo build --release -p ferrent-cli -p ferrent-gui` → `target/windows/`
-  artifact, `file`-lal ellenőrizve, hogy PE32+;
-- a daemon egyelőre `cargo check --no-default-features` (a `libtorrent`
-  Windows buildje még nincs a pipeline-ban) — így minden Unix-izmus
-  megbuktatja a pipeline-t, mielőtt a Windows gépre kerülne;
+- a job a `rust:1.100-slim` konténerben telepíti a mingw-t, a CMake-et, a
+  Boost fejléceket és a `x86_64-pc-windows-gnu` targetet (a hoston is ott van
+  a kézi buildhez: `infra` → `gitlab_runner_toolchain` role);
+- `packaging/windows/build-libtorrent.sh` cross-buildeli a libtorrentet egy
+  **cache-elt prefixbe** (`$HOME/.cache/ferrent-lt-win`), így a CMake build
+  nem fut minden pipeline-ban; utána egy `cargo build` adja a három
+  binárist (daemon a valódi engine-nel, nem mock);
+- `packaging/windows/stage-artifacts.sh` strippel és kimásolja a
+  `libstdc++-6.dll`-t (a `cxx` bridge miatt a daemon dinamikusan köti a C++
+  runtimet), az artifact `target/windows/`;
 - a `file` kimenete az első futásnál „PE32+ executable (console)" volt: a
   GUI release buildje `windows_subsystem = "windows"`-t kapott, hogy ne
   nyíljon konzolablak (debugban marad, a pániküzenet miatt).
@@ -179,10 +181,11 @@ felhasználónak WSL kell.
 | Lépés | Munka | Állapot |
 |---|---|---|
 | Forrás-port (9 hiba → 0) + cross-check hurok | 1 nap | **kész** (2026-11-23) |
+| CI cross-build (CLI + GUI + daemon) a runneren | 1 nap | **kész** (2026-11-23) |
+| libtorrent cross-build mingw-vel (beépített crypto) | 2–3 nap | **kész** (2026-11-23, ~4 perc) |
 | `%ProgramData%`/`%APPDATA%` útvonalak + token ACL | 1 nap | hátra |
-| libtorrent MSVC (vcpkg, statikus) zöldre hozása | 2–3 nap | hátra |
 | Windows service (WinSW/NSSM) + `Ctrl-C` átadás | 1–2 nap | hátra |
-| ZIP/MSI csomag + `ferrent.ico` + `windows-latest` CI | 1–2 nap | hátra |
+| ZIP csomag + `ferrent.ico` (majd MSI/winget) | 1–2 nap | hátra |
 | Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
 
