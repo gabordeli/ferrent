@@ -117,6 +117,14 @@ kezeli, a fejléc ⚙ gombja a daemon configját szerkeszti revízióellenőrzé
 ![Ugyanaz a lista desktopon (balra) és a weben (jobbra), sötét
 témában](images/parity-dark.png)
 
-A web UI világos témában: `docs/images/web-ui.png`; a billentyűparancsok
+![Ugyanaz a lista világos témában: desktop (balra) és web
+(jobbra)](images/parity-light.png)
+
+A web Settings oldal a daemon config TOML-ját szerkeszti (revízió és a
+környezeti felülírások jelölésével):
+
+![Web Settings: a daemon config TOML-ja](images/web-settings.png)
+
+A billentyűparancsok
 (`Space`, `Delete`, `Ctrl+F/R/A/O`, nyilak, `Home`/`End`, `Esc`, `?`)
 a desktop listáját követik, a `?` súgó-overlay a weben is megvan.
