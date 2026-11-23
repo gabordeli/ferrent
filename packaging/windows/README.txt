@@ -1,6 +1,11 @@
 Ferrent for Windows (x86_64)
 ============================
 
+This ZIP is the manual route. The release also ships
+Ferrent-<version>-windows-x86_64-setup.exe, which installs the same files and
+registers the service from one wizard; use it if you do not want to run
+PowerShell by hand.
+
 Files
 -----
   ferrentd.exe        the daemon (BitTorrent engine, gRPC over TLS)

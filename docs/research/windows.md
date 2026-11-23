@@ -67,7 +67,7 @@ jön:
 | libtorrent | nem kell | nem kell | kell: MSVC build, cold ~25–40 perc (cache-elhető) | nem kell |
 | Kódmódosítás | `rfd` target-kapu, `xdg-open`, config/token útvonalak | ugyanaz | + a 4 Unix-zárt forráshely, `rustix` kiváltása, Windows service | nincs |
 | Tesztelés | valódi Windows gép/VM kell | **a futáshoz is** Windows kell | Windows + drive-betűs zónák | WSL |
-| Csomagolás | ZIP (`.ico` kell; ma csak PNG van) | ZIP | ZIP/MSI (WiX) vagy winget + WinSW/NSSM service | — |
+| Csomagolás | ZIP + installeri varázsló | ZIP + NSIS setup.exe | ZIP/MSI (WiX) vagy winget + WinSW/NSSM service | — |
 | Munka (első verzió) | **2–3 nap** | 1–2 nap + Windows a teszthez | **~2 hét** | 0 nap |
 | Kockázat | minimális; a felhasználónak Linux daemon kell | a „cross-build, nem futtattam" csapda | libtorrent MSVC + DiskGuard drive-szemantika | nem valódi Windows app |
 
@@ -112,10 +112,10 @@ A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
 A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 `windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
 
-**Ami még hátra van:** `ferrent.ico` (a ZIP-ben még nincs), a GUI
-`%APPDATA%\ferrent\gui.toml` útvonala, a daemon `%ProgramData%` alapértékei
-(a service-generált config már ott él), és a 11 `#![cfg(unix)]` teszt Windows
-változatai. A libtorrent cross-build, a ZIP és a service wrapper **kész**
+**Ami még hátra van:** a GUI `%APPDATA%\ferrent\gui.toml` útvonala, a daemon
+`%ProgramData%` alapértékei (a service-generált config már ott él), a token
+ACL-je, és a 11 `#![cfg(unix)]` teszt Windows változatai. A libtorrent
+cross-build, a ZIP, az NSIS telepítő és a service wrapper **kész**
 (`packaging/windows/`); a service a daemont NSSM-mel futtatja, és
 `AppStopMethodConsole`-lal adja át a Ctrl-C-t, hogy a fastresume mentés
 lefusson.
@@ -137,7 +137,9 @@ Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
   `libstdc++-6.dll`-t (a `cxx` bridge miatt a daemon dinamikusan köti a C++
   runtimet), majd a `make-zip.sh` összeállítja a
   `Ferrent-<ver>-windows-x86_64.zip`-et (binárisok + DLL + `nssm.exe` +
-  `service.ps1` + minta config); mindkettő artifact;
+  `service.ps1` + minta config), a `make-installer.sh` pedig ugyanebből a
+  fájlkészletből az NSIS `-setup.exe`-t (`nsis` csomag a konténerben,
+  `makensis` Linuxon); mindkettő artifact a jobból;
 - a `file` kimenete az első futásnál „PE32+ executable (console)" volt: a
   GUI release buildje `windows_subsystem = "windows"`-t kapott, hogy ne
   nyíljon konzolablak (debugban marad, a pániküzenet miatt).
@@ -151,8 +153,8 @@ Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
 3. **Útvonalak**: `%ProgramData%\ferrent\{config.toml,token}`,
    `%APPDATA%\ferrent\gui.toml`; a token ACL-je a `0640 root:ferrent`
    megfelelője (`icacls`).
-4. **Csomag**: ZIP (majd MSI/winget) + `ferrent.ico`; CI-ben `windows-latest`
-   job, cache-elt vcpkg-val a libtorrenthez.
+4. **Csomag**: ZIP + NSIS setup.exe, `ferrent.ico`-val — **kész**; a
+   MSI/winget és a code-signing későbbi lépés.
 5. **A browseres PWA ma is működik Windows-ról** (0 munka) — ez a baseline,
    amit a natív csomagnak felül kell múlnia.
 
@@ -178,8 +180,9 @@ felhasználónak WSL kell.
 - **Van-e Windows gép/VM a teszteléshez?** Cross-check (mingw) a forrásra
   elég, de a futásra nem: a GUI megnyílása + csatlakozás egy daemonhoz
   (TLS pinning, token) a valódi kapu.
-- **ZIP elég, vagy MSI/winget?** All-in-one-nál a ZIP csak az első lépés; a
-  service telepítés miatt MSI (WiX) vagy winget a cél.
+- **ZIP elég, vagy MSI/winget?** **Döntés (2026-11-23): ZIP + NSIS
+  setup.exe.** A setup.exe regisztrálja a service-t, ikont és uninstallt ad; az
+  MSI (WiX) és a winget manifest későbbi, nem blokkoló lépés.
 
 ## Becslés a v1.0.0-rc1 után
 
@@ -190,15 +193,19 @@ felhasználónak WSL kell.
 | libtorrent cross-build mingw-vel (beépített crypto) | 2–3 nap | **kész** (2026-11-23, ~4 perc) |
 | ZIP csomag (binárisok + DLL + NSSM + service.ps1) | 1–2 nap | **kész** (2026-11-23) |
 | Windows service (NSSM) + `Ctrl-C` átadás | 1–2 nap | **kész** (2026-11-23) |
-| `ferrent.ico` + `%APPDATA%`/`%ProgramData%` alapértékek + token ACL | 1 nap | hátra |
+| NSIS telepítő (varázsló, start-menü, service, uninstall) | 1 nap | **kész** (2026-11-23) |
+| `ferrent.ico` (16–256 px, a GUI ikonjából) | fél nap | **kész** (2026-11-23) |
+| `%APPDATA%`/`%ProgramData%` alapértékek + token ACL | 1 nap | hátra |
 | Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
 
 ## Nyitott pont
 
-A **build út bizonyítása** (az acceptance 2. pontja) még hiányzik: ebben a
-körben a forrás típusellenőrzése zöld (`x86_64-pc-windows-gnu`), de `.exe`
-nem készült. Két ismert blokkoló van: a `ring` MSVC-t kér a C-jéhez, a
-libtorrentnek pedig nincs Windows-on kész `.lib`-je (vcpkg build kell).
-A következő lépés egy Windows hoston (vagy `cargo-xwin`-nal) futó
-`cargo build`, ami eldönti, hogy a becslés tartható-e.
+A **build útja bizonyított** (2026-11-23): a `windows-cross` job valódi
+`.exe`-ket ad (daemon 24,7 MB, CLI 15,1 MB, GUI 33,5 MB, `libstdc++-6.dll`
+2,2 MB), a ZIP 30,2 MB, a setup.exe ugyanebből a fájlkészletből készül.
+
+Ami **még nem** bizonyított: a **futás valódi Windows-on**. A `service.ps1` +
+NSSM út, a TLS pinning a GUI-ból és a DiskGuard drive-szemantika csak a
+VirtualBox VM-en derül ki; addig a „kész" a build láncra igaz, a viselkedésre
+nem.

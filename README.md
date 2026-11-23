@@ -57,7 +57,7 @@ forrásokkal: [docs/comparison.md](docs/comparison.md).
 | Fedora | [docs/install-fedora.md](docs/install-fedora.md) (forrásból) |
 | Arch Linux | [docs/install-arch.md](docs/install-arch.md) (forrásból) |
 | Docker (fej nélküli daemon) | [docs/install-docker.md](docs/install-docker.md) |
-| Windows 10/11 | [docs/install-windows.md](docs/install-windows.md) (ZIP + service) |
+| Windows 10/11 | [docs/install-windows.md](docs/install-windows.md) (telepítő vagy ZIP) |
 | macOS | tervezett: [docs/install-macos.md](docs/install-macos.md) |
 
 Demo adatokkal (mock daemon, 4 000 torrent) egy paranccsal kipróbálható:

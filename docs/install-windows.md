@@ -5,10 +5,30 @@ Linuxról, mingw-vel cross-buildelnek; a futás-teszt (VirtualBox VM) még hátr
 van, ezért az alábbi lépések a build útját már adják, a viselkedést nem
 garantálják minden ponton.
 
-## Telepítés ZIP-ből
+## Telepítés a setup.exe-vel (ajánlott)
 
 A `windows-cross` CI job artifactja
-`Ferrent-<verzió>-windows-x86_64.zip`, ezekkel:
+`Ferrent-<verzió>-windows-x86_64-setup.exe`. Futtatása (dupla kattintás,
+esetleg **jobb klikk → Run as administrator**):
+
+1. varázsló: licence, összetevők, célkönyvtár (`C:\Program Files\Ferrent`);
+2. kimásolja a binárisokat, a DLL-t, az `nssm.exe`-t és a `service.ps1`-t;
+3. beregisztrálja és elindítja a **`Ferrent` service**-t (automatikus indítás);
+4. a végén kiírja a **tokent** (és a `%ProgramData%\ferrent\token` fájlra
+   mutat) — ezt kéri a GUI a Servers modalban, a
+   `https://127.0.0.1:50051` címhez.
+
+A Start-menüben `Ferrent` (GUI) és `Uninstall` lesz, opcionálisan asztali
+parancsikon. Az uninstaller előbb leállítja a service-t, majd megkérdezi,
+hogy a `%ProgramData%\ferrent` adatkönyvtárat is töröljük-e — **alapból
+meghagyja** (a torrentek és az állapot ott vannak).
+
+A SmartScreen ismeretlen kiadót jelez (a setup.exe nincs code-signolva):
+"More info → Run anyway".
+
+## Telepítés ZIP-ből (szerver, kézi út)
+
+Ugyanaz a fájlkészlet, service nélküli varázsló nélkül. A ZIP tartalma:
 
 | Fájl | Szerep |
 |---|---|
@@ -19,7 +39,8 @@ A `windows-cross` CI job artifactja
 | `nssm.exe` + `service.ps1` | Windows service wrapper |
 | `config.example.toml` | minta konfiguráció |
 
-Csomagold ki egy könyvtárba, majd **emelt szintű PowerShellben**:
+A ZIP-ben minden egy mappában van, DLL-t nem kell máshova másolni. Csomagold
+ki egy könyvtárba, majd **emelt szintű PowerShellben**:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\service.ps1 install
@@ -27,8 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\service.ps1 install
 
 Ez létrehozza a `%ProgramData%\ferrent` könyvtárat (data, token, logs,
 `config.toml`), regisztrálja a `Ferrent` service-t és elindítja. A token a
-kimenetben és a `%ProgramData%\ferrent\token` fájlban van; ezt kéri a GUI a
-Servers modalban (`https://127.0.0.1:50051`).
+kimenetben és a `%ProgramData%\ferrent\token` fájlban van.
 
 ```powershell
 .\service.ps1 status | stop | start | restart | uninstall
@@ -41,7 +61,8 @@ A naplók: `%ProgramData%\ferrent\logs\ferrentd.{out,err}.log`.
 A `ferrentd` konzolprogram, és **Ctrl-C-re** menti a fastresume-ot. Az NSSM a
 service stopnál `AppStopMethodConsole`-lal konzol-eseményt küld a
 gyereknek, tehát a leállítás ugyanazt a mentést adja, mint a Ctrl-C; a
-`sc stop` `TerminateProcess`-szel kilőné a folyamatot.
+`sc stop` `TerminateProcess`-szel kilőné a folyamatot. A setup.exe és a ZIP
+ugyanezt a `service.ps1`-t hívja, így a két út nem tud szétcsúszni.
 
 ## Kézi futtatás (service nélkül)
 
@@ -61,7 +82,9 @@ PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_PATH=/tmp/lt-win/prefix/lib/pkgconfig \
   FERRENT_LIBTORRENT_STATIC=1 RUSTFLAGS="-C link-args=-static" \
   cargo build --release --target x86_64-pc-windows-gnu \
     -p ferrent-daemon -p ferrent-cli -p ferrent-gui
-packaging/windows/stage-artifacts.sh && packaging/windows/make-zip.sh
+packaging/windows/stage-artifacts.sh
+packaging/windows/make-zip.sh
+packaging/windows/make-installer.sh
 ```
 
 ## Ismert hiányosságok
@@ -69,8 +92,11 @@ packaging/windows/stage-artifacts.sh && packaging/windows/make-zip.sh
 - A GUI konfigja még a `%APPDATA%` helyett a Linuxos `~/.config` logikát
   követi; a daemon alapértékei (`/etc/ferrent/...`) helyett a service-generált
   config a mérvadó.
-- Nincs `ferrent.ico`, így a ZIP-ben az exék alapértelmezett ikonnal
-  jelennek meg, és nincs MSI/winget csomag.
+- A `.exe` fájlokba **nincs beágyazott ikon** (nincs `.rc`/`windres` lépés a
+  buildben), így az Intéző alapértelmezett ikonnal listázza őket; a
+  `ferrent.ico` a telepítőben, a parancsikonokon és az uninstall bejegyzésben
+  jelenik meg.
+- Nincs MSI és winget csomag; a setup.exe nincs code-signolva.
 - A 11 `#![cfg(unix)]` integrációs teszt Windows-on nem fut; a lib-tesztek
   igen.
 

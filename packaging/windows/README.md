@@ -8,7 +8,7 @@ kézi reprodukáláshoz kell.
 
 ```bash
 sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 cmake make pkg-config \
-  libboost-dev curl zip
+  libboost-dev curl zip nsis
 rustup target add x86_64-pc-windows-gnu
 ```
 
@@ -26,12 +26,32 @@ cargo build --release --target x86_64-pc-windows-gnu \
 
 packaging/windows/stage-artifacts.sh      # → target/windows/ (strippelt binárisok + DLL)
 packaging/windows/make-zip.sh             # → target/windows/dist/Ferrent-<ver>-windows-x86_64.zip
+packaging/windows/make-installer.sh       # → target/windows/dist/Ferrent-<ver>-windows-x86_64-setup.exe
 ```
 
 ## A ZIP tartalma
 
 `ferrentd.exe`, `ferrent-cli.exe`, `ferrent-gui.exe`, `libstdc++-6.dll`,
 `nssm.exe`, `service.ps1`, `config.example.toml`, `README.txt`.
+
+## A telepítő (NSIS)
+
+Ugyanaz a fájlkészlet, egy `.exe`-ben: varázsló, licence-oldal, Start-menü és
+asztali parancsikon (`ferrent.ico`), registry-uninstall, és a **service
+regisztrálása ugyanazzal a `service.ps1`-gyel**, amit a ZIP is szállít — így a
+két út nem tud szétcsúszni. A telepítés végén a token a kimenetben jelenik
+meg, és a `%ProgramData%\ferrent\token` fájlban marad.
+
+A `make-installer.sh` a staged binárisokat egy ideiglenes könyvtárba másolja a
+`service.ps1`-gyel, az `nssm.exe`-vel és a `ferrent.ico`-val, majd a
+`makensis`-t hívja. A verzió ugyanaz a `packaging/debian/version.sh --cargo`,
+mint a ZIP-nél és a `.deb`-nél; az NSIS négyrészes verzió-erőforrása a
+`-rc1` suffixet levágja (`1.0.0.0`), a megjelenített verzió viszont teljes.
+
+Az uninstaller a service-t előbb leállítja és törli (különben a `nssm.exe` és a
+`service.ps1` foglalt fájl lenne), utána kérdez rá, hogy a
+`%ProgramData%\ferrent` adatkönyvtárat is töröljük-e — alapból **meghagyja**
+(a torrentek és az állapot ott vannak).
 
 ## Service
 

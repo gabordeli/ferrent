@@ -80,6 +80,8 @@ buf-lint:
 # `cargo check` in the port, so a Unix-ism fails the pipeline.
 # The daemon needs libtorrent; it is cross-built into a cached prefix, so the
 # CMake build runs once per toolchain change, not per pipeline.
+# Two artifacts leave this job from the same staged files: the ZIP (server and
+# manual route) and the NSIS setup.exe (desktop route, registers the service).
 windows-cross:
   stage: quality
   variables:
@@ -97,7 +99,7 @@ windows-cross:
         apt-get update -qq &&
         apt-get install -y -qq --no-install-recommends
           gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 cmake make pkg-config
-          libboost-dev curl file zip &&
+          libboost-dev curl file zip nsis &&
         rustup target add x86_64-pc-windows-gnu &&
         packaging/windows/build-libtorrent.sh "$LT_PREFIX" &&
         PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_PATH="$LT_PREFIX/lib/pkgconfig"
@@ -107,14 +109,16 @@ windows-cross:
         packaging/windows/stage-artifacts.sh
           "$CARGO_TARGET_DIR/x86_64-pc-windows-gnu/release" /src/target/windows &&
         packaging/windows/make-zip.sh /src/target/windows /src/target/windows/dist &&
-        file /src/target/windows/*.exe &&
-        ls -l /src/target/windows/dist/*.zip &&
+        packaging/windows/make-installer.sh /src/target/windows /src/target/windows/dist &&
+        file /src/target/windows/*.exe /src/target/windows/dist/*setup.exe &&
+        ls -l /src/target/windows/dist/ &&
         chown -R "$HOST_UID:$HOST_GID" /src/target /cache'
   artifacts:
     paths:
       - target/windows/*.exe
       - target/windows/libstdc++-6.dll
       - target/windows/dist/*.zip
+      - target/windows/dist/*setup.exe
     expire_in: 1 week
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
