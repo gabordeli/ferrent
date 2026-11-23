@@ -53,6 +53,7 @@ forrásokkal: [docs/comparison.md](docs/comparison.md).
 | Platform | Útmutató |
 |---|---|
 | Debian 12/13, Ubuntu 24.04 | [docs/install-debian.md](docs/install-debian.md) (aláírt APT repó vagy `.deb`) |
+| Bármely x86_64 Linux (GUI) | [docs/install-appimage.md](docs/install-appimage.md) (AppImage, FUSE nélkül is) |
 | Fedora | [docs/install-fedora.md](docs/install-fedora.md) (forrásból) |
 | Arch Linux | [docs/install-arch.md](docs/install-arch.md) (forrásból) |
 | Docker (fej nélküli daemon) | [docs/install-docker.md](docs/install-docker.md) |

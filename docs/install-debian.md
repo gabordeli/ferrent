@@ -11,8 +11,9 @@ amd64). A repó a `gh-pages` ágon él, a Pages URL-je
 
 Az APT repót nem használó gépeken a `.deb` a GitHub Release-ről is
 letölthető és `sudo apt install ./ferrent_*.deb` paranccsal telepíthető
-(ugyanaz a csomag, a repó csak a frissítéseket adja). Forrásból:
-[docs/development.md](development.md); más platformok:
+(ugyanaz a csomag, a repó csak a frissítéseket adja). Csak a GUI-hoz,
+bármely x86_64 Linuxon: [docs/install-appimage.md](install-appimage.md).
+Forrásból: [docs/development.md](development.md); más platformok:
 [docs/install-fedora.md](install-fedora.md),
 [docs/install-arch.md](install-arch.md),
 [docs/install-docker.md](install-docker.md).

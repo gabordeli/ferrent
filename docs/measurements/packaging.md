@@ -222,8 +222,9 @@ ferrent-cli --server https://localhost:50139 \
   `tls-key.pem`, `tls-fingerprint.txt` és a `state.redb`.
 - A hostról a publikált porton a CLI **csatlakozik** (üres lista), tehát a
   TLS + token lánc a konténerben is jó.
-- A healthcheck első változata `--json status`-t hívott — nincs ilyen
-  alparancs, ezért a `list --limit 1` a próba.
+- A healthcheck első változata `--json status`-t hívott — akkor még nem volt
+  ilyen alparancs, ezért a `list --limit 1` lett a próba. Az M13-T5 (#71)
+  óta a `status` létezik, és a healthcheck azt hívja.
 
 ## M9 – AppImage (M3-T4)
 
@@ -273,3 +274,11 @@ A `release-appimage` job ugyanabból a release commitból épít, mint a
 - Helyben mérve 2026-11-22: build 1 m 11 s meleg targetből (`--no-build`),
   **34 MB**, `rows=13`, `fps=117`, `rss_kb=51 380` a 13 torrentes élő
   daemonon.
+
+**CI-mérés (2026-11-23, pipeline 6917):** a konténeres build (hideg target)
+**453 s**, a kész fájl **43 MB** (`dist/Ferrent-1.0.0-rc1-x86_64.AppImage`),
+a smoke `rows=0` (friss, üres daemon), `fps=515,5`, `rss_kb=43 564`,
+`visible_rows=64`; publikálva `ferrent-gui/1.0.0-rc1/` alá. A job a
+`release-deb` artifactját használja a smoke daemonhoz, tehát a `.deb` és az
+AppImage ugyanabból a commitból készül. Kiadási jegyzőkönyv:
+`docs/measurements/v1-rc1.md`.
