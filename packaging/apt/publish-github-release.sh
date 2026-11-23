@@ -68,10 +68,15 @@ curl -sS "${auth[@]}" "$api/repos/$repo/releases/$release_id/assets?per_page=100
 uploaded=0
 for deb in "${debs[@]}"; do
     file=$(basename "$deb")
+    # GitHub stores `~` in an asset name as `.` (1.0.0~rc1 -> 1.0.0.rc1), so
+    # compare against the normalised name as well; otherwise the pre-check
+    # misses the existing asset and the upload fails with a 422.
     if python3 -c '
 import json, sys
+name = sys.argv[1]
+key = name.replace("~", ".")
 names = {asset["name"] for asset in json.load(open("/tmp/gh-assets.json"))}
-sys.exit(0 if sys.argv[1] in names else 1)
+sys.exit(0 if name in names or key in names else 1)
 ' "$file"; then
         echo "asset exists, skipping $file"
         continue
@@ -83,6 +88,17 @@ sys.exit(0 if sys.argv[1] in names else 1)
         "https://uploads.github.com/repos/$repo/releases/$release_id/assets?name=$file")
     case "$code" in
     201) echo "uploaded $file"; uploaded=$((uploaded + 1)) ;;
+    422)
+        # A name the pre-check could not predict (GitHub rewrote it): the
+        # asset is already there, which is what a re-release wants.
+        if grep -q 'already_exists' /tmp/gh-asset.json; then
+            echo "asset exists, skipping $file"
+        else
+            cat /tmp/gh-asset.json >&2
+            echo "upload failed: $file (HTTP $code)" >&2
+            exit 1
+        fi
+        ;;
     *)
         cat /tmp/gh-asset.json >&2
         echo "upload failed: $file (HTTP $code)" >&2
