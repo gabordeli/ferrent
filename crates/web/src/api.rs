@@ -121,6 +121,7 @@ pub async fn status(
         "download_rate": status.download_rate,
         "upload_rate": status.upload_rate,
         "free_space_bytes": status.free_space_bytes,
+        "import_enabled": status.import_enabled,
         "states": {
             "downloading": status.downloading_count,
             "seeding": status.seeding_count,

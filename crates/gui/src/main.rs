@@ -1386,6 +1386,9 @@ impl App {
                 Task::none()
             }
             Message::ShowView(view) => {
+                if view == View::Import && !import_visible(self.server_status.as_ref()) {
+                    return Task::none();
+                }
                 self.view = view;
                 Task::none()
             }
@@ -6516,9 +6519,9 @@ impl App {
         } else {
             text("").size(1).into()
         };
-        let bottom: Element<Message> = WidgetColumn::with_children(vec![
-            disks_line,
-            icon_nav(
+        let mut utilities: Vec<Element<Message>> = vec![disks_line];
+        if import_visible(self.server_status.as_ref()) {
+            utilities.push(icon_nav(
                 expanded,
                 glyph::FOLDER_OPEN,
                 if self.view == View::Import {
@@ -6528,24 +6531,23 @@ impl App {
                 },
                 i18n::t("Import"),
                 Message::ShowView(View::Import),
-            ),
-            icon_nav(
-                expanded,
-                glyph::SETTINGS,
-                theme::text_secondary(),
-                i18n::t("Settings"),
-                Message::OpenSettings,
-            ),
-            icon_nav(
-                expanded,
-                glyph::SERVER,
-                theme::text_secondary(),
-                i18n::t("Servers"),
-                Message::OpenServers,
-            ),
-        ])
-        .spacing(2)
-        .into();
+            ));
+        }
+        utilities.push(icon_nav(
+            expanded,
+            glyph::SETTINGS,
+            theme::text_secondary(),
+            i18n::t("Settings"),
+            Message::OpenSettings,
+        ));
+        utilities.push(icon_nav(
+            expanded,
+            glyph::SERVER,
+            theme::text_secondary(),
+            i18n::t("Servers"),
+            Message::OpenServers,
+        ));
+        let bottom: Element<Message> = WidgetColumn::with_children(utilities).spacing(2).into();
 
         let header = container(header).padding(if expanded {
             iced::Padding::from([16, 14])
@@ -7375,6 +7377,16 @@ impl App {
         })
         .into()
     }
+}
+
+/// Whether the Import page belongs in the sidebar.
+///
+/// An unknown status (first connect) keeps the entry, so a supported daemon
+/// does not flash it in and out; only a daemon that reports "not on this
+/// platform" hides it. The decision is the daemon's, not the GUI build's: the
+/// thin client may run on Linux against a Windows daemon.
+fn import_visible(status: Option<&ServerStatus>) -> bool {
+    status.is_none_or(|status| status.import_enabled)
 }
 
 /// The scheduler's state as a coloured clock; clicking it opens the grid.
@@ -8540,6 +8552,24 @@ fn import_size(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod import_gate_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_daemon_that_reports_the_platform_hides_the_entry() {
+        assert!(import_visible(None));
+        assert!(import_visible(Some(&ServerStatus {
+            import_enabled: true,
+            ..ServerStatus::default()
+        })));
+        assert!(!import_visible(Some(&ServerStatus {
+            import_enabled: false,
+            ..ServerStatus::default()
+        })));
     }
 }
 

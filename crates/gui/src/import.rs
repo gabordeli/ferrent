@@ -124,14 +124,30 @@ pub struct ImportState {
     pub outcome: Option<Outcome>,
 }
 
+/// Where Deluge keeps its state on this platform.
+///
+/// The Debian package's `deluged` writes `/var/lib/deluged/config/state`; the
+/// Windows build keeps a roaming profile under `%APPDATA%\deluge\state`. A
+/// per-user Linux install edits the field to `~/.config/deluge/state`.
+#[cfg(windows)]
+fn default_deluge_state_dir() -> String {
+    std::env::var("APPDATA").map_or_else(
+        |_| r"C:\ProgramData\deluge\state".to_owned(),
+        |base| format!("{base}\\deluge\\state"),
+    )
+}
+
+#[cfg(not(windows))]
+fn default_deluge_state_dir() -> String {
+    "/var/lib/deluged/config/state".to_owned()
+}
+
 impl ImportState {
     #[must_use]
     pub fn new() -> Self {
         Self {
             source: "deluge".to_owned(),
-            // The Debian package's state directory; a per-user install edits
-            // this to ~/.config/deluge/state.
-            state_dir: "/var/lib/deluged/config/state".to_owned(),
+            state_dir: default_deluge_state_dir(),
             ..Self::default()
         }
     }
@@ -262,6 +278,15 @@ mod tests {
             save_path: path.to_owned(),
             trackers: vec![tracker.to_owned()],
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_default_state_dir_is_the_debian_one() {
+        assert_eq!(
+            ImportState::new().state_dir,
+            "/var/lib/deluged/config/state"
+        );
     }
 
     fn state() -> ImportState {

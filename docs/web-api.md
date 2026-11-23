@@ -60,7 +60,7 @@ upload_rate, queue, label`.
 
 | Metódus | Útvonal | Leírás |
 |---|---|---|
-| GET | `/api/status` | `{"torrents","download_rate","upload_rate","free_space_bytes","states":{…},"scheduler":{…}}` |
+| GET | `/api/status` | `{"torrents","download_rate","upload_rate","free_space_bytes","import_enabled","states":{…},"scheduler":{…}}` |
 | GET | `/api/labels` | `{"labels":[{"name","color","move_completed_path","download_rate_limit","upload_rate_limit","torrent_count"}]}` |
 | POST | `/api/labels` | `{"name":"movies","color":"#2f81f7"}` → `201 {"name"}` |
 | DELETE | `/api/labels/{name}` | `{"name","removed","cleared"}` |

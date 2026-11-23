@@ -64,6 +64,24 @@ pub fn default_data_dir() -> PathBuf {
     PathBuf::from(UNIX_DATA)
 }
 
+/// Whether the Deluge import is tested on this platform.
+///
+/// The parser is path-driven and the formats are platform-independent, but the
+/// Windows Deluge layout, its plugin configs and the drive-letter `save_path`
+/// values are unverified until the VM run; the Windows GUI hides the page while
+/// `ferrent-cli import-deluge` stays available for the test.
+#[cfg(windows)]
+#[must_use]
+pub fn import_supported() -> bool {
+    false
+}
+
+#[cfg(not(windows))]
+#[must_use]
+pub fn import_supported() -> bool {
+    true
+}
+
 /// Restricts the token file to the service account and the administrators.
 ///
 /// The `.deb` postinst creates the file `0640 root:ferrent`. On Windows the
@@ -112,6 +130,18 @@ mod tests {
         );
         assert_eq!(default_token_file(), PathBuf::from("/etc/ferrent/token"));
         assert_eq!(default_data_dir(), PathBuf::from("./ferrent-data"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_unix_import_is_supported() {
+        assert!(import_supported());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_windows_import_waits_for_the_vm_run() {
+        assert!(!import_supported());
     }
 
     #[cfg(windows)]

@@ -216,6 +216,9 @@ message GetStatusResponse {
   string daemon_version = 19;
   // Seconds since the daemon started.
   int64 uptime_secs = 20;
+  // Whether this daemon platform is tested for the Deluge import. Windows is
+  // not until the VM run: the GUI hides the page, the CLI still tries.
+  bool import_enabled = 21;
 }
 
 // Request to add a torrent.

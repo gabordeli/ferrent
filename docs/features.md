@@ -68,7 +68,9 @@ exit kódok, lokalizált súgó. Teljes referencia példákkal:
 
 - Deluge `state/` + plugin-configok importja (címkék, autoadd, execute,
   scheduler), szüneteltetett hozzáadással, info-hash deduppal:
-  [docs/deluge-migration.md](deluge-migration.md).
+  [docs/deluge-migration.md](deluge-migration.md). A daemon a `GetStatus`-ban
+  jelzi, tesztelt-e a platform (Windows: még nem — a GUI elrejti az oldalt, a
+  CLI `import-deluge` továbbra is elérhető).
 
 ## Nemzetköziesítés
 

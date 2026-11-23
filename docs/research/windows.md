@@ -112,6 +112,13 @@ A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
 A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 `windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
 
+**Import-kapu (2026-11-23):** a daemon a `GetStatus`-ban hirdeti, tesztelt-e a
+platform (`import_enabled`); Windows-on `false` a VM-es futásig, ezért a GUI
+elrejti az Import oldalt, a `ferrent-cli import-deluge` marad a teszt eszköze.
+A döntés a daemoné, nem a GUI buildjéé — a thin client Linuxról is
+csatlakozhat Windows daemonhoz. A GUI import kezdőmappája is platform
+szerinti (`%APPDATA%\deluge\state` vs `/var/lib/deluged/config/state`).
+
 **Ami még hátra van:** a GUI `%APPDATA%\ferrent\gui.toml` útvonala és a 11
 `#![cfg(unix)]` teszt Windows változatai. A libtorrent cross-build, a ZIP, az
 NSIS telepítő, a service wrapper, a daemon `%ProgramData%` alapértékei és a

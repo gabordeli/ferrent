@@ -1508,6 +1508,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     "free_space_bytes": status.free_space_bytes,
                     "download_rate": status.download_rate,
                     "upload_rate": status.upload_rate,
+                    "import_enabled": status.import_enabled,
                     "fingerprint": fingerprint,
                 }));
             } else {

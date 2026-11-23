@@ -96,6 +96,8 @@ pub struct ServerStatus {
     pub scheduler_enabled: bool,
     pub scheduler_level: String,
     pub scheduler_next_unix: i64,
+    /// Whether the daemon platform is tested for the Deluge import.
+    pub import_enabled: bool,
 }
 
 /// Reads the CA certificate and returns its SHA-256 fingerprint.
@@ -162,6 +164,7 @@ pub async fn status(client: &AuthClient) -> Result<ServerStatus, String> {
         scheduler_enabled: response.scheduler_enabled,
         scheduler_level: response.scheduler_level,
         scheduler_next_unix: response.scheduler_next_unix,
+        import_enabled: response.import_enabled,
     })
 }
 

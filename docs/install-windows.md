@@ -102,6 +102,11 @@ packaging/windows/make-installer.sh
 - A GUI konfigja még a `%APPDATA%` helyett a Linuxos `~/.config` logikát
   követi; a daemon viszont már a `%ProgramData%\ferrent` alapértékeket
   használja.
+- **Az Import oldal rejtett a GUI-ban**: a daemon `GetStatus`-ban
+  `import_enabled=false`-t ad Windows-on, mert a Deluge Windows-os állapotkönyvtára,
+  plugin-configjai és a `D:\...` mentési utak még nem lettek tesztelve. A
+  `ferrent-cli import-deluge` változatlanul működik (ez a VM-es teszt eszköze);
+  a futás után a `platform::import_supported()` egy sora billenti át.
 - Nincs MSI és winget csomag; a setup.exe nincs code-signolva (ezért a
   SmartScreen ismeretlen kiadót jelez).
 - A 11 `#![cfg(unix)]` integrációs teszt Windows-on nem fut; a lib-tesztek
