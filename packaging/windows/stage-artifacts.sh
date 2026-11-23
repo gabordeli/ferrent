@@ -25,6 +25,18 @@ dll=$(x86_64-w64-mingw32-g++ -print-file-name=libstdc++-6.dll)
 
 ls -l "$out"
 
+# The icon and VERSIONINFO come from crates/winres through windres. A build
+# that silently skipped it would still produce a working exe, so the resource
+# section is the proof it ran (the ico alone is ~117 KB).
+for name in ferrentd ferrent-cli ferrent-gui; do
+  hex=$(x86_64-w64-mingw32-objdump -h "$out/$name.exe" |
+    awk '$2 == ".rsrc" { print $3; exit }')
+  if [ -z "$hex" ] || [ $((16#$hex)) -lt 32768 ]; then
+    echo "$name.exe carries no icon resource (.rsrc missing or too small)" >&2
+    exit 1
+  fi
+done
+
 # A gate, not a report: the daemon must carry libtorrent statically. A dynamic
 # dependency would only show up as a missing DLL on the Windows box, so any
 # import outside the Windows API and the C++ runtime fails the build here.

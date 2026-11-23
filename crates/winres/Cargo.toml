@@ -1,0 +1,13 @@
+[package]
+name = "ferrent-winres"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Build-script helper that embeds the Windows icon and version info"
+publish = false
+
+[lints]
+workspace = true

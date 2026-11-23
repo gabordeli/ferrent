@@ -14,6 +14,7 @@ members = [
     "crates/import",
     "crates/web",
     "crates/telemetry",
+    "crates/winres",
 ]
 
 [workspace.package]

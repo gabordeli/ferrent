@@ -78,6 +78,12 @@ release build ne függjön tőle. A `vendor/README.md`-ben a verzió, a licenc
 
 ## Döntések, amiket érdemes tudni
 
+- **Ikon és verzió-információ a binárisban.** A `crates/winres` build-script
+  helper a `windres`-szel ágyazza be a `packaging/windows/ferrent.ico`-t
+  (16–256 px, a GUI ikonjából) és egy VERSIONINFO blokkot mindhárom exébe,
+  ugyanabból a forrásból, amit a telepítő használ. A `stage-artifacts.sh` a
+  `.rsrc` szekció méretével ellenőrzi, hogy tényleg megtörtént: egy csendben
+  kimaradt `windres` különben csak a Windows gépen tűnne fel.
 - **Nincs cross OpenSSL.** A libtorrent a beépített RC4/SHA1-jét használja, ha
   nem talál OpenSSLt/GnuTLS-t/libgcryptot; a CMake-et ezért
   `CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON`-nal hívjuk (különben a host Linux

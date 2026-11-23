@@ -1510,6 +1510,7 @@ dependencies = [
  "ferrent-import",
  "ferrent-protocol",
  "ferrent-telemetry",
+ "ferrent-winres",
  "libc",
  "serde",
  "serde_json",
@@ -1529,6 +1530,7 @@ dependencies = [
  "ferrent-import",
  "ferrent-protocol",
  "ferrent-telemetry",
+ "ferrent-winres",
  "rcgen",
  "redb",
  "regex",
@@ -1566,6 +1568,7 @@ dependencies = [
  "ferrent-i18n",
  "ferrent-protocol",
  "ferrent-telemetry",
+ "ferrent-winres",
  "iced",
  "regex",
  "rfd",
@@ -1633,6 +1636,10 @@ dependencies = [
  "tonic",
  "tower",
 ]
+
+[[package]]
+name = "ferrent-winres"
+version = "1.0.0-rc1"
 
 [[package]]
 name = "find-msvc-tools"

@@ -92,11 +92,8 @@ packaging/windows/make-installer.sh
 - A GUI konfigja még a `%APPDATA%` helyett a Linuxos `~/.config` logikát
   követi; a daemon alapértékei (`/etc/ferrent/...`) helyett a service-generált
   config a mérvadó.
-- A `.exe` fájlokba **nincs beágyazott ikon** (nincs `.rc`/`windres` lépés a
-  buildben), így az Intéző alapértelmezett ikonnal listázza őket; a
-  `ferrent.ico` a telepítőben, a parancsikonokon és az uninstall bejegyzésben
-  jelenik meg.
-- Nincs MSI és winget csomag; a setup.exe nincs code-signolva.
+- Nincs MSI és winget csomag; a setup.exe nincs code-signolva (ezért a
+  SmartScreen ismeretlen kiadót jelez).
 - A 11 `#![cfg(unix)]` integrációs teszt Windows-on nem fut; a lib-tesztek
   igen.
 

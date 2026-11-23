@@ -142,7 +142,11 @@ Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
   `makensis` Linuxon); mindkettő artifact a jobból;
 - a `file` kimenete az első futásnál „PE32+ executable (console)" volt: a
   GUI release buildje `windows_subsystem = "windows"`-t kapott, hogy ne
-  nyíljon konzolablak (debugban marad, a pániküzenet miatt).
+  nyíljon konzolablak (debugban marad, a pániküzenet miatt);
+- a `crates/winres` build-script helper `windres`-szel ágyazza be a
+  `ferrent.ico`-t és a VERSIONINFO blokkot mindhárom exébe; a
+  `stage-artifacts.sh` a `.rsrc` méretén ellenőrzi, hogy tényleg megtörtént
+  (a csendben kimaradt `windres` csak a Windows gépen tűnne fel).
 
 ## Javaslat
 
@@ -194,7 +198,7 @@ felhasználónak WSL kell.
 | ZIP csomag (binárisok + DLL + NSSM + service.ps1) | 1–2 nap | **kész** (2026-11-23) |
 | Windows service (NSSM) + `Ctrl-C` átadás | 1–2 nap | **kész** (2026-11-23) |
 | NSIS telepítő (varázsló, start-menü, service, uninstall) | 1 nap | **kész** (2026-11-23) |
-| `ferrent.ico` (16–256 px, a GUI ikonjából) | fél nap | **kész** (2026-11-23) |
+| `ferrent.ico` (16–256 px) + beágyazás az exékbe (`crates/winres`) | fél nap | **kész** (2026-11-23) |
 | `%APPDATA%`/`%ProgramData%` alapértékek + token ACL | 1 nap | hátra |
 | Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
