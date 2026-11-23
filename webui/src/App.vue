@@ -23,6 +23,7 @@ import type {
 } from "./types";
 import AddDialog from "./components/AddDialog.vue";
 import FilterBar from "./components/FilterBar.vue";
+import InstallHint from "./components/InstallHint.vue";
 import LabelsSheet from "./components/LabelsSheet.vue";
 import SelectionBar from "./components/SelectionBar.vue";
 import SessionSheet from "./components/SessionSheet.vue";
@@ -806,6 +807,8 @@ onBeforeUnmount(() => {
         👤
       </button>
     </header>
+
+    <InstallHint />
 
     <output v-if="!online" class="offline-banner">
       {{ t("list.offline") }}

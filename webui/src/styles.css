@@ -2254,3 +2254,17 @@ button:disabled {
   color: var(--muted);
   font-size: 11.5px;
 }
+
+/* "Add to Home Screen" nudge (iOS Safari). */
+.install-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11.5px;
+}

@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Ferrent Web",
   "short_name": "Ferrent",
-  "description": "Mobil-first Deluge torrent kezelő",
+  "description": "Ferrent torrent kezelő (mobil)",
   "lang": "hu",
   "start_url": "/",
   "scope": "/",
