@@ -19,6 +19,27 @@ Description: Headless Ferrent BitTorrent daemon
  Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
  restart.
 
+Package: ferrent
+Version: 1.0.0~rc1-1
+Architecture: amd64
+Maintainer: Gabor Deli <gabor.deli@gmail.com>
+Installed-Size: 166045
+Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6 (>= 12)
+Breaks: ferrentd (<= 0.1.2-1)
+Replaces: ferrentd (<= 0.1.2-1)
+Provides: ferrentd
+Filename: pool/main/f/ferrent/ferrent_1.0.0.rc1-1_amd64.deb
+Size: 27449928
+MD5sum: dbda248435b798ed65ad8b80f2aec950
+SHA1: d6a587dc1d728002769e0b25f1c22e625bf5a435
+SHA256: 801cdd7dcf2faa33e45274b6d6b15d36d90237e4273962430f2b1c71c1c76667
+Section: net
+Priority: optional
+Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
+Description: Headless Ferrent BitTorrent daemon
+ Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
+ restart.
+
 Package: ferrent-gui
 Version: 0.1.3-1
 Architecture: amd64
@@ -30,6 +51,23 @@ Size: 35797960
 MD5sum: 13b51a674760f60b309047acb8a1f454
 SHA1: fe11b51dfe76e9bc8ae12be6405b40bb03f12b0a
 SHA256: 03cf7ceec9785d93b53e0f8885184937269d590bea07f56cade8f47561af8547
+Section: net
+Priority: optional
+Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
+Description: Ferrent desktop thin client (iced)
+ Ferrent desktop thin client (iced).
+
+Package: ferrent-gui
+Version: 1.0.0~rc1-1
+Architecture: amd64
+Maintainer: Gabor Deli <gabor.deli@gmail.com>
+Installed-Size: 175334
+Depends: ferrent, libc6 (>= 2.35), libglib2.0-0 (>= 2.12.0), libgtk-3-0 (>= 3.19.12), libssl3 (>= 3.0.0)
+Filename: pool/main/f/ferrent-gui/ferrent-gui_1.0.0.rc1-1_amd64.deb
+Size: 26997332
+MD5sum: fe1fdf5066ea0ebfb5f6af098929a36a
+SHA1: dd474a510f9ac717af35a97127bb63e3ea22e836
+SHA256: 5cd2712595c86db12fff568edfdfa5c8471584ee7b54cb898276449e60bb6507
 Section: net
 Priority: optional
 Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent

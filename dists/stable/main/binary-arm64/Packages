@@ -19,6 +19,27 @@ Description: Headless Ferrent BitTorrent daemon
  Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
  restart.
 
+Package: ferrent
+Version: 1.0.0~rc1-1
+Architecture: arm64
+Maintainer: Gabor Deli <gabor.deli@gmail.com>
+Installed-Size: 167427
+Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6:arm64
+Breaks: ferrentd (<= 0.1.2-1)
+Replaces: ferrentd (<= 0.1.2-1)
+Provides: ferrentd
+Filename: pool/main/f/ferrent/ferrent_1.0.0.rc1-1_arm64.deb
+Size: 25554888
+MD5sum: 6dbf442f73ae6f62d5142e3840a08cce
+SHA1: f1c8219003e62e890799b35f36b368fef560b2a8
+SHA256: 1a878f2f4cfb10275dfc33639ab38beb93342d1d4505d113564978441320b155
+Section: net
+Priority: optional
+Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
+Description: Headless Ferrent BitTorrent daemon
+ Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
+ restart.
+
 Package: ferrentd
 Version: 0.1.2-1
 Architecture: arm64
