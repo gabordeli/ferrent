@@ -56,6 +56,11 @@ kimenetben és a `%ProgramData%\ferrent\token` fájlban van.
 
 A naplók: `%ProgramData%\ferrent\logs\ferrentd.{out,err}.log`.
 
+A `token` és a `config.toml` a `%ProgramData%` örökölt ACL-je helyett
+**SYSTEM + Administrators** (teljes), öröklés nélkül — a Linux-os
+`0640 root:ferrent` megfelelője; a daemon induláskor a tokenre ugyanezt újra
+érvényesíti.
+
 ## Miért NSSM
 
 A `ferrentd` konzolprogram, és **Ctrl-C-re** menti a fastresume-ot. Az NSSM a
@@ -66,8 +71,13 @@ ugyanezt a `service.ps1`-t hívja, így a két út nem tud szétcsúszni.
 
 ## Kézi futtatás (service nélkül)
 
+A daemon a Windows-os alapértékeket használja: config
+`%ProgramData%\ferrent\config.toml`, token `%ProgramData%\ferrent\token`,
+adat `%ProgramData%\ferrent\data` — ugyanazok, amiket a `service.ps1 install`
+létrehoz. Env felülírás: `FERRENT_CONFIG`, `FERRENT_DATA_DIR`,
+`FERRENT_TOKEN`.
+
 ```powershell
-set FERRENT_CONFIG=C:\ProgramData\ferrent\config.toml
 .\ferrentd.exe
 ```
 
@@ -90,8 +100,8 @@ packaging/windows/make-installer.sh
 ## Ismert hiányosságok
 
 - A GUI konfigja még a `%APPDATA%` helyett a Linuxos `~/.config` logikát
-  követi; a daemon alapértékei (`/etc/ferrent/...`) helyett a service-generált
-  config a mérvadó.
+  követi; a daemon viszont már a `%ProgramData%\ferrent` alapértékeket
+  használja.
 - Nincs MSI és winget csomag; a setup.exe nincs code-signolva (ezért a
   SmartScreen ismeretlen kiadót jelez).
 - A 11 `#![cfg(unix)]` integrációs teszt Windows-on nem fut; a lib-tesztek

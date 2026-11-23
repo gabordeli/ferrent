@@ -1,9 +1,11 @@
 //! Typed daemon configuration: file schema, layering and validation.
 //!
-//! The file is `/etc/ferrent/config.toml` (or `$FERRENT_CONFIG`). The schema
-//! keeps the original flat keys (`data_dir`, `download_dir`, `bind`,
-//! `token_file`) and adds sections for the features that follow. Unknown keys
-//! are rejected instead of silently ignored.
+//! The file is `/etc/ferrent/config.toml` on Unix and
+//! `%ProgramData%\ferrent\config.toml` on Windows (`$FERRENT_CONFIG`
+//! overrides both; see `platform`). The schema keeps the original flat keys
+//! (`data_dir`, `download_dir`, `bind`, `token_file`) and adds sections for
+//! the features that follow. Unknown keys are rejected instead of silently
+//! ignored.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -15,11 +17,10 @@ use crate::autoadd::WatchDir;
 use crate::diskguard::Zone;
 use crate::hooks::HookSpec;
 use crate::notify::{TelegramRule, WebhookRule};
+use crate::platform::{default_data_dir, default_token_file};
 use crate::scheduler::Grid;
 
-const DEFAULT_DATA_DIR: &str = "./ferrent-data";
 const DEFAULT_BIND: &str = "127.0.0.1:50051";
-const DEFAULT_TOKEN_FILE: &str = "/etc/ferrent/token";
 
 /// The on-disk configuration file.
 ///
@@ -641,7 +642,7 @@ impl FileConfig {
 
         let data_dir = env_path(env, "FERRENT_DATA_DIR")
             .or_else(|| self.data_dir.clone())
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR));
+            .unwrap_or_else(default_data_dir);
         if env.contains_key("FERRENT_DATA_DIR") {
             locked.insert("data_dir".to_owned());
         }
@@ -663,10 +664,7 @@ impl FileConfig {
         }
         validate_bind(&bind)?;
 
-        let token_file = self
-            .token_file
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_TOKEN_FILE));
+        let token_file = self.token_file.clone().unwrap_or_else(default_token_file);
 
         let resolved = ResolvedConfig {
             data_dir,
@@ -1088,13 +1086,10 @@ command = "/bin/true"
     #[test]
     fn download_dir_defaults_under_data_dir() {
         let resolved = FileConfig::default().resolve(&env(&[])).expect("resolve");
-        assert_eq!(resolved.data_dir, PathBuf::from(DEFAULT_DATA_DIR));
-        assert_eq!(
-            resolved.download_dir,
-            PathBuf::from(DEFAULT_DATA_DIR).join("downloads")
-        );
+        assert_eq!(resolved.data_dir, default_data_dir());
+        assert_eq!(resolved.download_dir, default_data_dir().join("downloads"));
         assert_eq!(resolved.bind, DEFAULT_BIND);
-        assert_eq!(resolved.token_file, PathBuf::from(DEFAULT_TOKEN_FILE));
+        assert_eq!(resolved.token_file, default_token_file());
     }
 
     #[test]

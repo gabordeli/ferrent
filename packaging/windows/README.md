@@ -70,7 +70,13 @@ config.toml), regisztrálja a `Ferrent` service-t és elindítja. A token a
 kimenetben és a `%ProgramData%\ferrent\token` fájlban.
 
 A `service.ps1` a configot **generálja** (nem másolja), hogy a `data_dir` /
-`token_file` a tényleges `%ProgramData%`-ra mutasson.
+`token_file` a tényleges `%ProgramData%`-ra mutasson, és a `token` +
+`config.toml` ACL-jét **SYSTEM + Administrators**-re szűkíti (öröklés nélkül,
+Linux `0640 root:ferrent` megfelelője). A daemon induláskor a tokenre
+ugyanezt újra érvényesíti (`crates/daemon/src/platform.rs`), így egy kézzel
+létrehozett, világ által olvasható token is megjavul. A csoportot SID-del
+(`*S-1-5-18`, `*S-1-5-32-544`) adjuk meg, mert a magyar Windows
+`Rendszergazdák`-nak hívja.
 
 Az `nssm.exe` **vendored** (`vendor/`): a nssm.cc gyakran 503-at ad, és egy
 release build ne függjön tőle. A `vendor/README.md`-ben a verzió, a licenc

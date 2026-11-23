@@ -46,7 +46,7 @@ struct Config {
 fn load_config() -> Result<Config, Box<dyn Error>> {
     let path = env::var_os("FERRENT_CONFIG")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/etc/ferrent/config.toml"));
+        .unwrap_or_else(ferrent_daemon::platform::default_config_path);
     let store = ConfigStore::load(path)?;
     let resolved = store.resolved()?;
     let token = if let Ok(token) = env::var("FERRENT_TOKEN") {
@@ -65,6 +65,9 @@ fn load_config() -> Result<Config, Box<dyn Error>> {
     if token.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "empty API token").into());
     }
+    // Windows only: the file inherits %ProgramData%'s ACL, which lets every
+    // user read the token. The .deb postinst already installs it 0640.
+    ferrent_daemon::platform::harden_secret_file(&resolved.token_file);
     Ok(Config {
         store,
         resolved,

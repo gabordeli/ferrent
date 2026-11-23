@@ -17,6 +17,7 @@ pub mod metrics;
 pub mod netbind;
 pub mod notify;
 pub mod persist;
+pub mod platform;
 pub mod rpc;
 pub mod rss;
 pub mod rss_service;

@@ -48,6 +48,18 @@ function New-Token([string]$path) {
     [IO.File]::WriteAllText($path, [Convert]::ToBase64String($bytes), [Text.Encoding]::ASCII)
 }
 
+# %ProgramData%\ferrent inherits an ACL that lets every user read, so the files
+# that hold secrets get the Linux package's 0640 root:ferrent equivalent:
+# SYSTEM and Administrators full, nobody else, no inheritance. The SIDs are
+# spelled out because a Hungarian Windows calls the group "Rendszergazdák" and
+# icacls would not resolve the English name.
+function Protect-File([string]$path) {
+    & icacls $path /inheritance:r /grant:r '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "icacls failed on $path (exit $LASTEXITCODE); the file stays readable by Users"
+    }
+}
+
 function Invoke-Nssm {
     & $nssm @args
     if ($LASTEXITCODE -ne 0) { throw "nssm $args failed with exit code $LASTEXITCODE" }
@@ -61,6 +73,7 @@ switch ($Action) {
     'install' {
         New-Item -ItemType Directory -Force -Path $DataDir, (Join-Path $DataDir 'data'), $logDir | Out-Null
         if (-not (Test-Path $tokenPath)) { New-Token $tokenPath }
+        Protect-File $tokenPath
         if (-not (Test-Path $configPath)) {
             $toml = @"
 # Written by service.ps1.
@@ -70,6 +83,7 @@ token_file = "$(ConvertTo-TomlPath $tokenPath)"
 "@
             Set-Content -Path $configPath -Value $toml -Encoding ASCII
         }
+        Protect-File $configPath
 
         Invoke-Nssm install $serviceName $daemon
         Invoke-Nssm set $serviceName AppDirectory $BinDir

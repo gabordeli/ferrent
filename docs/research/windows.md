@@ -112,10 +112,10 @@ A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
 A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 `windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
 
-**Ami még hátra van:** a GUI `%APPDATA%\ferrent\gui.toml` útvonala, a daemon
-`%ProgramData%` alapértékei (a service-generált config már ott él), a token
-ACL-je, és a 11 `#![cfg(unix)]` teszt Windows változatai. A libtorrent
-cross-build, a ZIP, az NSIS telepítő és a service wrapper **kész**
+**Ami még hátra van:** a GUI `%APPDATA%\ferrent\gui.toml` útvonala és a 11
+`#![cfg(unix)]` teszt Windows változatai. A libtorrent cross-build, a ZIP, az
+NSIS telepítő, a service wrapper, a daemon `%ProgramData%` alapértékei és a
+token ACL-je (`icacls`, SYSTEM + Administrators) **kész**
 (`packaging/windows/`); a service a daemont NSSM-mel futtatja, és
 `AppStopMethodConsole`-lal adja át a Ctrl-C-t, hogy a fastresume mentés
 lefusson.
@@ -199,7 +199,8 @@ felhasználónak WSL kell.
 | Windows service (NSSM) + `Ctrl-C` átadás | 1–2 nap | **kész** (2026-11-23) |
 | NSIS telepítő (varázsló, start-menü, service, uninstall) | 1 nap | **kész** (2026-11-23) |
 | `ferrent.ico` (16–256 px) + beágyazás az exékbe (`crates/winres`) | fél nap | **kész** (2026-11-23) |
-| `%APPDATA%`/`%ProgramData%` alapértékek + token ACL | 1 nap | hátra |
+| `%ProgramData%` alapértékek + token ACL (`crates/daemon/src/platform.rs`) | fél nap | **kész** (2026-11-23) |
+| A GUI `%APPDATA%\ferrent\gui.toml` útvonala | fél nap | hátra |
 | Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
 
