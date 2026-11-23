@@ -9,7 +9,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rustix::process::{Pid, Signal, kill_process_group};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
@@ -200,14 +199,37 @@ pub async fn run_hook(spec: &HookSpec, event: &HookEvent, label: &str) -> HookRu
         Err(_) => {
             run.timed_out = true;
             if let Some(pid) = pid {
-                if let Some(pid) = Pid::from_raw(i32::try_from(pid).unwrap_or(i32::MAX)) {
-                    let _ = kill_process_group(pid, Signal::KILL);
-                }
+                kill_tree(pid);
             }
         }
     }
     run.duration_ms = elapsed_millis(started);
     run
+}
+
+/// Kills a timed-out hook together with anything it started.
+///
+/// Unix gives the hook its own process group (`process_group(0)`), so one
+/// group signal reaches the whole tree. Windows has no equivalent on a
+/// console child, so `taskkill /T` walks the tree by parent pid instead.
+fn kill_tree(pid: u32) {
+    #[cfg(unix)]
+    {
+        use rustix::process::{Pid, Signal, kill_process_group};
+        if let Some(pid) = Pid::from_raw(i32::try_from(pid).unwrap_or(i32::MAX)) {
+            let _ = kill_process_group(pid, Signal::KILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = pid;
 }
 
 fn elapsed_millis(started: Instant) -> u64 {

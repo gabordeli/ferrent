@@ -4,6 +4,7 @@
 //! injected `statvfs`/`stat`), so bind mounts and pseudo filesystems are
 //! testable without root.
 
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
@@ -89,15 +90,153 @@ pub fn real_mounts(mounts: &[Mount]) -> Vec<&Mount> {
 /// Reads the live mount table; an unreadable table yields an empty list.
 #[must_use]
 pub fn mount_table() -> Vec<Mount> {
-    std::fs::read_to_string("/proc/self/mounts")
-        .map(|text| parse_mounts(&text))
-        .unwrap_or_default()
+    #[cfg(unix)]
+    {
+        std::fs::read_to_string("/proc/self/mounts")
+            .map(|text| parse_mounts(&text))
+            .unwrap_or_default()
+    }
+    #[cfg(windows)]
+    {
+        windows_drives()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Vec::new()
+    }
+}
+
+/// Drives with a mounted volume as a mount table, one entry per drive letter.
+///
+/// `/proc/self/mounts` has no Windows equivalent; each drive is its own
+/// filesystem, so the drive root is the mount point and the volume serial is
+/// the filesystem identity. A drive whose volume information cannot be read
+/// (an empty card reader, a disconnected network share) is left out.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_drives() -> Vec<Mount> {
+    use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+
+    let mask = unsafe { GetLogicalDrives() };
+    let mut mounts = Vec::new();
+    for index in 0..26u32 {
+        if mask & (1 << index) == 0 {
+            continue;
+        }
+        let letter = char::from(b'A' + u8::try_from(index).unwrap_or(0));
+        let root = format!("{letter}:\\");
+        let Some(fstype) = volume_filesystem(&root) else {
+            continue;
+        };
+        mounts.push(Mount {
+            device: format!("{letter}:"),
+            mountpoint: PathBuf::from(&root),
+            fstype,
+        });
+    }
+    mounts
+}
+
+#[allow(unsafe_code)]
+#[cfg(windows)]
+fn wide_str(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Filesystem name of a drive root, as Windows reports it (e.g. `NTFS`).
+#[allow(unsafe_code)]
+#[cfg(windows)]
+fn volume_filesystem(root: &str) -> Option<String> {
+    use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    let root = wide_str(root);
+    let mut name = [0u16; 32];
+    let ok = unsafe {
+        GetVolumeInformationW(
+            root.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            name.as_mut_ptr(),
+            u32::try_from(name.len()).unwrap_or(0),
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let end = name
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(name.len());
+    Some(String::from_utf16_lossy(&name[..end]).to_lowercase())
 }
 
 /// Filesystem id of a path (`st_dev`).
 #[must_use]
 pub fn device_id(path: &Path) -> Option<u64> {
-    std::fs::metadata(path).ok().map(|metadata| metadata.dev())
+    #[cfg(unix)]
+    {
+        std::fs::metadata(path).ok().map(|metadata| metadata.dev())
+    }
+    #[cfg(windows)]
+    {
+        // Match the Unix semantics: the identity comes from the path that
+        // exists; `device_id_nearest` walks up for the not-yet-created case.
+        if !path.exists() {
+            return None;
+        }
+        volume_serial(&drive_root(path)?)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Drive root of a path (`C:\`), absolute paths only.
+#[allow(unsafe_code)]
+#[cfg(windows)]
+fn drive_root(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    match absolute.components().next()? {
+        Component::Prefix(prefix) => {
+            let mut root = PathBuf::from(prefix.as_os_str());
+            root.push("\\");
+            Some(root)
+        }
+        Component::RootDir => Some(PathBuf::from("\\")),
+        _ => None,
+    }
+}
+
+/// Volume serial number of a drive root, the Windows `st_dev` equivalent.
+#[allow(unsafe_code)]
+#[cfg(windows)]
+fn volume_serial(root: &Path) -> Option<u64> {
+    use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    let root = wide_str(&root.to_string_lossy());
+    let mut serial: u32 = 0;
+    let ok = unsafe {
+        GetVolumeInformationW(
+            root.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            &raw mut serial,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (ok != 0).then_some(u64::from(serial))
 }
 
 /// Filesystem id of a path, walking up to an existing ancestor.
@@ -117,17 +256,65 @@ pub fn device_id_nearest(path: &Path) -> Option<u64> {
 
 /// Free-space numbers of the filesystem holding a path.
 #[must_use]
+#[allow(unsafe_code)] // the Win32 disk-space call is FFI
 pub fn disk_stat(path: &Path) -> Option<DiskStat> {
-    let stat = rustix::fs::statvfs(path).ok()?;
-    let block = stat.f_frsize;
-    Some(DiskStat {
-        total: stat.f_blocks.saturating_mul(block),
-        free: stat.f_bavail.saturating_mul(block),
-        used: stat
-            .f_blocks
-            .saturating_sub(stat.f_bfree)
-            .saturating_mul(block),
-    })
+    #[cfg(unix)]
+    {
+        let stat = rustix::fs::statvfs(path).ok()?;
+        let block = stat.f_frsize;
+        Some(DiskStat {
+            total: stat.f_blocks.saturating_mul(block),
+            free: stat.f_bavail.saturating_mul(block),
+            used: stat
+                .f_blocks
+                .saturating_sub(stat.f_bfree)
+                .saturating_mul(block),
+        })
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+        let wide = wide_str(&path.to_string_lossy());
+        let mut free = 0u64;
+        let mut total = 0u64;
+        let mut total_free = 0u64;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &raw mut free,
+                &raw mut total,
+                &raw mut total_free,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        Some(DiskStat {
+            // `free` is what *this* user may still write; `total_free` also
+            // counts the reserved blocks, so `used` keeps them in.
+            total,
+            free,
+            used: total.saturating_sub(total_free),
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Free-space numbers of a path, walking up to an existing ancestor.
+#[must_use]
+pub fn disk_stat_nearest(path: &Path) -> Option<DiskStat> {
+    let mut candidate = path;
+    loop {
+        if let Some(stat) = disk_stat(candidate) {
+            return Some(stat);
+        }
+        candidate = candidate.parent()?;
+    }
 }
 
 /// The longest mount point containing `path`.
@@ -305,6 +492,16 @@ tmpfs /run tmpfs rw 0 0
         );
         assert!(disk_stat(Path::new("/definitely/not/here")).is_none());
         assert!(device_id(Path::new("/definitely/not/here")).is_none());
+    }
+
+    #[test]
+    fn nearest_disk_stat_walks_up_to_an_existing_ancestor() {
+        let missing = std::env::temp_dir()
+            .join("ferrent-not-created-yet")
+            .join("sub");
+        let stat = disk_stat_nearest(&missing).expect("ancestor stat");
+        assert!(stat.total > 0, "{stat:?}");
+        stat_vs_statvfs(&stat);
     }
 
     fn stat_vs_statvfs(stat: &DiskStat) {

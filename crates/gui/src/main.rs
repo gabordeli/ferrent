@@ -2284,7 +2284,7 @@ impl App {
             return Task::none();
         }
         if std::path::Path::new(&path).is_dir() {
-            match std::process::Command::new("xdg-open").arg(&path).spawn() {
+            match open_in_file_manager(&path) {
                 Ok(_) => self.set_notice(i18n::t_fmt("Opening {}", &[&path])),
                 Err(error) => {
                     self.set_notice(i18n::t_fmt(
@@ -8449,6 +8449,40 @@ fn read_rss_kb() -> u64 {
     0
 }
 
+/// Opens a directory in the desktop's file manager.
+fn open_in_file_manager(path: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(path).spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
+    }
+    Ok(())
+}
+
+/// Window class / taskbar identity, in the shape each platform accepts.
+fn window_platform_specific() -> iced::window::settings::PlatformSpecific {
+    #[cfg(target_os = "linux")]
+    {
+        // The WM class (the desktop entry's StartupWMClass) is what lets
+        // GNOME group the window with its launcher and show its icon.
+        iced::window::settings::PlatformSpecific {
+            application_id: "ferrent".to_owned(),
+            ..iced::window::settings::PlatformSpecific::default()
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        iced::window::settings::PlatformSpecific::default()
+    }
+}
+
 fn main() -> iced::Result {
     let _telemetry = ferrent_telemetry::init("ferrent-gui");
     let app = iced::application("Ferrent", App::update, App::view)
@@ -8462,12 +8496,7 @@ fn main() -> iced::Result {
         .window(iced::window::Settings {
             size: Size::new(1440.0, 900.0),
             icon: iced::window::icon::from_file_data(theme::ICON_BYTES, None).ok(),
-            // The WM class (the desktop entry's StartupWMClass) is what lets
-            // GNOME group the window with its launcher and show its icon.
-            platform_specific: iced::window::settings::PlatformSpecific {
-                application_id: "ferrent".to_owned(),
-                ..iced::window::settings::PlatformSpecific::default()
-            },
+            platform_specific: window_platform_specific(),
             ..iced::window::Settings::default()
         });
 

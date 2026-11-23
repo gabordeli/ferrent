@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use storage::{
-    DiskStat, Mount, canonical_mount, device_id, device_id_nearest, disk_stat, mount_for_device,
-    mount_for_device_with, mount_table, parse_mounts, real_mounts,
+    DiskStat, Mount, canonical_mount, device_id, device_id_nearest, disk_stat, disk_stat_nearest,
+    mount_for_device, mount_for_device_with, mount_table, parse_mounts, real_mounts,
 };
 pub use zones::{
     Zone, ZoneError, library_zone, resolve_staging, resolve_staging_with, validate_zones,

@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::net::IpAddr;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -41,7 +42,10 @@ pub async fn load_or_generate(settings: &TlsConfig) -> Result<WebTls, String> {
             .map_err(|error| format!("cannot write {}: {error}", settings.cert.display()))?;
         fs::write(&settings.key, key.serialize_pem())
             .map_err(|error| format!("cannot write {}: {error}", settings.key.display()))?;
-        let _ = fs::set_permissions(&settings.key, fs::Permissions::from_mode(0o600));
+        #[cfg(unix)]
+        {
+            let _ = fs::set_permissions(&settings.key, fs::Permissions::from_mode(0o600));
+        }
     }
 
     let cert_pem = fs::read_to_string(&settings.cert)

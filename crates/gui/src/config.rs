@@ -4,7 +4,9 @@
 //! written with mode 0600 because it contains API tokens.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

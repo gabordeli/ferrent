@@ -241,9 +241,8 @@ impl AppState {
         let torrents = self.mirror.query(&TorrentQuery::default());
         let mut status = AggregateStatus {
             torrent_count: torrents.len() as u32,
-            free_space: rustix::fs::statvfs(&self.data_dir)
-                .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize))
-                .unwrap_or(0),
+            free_space: crate::diskguard::disk_stat_nearest(&self.data_dir)
+                .map_or(0, |stat| stat.free),
             ..AggregateStatus::default()
         };
         for torrent in &torrents {

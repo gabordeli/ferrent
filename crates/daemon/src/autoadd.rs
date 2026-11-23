@@ -648,16 +648,7 @@ pub enum FileOutcome {
 /// ancestor so a not-yet-created save directory still reports its mount.
 #[must_use]
 pub fn free_bytes(path: &Path) -> u64 {
-    let mut candidate = path;
-    loop {
-        if let Ok(stat) = rustix::fs::statvfs(candidate) {
-            return stat.f_bavail.saturating_mul(stat.f_frsize);
-        }
-        match candidate.parent() {
-            Some(parent) => candidate = parent,
-            None => return 0,
-        }
-    }
+    crate::diskguard::disk_stat_nearest(path).map_or(0, |stat| stat.free)
 }
 
 /// Resolves the label of a watch directory against the known definitions.

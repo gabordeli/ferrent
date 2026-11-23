@@ -73,7 +73,6 @@ rcgen = "0.14"
 redb = "2"
 regex = "1"
 rustls-pemfile = "2"
-rustix = { version = "1", features = ["fs", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = "3"
@@ -85,3 +84,14 @@ toml = "0.8"
 tonic = { version = "0.14", features = ["tls-ring"] }
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
+
+# Free space and filesystem identity: statvfs/st_dev on Unix, the Win32
+# volume and disk-space calls on Windows.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }

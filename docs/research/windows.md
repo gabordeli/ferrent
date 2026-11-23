@@ -36,8 +36,8 @@ jön:
 | `storage.rs:121`, `rpc/mod.rs:244`, `autoadd.rs:653` | `rustix::fs::statvfs` | `GetDiskFreeSpaceExW` |
 | `crates/daemon/src/hooks.rs:12,161` | `rustix::process::kill_process_group` + `process_group(0)` | Job object vagy `taskkill /T` |
 | `crates/daemon/Cargo.toml:76` | `rustix` függőség (Unix-only crate) | `[target.'cfg(unix)'.dependencies]` |
-| `crates/gui/src/main.rs:2287` | `Command::new("xdg-open")` | `ShellExecuteW` / `start` |
-| `crates/gui/Cargo.toml:26` | `rfd` `default-features = false, features = ["gtk3"]` | Windows-on default features (IFileDialog) |
+| `crates/gui/src/main.rs` (`xdg-open`) | `Command::new("xdg-open")` | `explorer` (Windows) / `open` (macOS) — **kész** |
+| `crates/gui/Cargo.toml:26` | `rfd` `gtk3` feature | **nem kell módosítani**: a feature Linux-only, a Win32 backend (IFileDialog) target-dependencyként mindig fordul |
 | `main.rs:49`, `config/schema.rs:22` | `/etc/ferrent/config.toml`, `/etc/ferrent/token` | `%ProgramData%\ferrent\` |
 | `crates/gui/src/config.rs:135` | `~/.config/ferrent/gui.toml` (`XDG_CONFIG_HOME`) | `%APPDATA%\ferrent\` |
 
@@ -71,22 +71,65 @@ jön:
 | Munka (első verzió) | **2–3 nap** | 1–2 nap + Windows a teszthez | **~2 hét** | 0 nap |
 | Kockázat | minimális; a felhasználónak Linux daemon kell | a „cross-build, nem futtattam" csapda | libtorrent MSVC + DiskGuard drive-szemantika | nem valódi Windows app |
 
+## A forrás-port (2026-11-23)
+
+A két tengely közül az **all-in-one** mellett döntött a user: Windows-on a
+daemon, a CLI és a GUI is kell, egy csomagban. A forrás szintű port elkészült;
+a mérés alapja egy helyi cross-check hurok, ami Windows **nélkül** is fog:
+
+```bash
+sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64     # egyszer
+rustup target add x86_64-pc-windows-gnu
+cargo check --workspace --exclude ferrent-daemon --target x86_64-pc-windows-gnu
+cargo check -p ferrent-daemon --no-default-features --target x86_64-pc-windows-gnu
+```
+
+A `--no-default-features` kell, mert a daemon default feature-je a
+`libtorrent` (annak a Windows buildje külön munka); a mock engine viszont a
+daemon **saját** kódját teljesen típusellenőrzi.
+
+Ezen a hurkon a kiindulás **9 hiba** volt, a végállapot **0**:
+
+| Crate | Kiinduló hiba | Javítás |
+|---|---|---|
+| `ferrent-cli` | 0 | már hordozható volt |
+| `ferrent-web` | 2 (`PermissionsExt`, `from_mode`) | `cfg(unix)` kapu a kulcs `0600`-jára |
+| `ferrent-daemon` | 6 (`st_dev`, 3× `statvfs`, `kill_process_group`, `rustix`) | `display` alatti platform-réteg |
+| `ferrent-gui` | 1 (`PlatformSpecific::application_id`) | `window_platform_specific()` per-platform |
+
+A daemon platform-rétege (`crates/daemon/src/diskguard/storage.rs`):
+
+- `disk_stat` / `disk_stat_nearest`: Unix `statvfs`, Windows
+  `GetDiskFreeSpaceExW` (`free` = a hívó által írható, `used` = `total − total_free`);
+- `device_id`: Unix `st_dev`, Windows a drive **volume serial**ja
+  (`GetVolumeInformationW`), a nem létező útvonalon `None` — ugyanaz a
+  szemantika, mint Unixon, így a `device_id_nearest` ott is felfelé lép;
+- `mount_table`: Windows-on `GetLogicalDrives` + volumeinfo → egy bejegyzés
+  drive-onként (`C:\`, fstype a valódi fájlrendszer-név), így a DiskGuard
+  zónái drive-okra is működnek, nem üres táblára;
+- `hooks::kill_tree`: Unix process-group `SIGKILL`, Windows `taskkill /T /F`.
+
+A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
+`windows-sys` 0.59 (már a lockfile-ban volt, nincs új letöltés).
+
+**Ami még hátra van** (a forrás-port után): libtorrent Windows build
+(vcpkg vagy mingw), ZIP/MSI csomag + `ferrent.ico`, Windows service wrapper
+(`Ctrl-C` átadással a fastresume mentéshez), `%ProgramData%`/`%APPDATA%`
+útvonalak, és a 11 `#![cfg(unix)]` teszt Windows változatai.
+
 ## Javaslat
 
-**A v1.0.0-rc1 után az A (csak GUI, natív MSVC) az első lépés**, mert a munka
-90%-a kész: a GUI futásidejű függőségei hordozhatók, a betűtípusok és a
-nyelvi katalógus bundle-ölve vannak, a konfigmentésnek már van nem-Unix ága.
+**All-in-one (a user döntése): daemon + CLI + GUI, egy Windows csomag.**
 
-1. **`rfd` target-kapu** (`[target.'cfg(target_os = "linux")'.dependencies]` a
-   gtk3-mal, egyébként default features) — enélkül Windows-on nincs fájlválasztó.
-2. **`xdg-open` → `ShellExecuteW`** („Reveal in folder" / torrent megnyitása).
+1. ~~`rfd` target-kapu~~ — **nem kell**, a `gtk3` feature Linux-only.
+2. ~~`xdg-open`~~ — `explorer`/`open` ágra váltva.
 3. **Útvonalak**: `%ProgramData%\ferrent\{config.toml,token}`,
    `%APPDATA%\ferrent\gui.toml`; a token ACL-je a `0640 root:ferrent`
    megfelelője (`icacls`).
-4. **Csomag**: ZIP + `ferrent.ico`; CI-ben `windows-latest` job (nincs
-   libtorrent → nincs vcpkg, ~5 perc meleg cache-sel).
+4. **Csomag**: ZIP (majd MSI/winget) + `ferrent.ico`; CI-ben `windows-latest`
+   job, cache-elt vcpkg-val a libtorrenthez.
 5. **A browseres PWA ma is működik Windows-ról** (0 munka) — ez a baseline,
-   amit a natív GUI-nak felül kell múlnia.
+   amit a natív csomagnak felül kell múlnia.
 
 **A C (daemon is) külön döntés**, és csak akkor éri meg, ha valaki Windows-ról
 akar seedelni: a DiskGuardnak drive-betűkkel kell zónáznia, a szabad helyet
@@ -103,36 +146,33 @@ renderelést — a `windows-latest` CI job (A) őszintébb.
 **A D (WSL) nem app**, csak fallback: a Linux GUI WSLg-vel elindul, de a
 felhasználónak WSL kell.
 
-## Döntési pontok (user)
+## Döntési pontok
 
-- **Kell-e Windows-on daemon, vagy csak a GUI?** (az issue nyitott pontja) —
-  ha csak a GUI, a munka ~2–3 nap; ha a daemon is, ~2 hét.
-- **Van-e Windows gép/VM a teszteléshez?** Cross-build önmagában nem
-  bizonyíték a futásra; a GUI megnyílása + csatlakozás egy Linux daemonhoz
+- ~~Kell-e Windows-on daemon, vagy csak a GUI?~~ **Döntés (2026-11-23):
+  all-in-one** — daemon + CLI + GUI egy csomagban, ~2 hét.
+- **Van-e Windows gép/VM a teszteléshez?** Cross-check (mingw) a forrásra
+  elég, de a futásra nem: a GUI megnyílása + csatlakozás egy daemonhoz
   (TLS pinning, token) a valódi kapu.
-- **ZIP elég, vagy MSI/winget?** Utóbbi csak akkor, ha a daemon is megy
-  Windows-on.
+- **ZIP elég, vagy MSI/winget?** All-in-one-nál a ZIP csak az első lépés; a
+  service telepítés miatt MSI (WiX) vagy winget a cél.
 
 ## Becslés a v1.0.0-rc1 után
 
-| Lépés | Munka |
-|---|---|
-| `rfd` kapu + `ShellExecuteW` + útvonalak | 1 nap |
-| ZIP csomag + `ferrent.ico` + `windows-latest` CI job | 1 nap |
-| Füstteszt Windows-on (indulás, csatlakozás, fájlválasztó) | 0,5 nap |
-| **A: csak GUI összesen** | **2–3 nap** |
-| libtorrent MSVC (vcpkg, statikus) zöldre hozása | 2–3 nap |
-| 4 Unix-zárt forráshely + `rustix` kiváltása | 2 nap |
-| Windows service (WinSW/NSSM) + token ACL + útvonalak | 1–2 nap |
-| DiskGuard drive-betű + szabad hely | 1 nap |
-| Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap |
-| **C: daemon is összesen** | **~2 hét** |
+| Lépés | Munka | Állapot |
+|---|---|---|
+| Forrás-port (9 hiba → 0) + cross-check hurok | 1 nap | **kész** (2026-11-23) |
+| `%ProgramData%`/`%APPDATA%` útvonalak + token ACL | 1 nap | hátra |
+| libtorrent MSVC (vcpkg, statikus) zöldre hozása | 2–3 nap | hátra |
+| Windows service (WinSW/NSSM) + `Ctrl-C` átadás | 1–2 nap | hátra |
+| ZIP/MSI csomag + `ferrent.ico` + `windows-latest` CI | 1–2 nap | hátra |
+| Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
+| **Összesen (all-in-one)** | **~2 hét** | |
 
 ## Nyitott pont
 
 A **build út bizonyítása** (az acceptance 2. pontja) még hiányzik: ebben a
-körben a `cargo check` a `ring`/`lib.exe` blokkolóig jutott, `.exe` nem
-készült. A blokkoló nevesítve van (MSVC toolchain, illetve cross-compile-nál
-`clang-cl` + `llvm-lib`); a következő lépés egy Windows hoston (vagy
-`cargo-xwin`-nal) futó `cargo build -p ferrent-gui`, ami eldönti, hogy az A
-tényleg 2–3 nap-e.
+körben a forrás típusellenőrzése zöld (`x86_64-pc-windows-gnu`), de `.exe`
+nem készült. Két ismert blokkoló van: a `ring` MSVC-t kér a C-jéhez, a
+libtorrentnek pedig nincs Windows-on kész `.lib`-je (vcpkg build kell).
+A következő lépés egy Windows hoston (vagy `cargo-xwin`-nal) futó
+`cargo build`, ami eldönti, hogy a becslés tartható-e.
