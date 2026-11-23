@@ -100,6 +100,24 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/torrents/bulk", post(api::bulk))
         .route("/api/torrents/{id}", get(api::detail).delete(api::remove))
         .route("/api/torrents/{id}/files", get(api::files))
+        .route("/api/torrents/{id}/peers", get(api::peers))
+        .route(
+            "/api/torrents/{id}/trackers",
+            get(api::trackers)
+                .post(api::add_tracker)
+                .delete(api::remove_tracker),
+        )
+        .route(
+            "/api/torrents/{id}/webseeds",
+            get(api::web_seeds).put(api::set_web_seeds),
+        )
+        .route("/api/torrents/{id}/sequential", post(api::set_sequential))
+        .route(
+            "/api/torrents/{id}/super-seeding",
+            post(api::set_super_seeding),
+        )
+        .route("/api/torrents/{id}/rename-file", post(api::rename_file))
+        .route("/api/config", get(api::config).put(api::set_config))
         .route("/api/torrents/{id}/pause", post(api::pause))
         .route("/api/torrents/{id}/resume", post(api::resume))
         .route("/api/torrents/{id}/label", put(api::set_label))

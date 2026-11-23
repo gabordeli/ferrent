@@ -14,10 +14,12 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrent_protocol::client::AuthClient;
 use ferrent_protocol::v1::{
-    AddTorrentRequest, CreateLabelRequest, DeleteLabelRequest, GetStatusRequest,
-    GetTorrentFilesRequest, GetTorrentRequest, Label, ListLabelsRequest, ListTorrentsRequest,
-    PauseTorrentRequest, RemoveTorrentRequest, ResumeTorrentRequest, SetTorrentLabelRequest,
-    SortField, Torrent, TorrentState,
+    AddTorrentRequest, AddTrackerRequest, CreateLabelRequest, DeleteLabelRequest, GetConfigRequest,
+    GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentRequest,
+    GetTorrentTrackersRequest, GetWebSeedsRequest, Label, ListLabelsRequest, ListTorrentsRequest,
+    PauseTorrentRequest, RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest,
+    ResumeTorrentRequest, SetConfigRequest, SetSequentialRequest, SetSuperSeedingRequest,
+    SetTorrentLabelRequest, SetWebSeedsRequest, SortField, Torrent, TorrentState,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -414,6 +416,298 @@ pub async fn set_label(
         .map_err(grpc)?
         .into_inner();
     Ok(Json(json!({ "id": id, "label": response.label })).into_response())
+}
+
+/// `GET /api/torrents/{id}/peers`
+pub async fn peers(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+) -> Result<Response, ApiError> {
+    let mut client = client(&state)?;
+    let response = client
+        .get_torrent_peers(GetTorrentPeersRequest { id })
+        .await
+        .map_err(grpc)?
+        .into_inner();
+    let peers: Vec<Value> = response
+        .peers
+        .iter()
+        .map(|peer| {
+            json!({
+                "endpoint": peer.endpoint,
+                "client": peer.client,
+                "progress": peer.progress,
+                "download_rate": peer.download_rate,
+                "upload_rate": peer.upload_rate,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "peers": peers })).into_response())
+}
+
+fn tracker_values(trackers: &[ferrent_protocol::v1::TorrentTracker]) -> Vec<Value> {
+    trackers
+        .iter()
+        .map(|tracker| {
+            json!({
+                "url": tracker.url,
+                "status": tracker.status,
+                "seeds": tracker.seeds,
+                "leechers": tracker.leechers,
+                "message": tracker.message,
+                "next_announce": tracker.next_announce,
+                "fails": tracker.fails,
+            })
+        })
+        .collect()
+}
+
+async fn tracker_list(client: &mut AuthClient, id: u64) -> Result<Response, ApiError> {
+    let trackers = client
+        .get_torrent_trackers(GetTorrentTrackersRequest { id })
+        .await
+        .map_err(grpc)?
+        .into_inner()
+        .trackers;
+    Ok(Json(json!({ "id": id, "trackers": tracker_values(&trackers) })).into_response())
+}
+
+/// `GET /api/torrents/{id}/trackers`
+pub async fn trackers(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+) -> Result<Response, ApiError> {
+    let mut client = client(&state)?;
+    tracker_list(&mut client, id).await
+}
+
+/// Body of a tracker addition.
+#[derive(Debug, Deserialize)]
+pub struct TrackerBody {
+    pub url: String,
+}
+
+/// `POST /api/torrents/{id}/trackers`
+pub async fn add_tracker(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Json(body): Json<TrackerBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    client
+        .add_tracker(AddTrackerRequest { id, url: body.url })
+        .await
+        .map_err(grpc)?;
+    tracker_list(&mut client, id).await
+}
+
+/// Query of a tracker removal.
+#[derive(Debug, Deserialize)]
+pub struct TrackerQuery {
+    pub url: String,
+}
+
+/// `DELETE /api/torrents/{id}/trackers?url=...`
+pub async fn remove_tracker(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Query(query): Query<TrackerQuery>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    client
+        .remove_tracker(RemoveTrackerRequest { id, url: query.url })
+        .await
+        .map_err(grpc)?;
+    tracker_list(&mut client, id).await
+}
+
+/// `GET /api/torrents/{id}/webseeds`
+pub async fn web_seeds(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+) -> Result<Response, ApiError> {
+    let mut client = client(&state)?;
+    let urls = client
+        .get_web_seeds(GetWebSeedsRequest { id })
+        .await
+        .map_err(grpc)?
+        .into_inner()
+        .urls;
+    Ok(Json(json!({ "id": id, "web_seeds": urls })).into_response())
+}
+
+/// Body of a web seed replacement.
+#[derive(Debug, Deserialize)]
+pub struct WebSeedsBody {
+    pub urls: Vec<String>,
+}
+
+/// `PUT /api/torrents/{id}/webseeds`
+pub async fn set_web_seeds(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Json(body): Json<WebSeedsBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    let urls = client
+        .set_web_seeds(SetWebSeedsRequest {
+            id,
+            urls: body.urls,
+        })
+        .await
+        .map_err(grpc)?
+        .into_inner()
+        .urls;
+    Ok(Json(json!({ "id": id, "web_seeds": urls })).into_response())
+}
+
+/// Body of a sequential/super-seeding toggle.
+#[derive(Debug, Deserialize)]
+pub struct ToggleBody {
+    #[serde(default = "yes")]
+    pub on: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// `POST /api/torrents/{id}/sequential`
+pub async fn set_sequential(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Json(body): Json<ToggleBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    client
+        .set_sequential(SetSequentialRequest { id, on: body.on })
+        .await
+        .map_err(grpc)?;
+    Ok(Json(json!({ "id": id, "sequential": body.on })).into_response())
+}
+
+/// `POST /api/torrents/{id}/super-seeding`
+pub async fn set_super_seeding(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Json(body): Json<ToggleBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    client
+        .set_super_seeding(SetSuperSeedingRequest { id, on: body.on })
+        .await
+        .map_err(grpc)?;
+    Ok(Json(json!({ "id": id, "super_seeding": body.on })).into_response())
+}
+
+/// Body of a file rename.
+#[derive(Debug, Deserialize)]
+pub struct RenameBody {
+    pub index: u32,
+    pub name: String,
+}
+
+/// `POST /api/torrents/{id}/rename-file`
+pub async fn rename_file(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(id): Path<u64>,
+    Json(body): Json<RenameBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    let files = client
+        .rename_torrent_file(RenameTorrentFileRequest {
+            id,
+            index: body.index,
+            name: body.name,
+        })
+        .await
+        .map_err(grpc)?
+        .into_inner()
+        .files;
+    let files: Vec<Value> = files
+        .iter()
+        .map(|file| {
+            json!({
+                "path": file.path,
+                "size": file.size,
+                "progress": file.progress,
+                "priority": file.priority,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "id": id, "files": files })).into_response())
+}
+
+/// `GET /api/config`
+pub async fn config(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+) -> Result<Response, ApiError> {
+    let mut client = client(&state)?;
+    let response = client
+        .get_config(GetConfigRequest {})
+        .await
+        .map_err(grpc)?
+        .into_inner();
+    Ok(Json(json!({
+        "revision": response.revision,
+        "env_locked": response.env_locked,
+        "toml": response.toml,
+    }))
+    .into_response())
+}
+
+/// Body of a configuration replacement.
+#[derive(Debug, Deserialize)]
+pub struct ConfigBody {
+    pub toml: String,
+    /// Revision the editor started from; fetched first when omitted.
+    pub revision: Option<u64>,
+}
+
+/// `PUT /api/config`
+pub async fn set_config(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Json(body): Json<ConfigBody>,
+) -> Result<Response, ApiError> {
+    writable(&state)?;
+    let mut client = client(&state)?;
+    let revision = match body.revision {
+        Some(revision) => revision,
+        None => {
+            client
+                .get_config(GetConfigRequest {})
+                .await
+                .map_err(grpc)?
+                .into_inner()
+                .revision
+        }
+    };
+    let response = client
+        .set_config(SetConfigRequest {
+            toml: body.toml,
+            revision,
+        })
+        .await
+        .map_err(grpc)?
+        .into_inner();
+    Ok(Json(json!({ "revision": response.revision })).into_response())
 }
 
 /// Body of a bulk action.
