@@ -70,6 +70,7 @@ async fn health_reports_a_missing_daemon() {
     let text = body(response).await;
     assert!(text.contains("degraded"), "{text}");
     assert!(text.contains("read_only"), "{text}");
+    assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
 }
 
 #[tokio::test]

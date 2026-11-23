@@ -2,7 +2,7 @@
 
 The `.deb` files are published from the `gh-pages` branch as a signed APT
 repository (`dists/stable` + `pool/main/f/<package>`). The client side is
-described in `docs/apt-install.md`.
+described in `docs/install-debian.md`.
 
 ## Signing key
 
@@ -101,7 +101,7 @@ never publishes an unsigned repository silently.
 
 1. generate a new key in the same keyring, export **both** public keys over
    `packaging/apt/keyring/ferrent.gpg` (old + new, so old signatures still
-   verify), update the fingerprint in this file and in `docs/apt-install.md`;
+   verify), update the fingerprint in this file and in `docs/install-debian.md`;
 2. update the three secrets (`GPG_PRIVATE_KEY`, `GPG_KEY_ID`,
    `GPG_PASSPHRASE`), run the workflow on a tag;
 3. clients must re-download the keyring (`/ferrent.gpg`) — `Signed-By` reads

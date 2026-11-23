@@ -201,7 +201,7 @@ néhány perc alatt követi a pushot).
 **Amíg a repó privát**, a GitHub Pages és így az APT repó URL-je
 (`https://gabordeli.github.io/ferrent/`) kívülről nem érhető el; a
 `gh-pages` ág és a tartalma akkor válik használhatóvá, amikor a repó nyilvános
-lesz (`docs/apt-install.md`).
+lesz (`docs/install-debian.md`).
 
 ## APT repó (GitHub Pages)
 

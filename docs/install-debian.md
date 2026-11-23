@@ -1,4 +1,4 @@
-# Telepítés APT repóból
+# Telepítés Debian/Ubuntu alá
 
 A `ferrent` csomag (daemon + CLI) és a `ferrent-gui` (desktop kliens) egy
 aláírt APT repóból telepíthető Debian 12/13-on és Ubuntu 24.04-on (a GUI
@@ -8,6 +8,14 @@ amd64). A repó a `gh-pages` ágon él, a Pages URL-je
 > A GitHub repó a `v0.1.0` kiadásig **privát**, ezért a Pages URL addig
 > kívülről nem érhető el. A lenti lépések a repó publikálása után működnek
 > változatlanul.
+
+Az APT repót nem használó gépeken a `.deb` a GitHub Release-ről is
+letölthető és `sudo apt install ./ferrent_*.deb` paranccsal telepíthető
+(ugyanaz a csomag, a repó csak a frissítéseket adja). Forrásból:
+[docs/development.md](development.md); más platformok:
+[docs/install-fedora.md](install-fedora.md),
+[docs/install-arch.md](install-arch.md),
+[docs/install-docker.md](install-docker.md).
 
 ## 1. Kulcs
 

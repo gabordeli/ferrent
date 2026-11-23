@@ -197,8 +197,8 @@ const SORT_NAMES: Record<string, string> = {
 export function getHealth(): Promise<Health> {
   return request<Health>("/health").then((health) => ({
     ok: health.ok ?? true,
-    version: "0.1.0",
-    port: null,
+    version: health.version || "unknown",
+    port: health.port ?? null,
   }));
 }
 

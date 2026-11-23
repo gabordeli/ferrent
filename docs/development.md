@@ -38,6 +38,38 @@ A `libtorrent` backend kapuja:
 ./ci/check-libtorrent.sh
 ```
 
+## GUI build
+
+A `ferrent-gui` az `iced` 0.13-at használja; a rendszerkönyvtárak:
+
+```bash
+# Debian 12/13, Ubuntu 24.04
+sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+  libxcursor-dev libxrandr-dev libxi-dev libglib2.0-dev libgtk-3-dev
+
+# Fedora
+sudo dnf install -y libxkbcommon-devel wayland-devel libX11-devel \
+  libXcursor-devel libXrandr-devel libXi-devel glib2-devel gtk3-devel
+```
+
+```bash
+cargo build -p ferrent-gui
+```
+
+Fej nélküli (Xvfb) ellenőrzéshez `ICED_BACKEND=tiny-skia`, és a Wayland
+kikapcsolása kell: `env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 …` (a
+részletek: `docs/measurements/m11-gui.md`).
+
+## Demo adatok
+
+```bash
+cargo build --release -p ferrent-gui --example demo_server
+./target/release/examples/demo_server --torrents 4000 --port 50129 \
+  --data-dir /tmp/ferrent-demo
+```
+
+A GUI profil kitöltése és a CLI-vel való kipróbálás: `docs/demo.md`.
+
 ## Store (M1-T1)
 
 ```bash

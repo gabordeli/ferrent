@@ -166,7 +166,7 @@ worktree (vagy üres orphan branch) → repó építés + aláírás a
 `GPG_PRIVATE_KEY`/`GPG_KEY_ID` secretből → commit+push. A régi verziók a
 `gh-pages` history-ban maradnak. Hiányzó secret → explicit `::error::` és
 bukó job. A Pages beállítás (branch: `gh-pages`) és a kliens útmutató
-(`docs/apt-install.md`) dokumentálva.
+(`docs/install-debian.md`) dokumentálva.
 
 
 

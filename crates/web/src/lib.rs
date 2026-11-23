@@ -133,6 +133,9 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
     let up = state.daemon_up.load(Ordering::Relaxed);
     let body = Json(json!({
         "status": if up { "ok" } else { "degraded" },
+        "ok": up,
+        "version": env!("CARGO_PKG_VERSION"),
+        "port": null,
         "daemon": up,
         "read_only": state.config.read_only,
     }));
