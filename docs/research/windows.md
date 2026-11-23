@@ -117,6 +117,21 @@ A `rustix` innentől `[target.'cfg(unix)'.dependencies]`, a Windows-oldal
 (`Ctrl-C` átadással a fastresume mentéshez), `%ProgramData%`/`%APPDATA%`
 útvonalak, és a 11 `#![cfg(unix)]` teszt Windows változatai.
 
+### CI: `windows-cross` a saját runneren
+
+A runner az egyetlen CI-host, a Windows VM kézi teszt-gép lesz, ezért a
+Windows binárisok **cross-buildel** készülnek (`stage: quality`, a
+`.gitlab-ci.yml`-ben):
+
+- a job a `rust:1.100-slim` konténerben telepíti a mingw-t és a
+  `x86_64-pc-windows-gnu` targetet (a hoston is ott van a kézi buildhez:
+  `infra` → `gitlab_runner_toolchain` role);
+- `cargo build --release -p ferrent-cli -p ferrent-gui` → `target/windows/`
+  artifact, `file`-lal ellenőrizve, hogy PE32+;
+- a daemon egyelőre `cargo check --no-default-features` (a `libtorrent`
+  Windows buildje még nincs a pipeline-ban) — így minden Unix-izmus
+  megbuktatja a pipeline-t, mielőtt a Windows gépre kerülne.
+
 ## Javaslat
 
 **All-in-one (a user döntése): daemon + CLI + GUI, egy Windows csomag.**

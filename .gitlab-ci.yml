@@ -74,6 +74,40 @@ buf-lint:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
+# Windows binaries are cross-built here: the runner is the only CI host and the
+# Windows VM is a manual test box, not a runner. mingw gives real .exe files
+# (the MSVC target would need cl.exe for ring's C), and the same target backs
+# `cargo check` in the port, so a Unix-ism fails the pipeline.
+# The daemon is only checked yet: its default feature is libtorrent, which has
+# no Windows build in the pipeline.
+windows-cross:
+  stage: quality
+  variables:
+    CARGO_TERM_COLOR: never
+  script:
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -w /src
+        -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)"
+        -e CARGO_TARGET_DIR=/tmp/ferrent-win
+        rust:1.100-slim sh -c '
+        apt-get update -qq &&
+        apt-get install -y -qq --no-install-recommends
+          gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 file &&
+        rustup target add x86_64-pc-windows-gnu &&
+        cargo build --release --target x86_64-pc-windows-gnu -p ferrent-cli -p ferrent-gui &&
+        cargo check --target x86_64-pc-windows-gnu -p ferrent-daemon --no-default-features &&
+        mkdir -p /src/target/windows &&
+        cp "$CARGO_TARGET_DIR/x86_64-pc-windows-gnu/release/ferrent-cli.exe"
+           "$CARGO_TARGET_DIR/x86_64-pc-windows-gnu/release/ferrent-gui.exe" /src/target/windows/ &&
+        file /src/target/windows/*.exe &&
+        chown -R "$HOST_UID:$HOST_GID" /src/target/windows'
+  artifacts:
+    paths:
+      - target/windows/*.exe
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
 # The web UI coverage feeds Sonar's new-coverage gate; the scanner does not run
 # npm itself, so the lcov report is produced here and passed as an artifact.
 webui-coverage:
