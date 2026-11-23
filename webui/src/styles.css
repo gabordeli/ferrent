@@ -1308,6 +1308,10 @@ dialog.detail {
   inset: auto;
   width: 100%;
   height: auto;
+  /* The UA dialog border paints with currentColor: a black frame in the
+     light theme and a white one in the dark. The panel is full-bleed. */
+  border: 0;
+  padding: 0;
   color: inherit;
 }
 
@@ -1320,7 +1324,7 @@ dialog.detail {
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(11, 13, 16, 0.94);
+  background: var(--header-bg);
   backdrop-filter: blur(12px);
 }
 
