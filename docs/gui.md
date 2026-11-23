@@ -106,3 +106,17 @@ XDG_CONFIG_HOME=/tmp/ferrent-demo-home \
 ```
 
 A részletes mérés: `docs/measurements/m2-gui-table.md`.
+
+## Web parity (M13-T10)
+
+A böngészős kliens ugyanazt az adatot mutatja, mint a desktop GUI: a
+`ferrent-web` REST + SSE gateway a daemon RPC-it fordítja, a részletek panel
+pedig a peer-eket, a trackereket (hozzáadás/törlés) és a web seed listát is
+kezeli, a fejléc ⚙ gombja a daemon configját szerkeszti revízióellenőrzéssel.
+
+![Ugyanaz a lista desktopon (balra) és a weben (jobbra), sötét
+témában](images/parity-dark.png)
+
+A web UI világos témában: `docs/images/web-ui.png`; a billentyűparancsok
+(`Space`, `Delete`, `Ctrl+F/R/A/O`, nyilak, `Home`/`End`, `Esc`, `?`)
+a desktop listáját követik, a `?` súgó-overlay a weben is megvan.

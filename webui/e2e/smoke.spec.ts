@@ -81,6 +81,56 @@ async function mockApi(page: Page): Promise<string[]> {
     json(route, { id: 1, paused: true }),
   );
   await page.route("**/api/torrents/1", (route) => json(route, movies));
+  await page.route("**/api/torrents/1/files", (route) =>
+    json(route, {
+      files: [{ path: "Demo.Movie.2024.mkv", size: 734003200, progress: 1, priority: 4 }],
+    }),
+  );
+  await page.route("**/api/torrents/1/peers", (route) =>
+    json(route, {
+      peers: [
+        {
+          endpoint: "1.2.3.4:51413",
+          client: "qBittorrent 4.6",
+          progress: 0.5,
+          download_rate: 1024,
+          upload_rate: 512,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/torrents/1/trackers", (route) => {
+    if (route.request().method() === "POST") {
+      return json(route, {
+        id: 1,
+        trackers: [
+          {
+            url: "udp://t.example:6969",
+            status: "unverified",
+            seeds: 0,
+            leechers: 0,
+            message: "",
+            next_announce: 0,
+            fails: 0,
+          },
+        ],
+      });
+    }
+    return json(route, { id: 1, trackers: [] });
+  });
+  await page.route("**/api/torrents/1/webseeds", (route) =>
+    json(route, { id: 1, web_seeds: [] }),
+  );
+  await page.route("**/api/config", (route) => {
+    if (route.request().method() === "PUT") {
+      return json(route, { revision: 2 });
+    }
+    return json(route, {
+      revision: 1,
+      env_locked: ["bind"],
+      toml: '[general]\ndata_dir = "/data"\n',
+    });
+  });
   await page.route("**/api/events", (route) =>
     route.fulfill({
       status: 200,
@@ -129,4 +179,65 @@ test("switches to English and back", async ({ page }) => {
   await expect(page.getByPlaceholder("Search by name…")).toBeVisible();
   await page.getByRole("button", { name: "Language" }).click();
   await expect(page.getByPlaceholder("Keresés névben…")).toBeVisible();
+});
+
+test("opens the detail, adds a tracker and lists the peers", async ({ page }) => {
+  const errors = await mockApi(page);
+  await login(page);
+
+  await page.getByText("Demo Movie 2024").click();
+  await expect(
+    page.getByRole("heading", { name: "Demo Movie 2024" }),
+  ).toBeVisible();
+  await expect(page.getByText("1.2.3.4:51413")).toBeVisible();
+
+  await page.getByRole("button", { name: /Trackerek/ }).click();
+  await page
+    .getByPlaceholder("Announce URL (http, https, udp vagy ws)")
+    .fill("udp://t.example:6969");
+  await page.getByRole("button", { name: "Add tracker" }).click();
+  await expect(page.getByText("udp://t.example:6969")).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+test("saves the daemon config against its revision", async ({ page }) => {
+  const errors = await mockApi(page);
+  await login(page);
+
+  await page.getByRole("button", { name: "Beállítások" }).click();
+  await expect(page.getByText("Revízió: 1")).toBeVisible();
+  await expect(page.getByText("bind")).toBeVisible();
+
+  const editor = page.locator(".settings-sheet textarea");
+  await editor.fill('[general]\ndata_dir = "/data2"\n');
+  const put = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/config") && request.method() === "PUT",
+  );
+  await page.locator(".settings-sheet .sheet-actions .primary").click();
+  const request = await put;
+  expect(JSON.parse(request.postData() ?? "{}")).toEqual({
+    toml: '[general]\ndata_dir = "/data2"\n',
+    revision: 1,
+  });
+
+  expect(errors).toEqual([]);
+});
+
+test("keyboard: ? opens the help and arrows select a row", async ({ page }) => {
+  await mockApi(page);
+  await login(page);
+
+  await page.keyboard.press("?");
+  await expect(
+    page.getByRole("heading", { name: "Billentyűparancsok" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("heading", { name: "Billentyűparancsok" }),
+  ).toBeHidden();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByText("1 kijelölve")).toBeVisible();
 });

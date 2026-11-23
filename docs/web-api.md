@@ -25,6 +25,15 @@ a daemon tokent. TLS-t a reverse proxy ad; a gateway loopbacken figyel.
 | GET | `/api/torrents` | lapozott lista; query: `filter`, `state`, `label`, `sort`, `desc`, `offset`, `limit` (max 1000, alap 100) |
 | GET | `/api/torrents/{id}` | egy torrent |
 | GET | `/api/torrents/{id}/files` | `{"files":[{"path","size","progress","priority"}]}` |
+| GET | `/api/torrents/{id}/peers` | `{"peers":[{"endpoint","client","progress","download_rate","upload_rate"}]}` |
+| GET | `/api/torrents/{id}/trackers` | `{"id","trackers":[{"url","status","seeds","leechers","message","next_announce","fails"}]}` |
+| POST | `/api/torrents/{id}/trackers` | `{"url":"udp://…"}` → a frissített tracker lista |
+| DELETE | `/api/torrents/{id}/trackers?url=…` | a frissített tracker lista |
+| GET | `/api/torrents/{id}/webseeds` | `{"id","web_seeds":["https://…"]}` |
+| PUT | `/api/torrents/{id}/webseeds` | `{"urls":["https://…"]}` — a **teljes** lista cseréje |
+| POST | `/api/torrents/{id}/sequential` | `{"on":true}` → `{"id","sequential"}` |
+| POST | `/api/torrents/{id}/super-seeding` | `{"on":true}` → `{"id","super_seeding"}` |
+| POST | `/api/torrents/{id}/rename-file` | `{"index":0,"name":"new.mkv"}` → `{"id","files":[…]}` |
 | POST | `/api/torrents` | hozzáadás; `201 {"id"}`; duplicate → `409 {"id","duplicate":true}` |
 | POST | `/api/torrents/{id}/pause` | `200 {"id","paused":true}` |
 | POST | `/api/torrents/{id}/resume` | `200 {"id","paused":false}` |
@@ -41,7 +50,7 @@ utáni összes elem, lapozás előtt.
 
 **Torrent objektum:** `id, name, total_bytes, state, progress, download_rate,
 upload_rate, seeds, peers, eta_seconds, save_path, label, error,
-queue_position`.
+queue_position, infohash, pause_reasons, sequential, super_seeding`.
 
 **`state` szűrő:** `queued, checking, downloading, seeding, paused, error,
 moving` (üres/`all` = mind). **`sort`:** `id, name, progress, download_rate,
@@ -56,6 +65,8 @@ upload_rate, queue, label`.
 | POST | `/api/labels` | `{"name":"movies","color":"#2f81f7"}` → `201 {"name"}` |
 | DELETE | `/api/labels/{name}` | `{"name","removed","cleared"}` |
 | GET | `/api/events` | SSE: `event: deltas`, `data: {"changed":[…],"removed":[…]}` |
+| GET | `/api/config` | `{"revision":n,"env_locked":["bind"],"toml":"…"}` — a daemon config dokumentuma |
+| PUT | `/api/config` | `{"toml":"…","revision":n}` → `{"revision":n+1}`; elavult revízió → **412** |
 
 Az SSE a daemon `Watch` streamjét **coalescálva** adja: legfeljebb egy üzenet
 a coalesce ablakban (alap 1 s), csak a változott torrentekkel, 15 s
