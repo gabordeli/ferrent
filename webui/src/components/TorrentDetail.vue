@@ -14,6 +14,7 @@ import { locale, stateLabel, t } from "../i18n";
 import type {
   FilePriorityPayload,
   LabelInfo,
+  PeerInfo,
   TorrentDetail,
   TorrentFile,
   TorrentOptions,
@@ -58,6 +59,9 @@ const moveOpen = ref(false);
 const movePath = ref("");
 const moveBusy = ref(false);
 const pickerOpen = ref(false);
+const peers = ref<PeerInfo[]>([]);
+const trackerUrl = ref("");
+const trackerBusy = ref(false);
 const backButton = ref<HTMLButtonElement | null>(null);
 const dialogEl = ref<HTMLElement | null>(null);
 let releaseFocus: (() => void) | null = null;
@@ -109,11 +113,60 @@ async function loadDetail(): Promise<void> {
     selectedLabel.value = detail.value.label;
     downLimit.value = detail.value.max_download_speed;
     upLimit.value = detail.value.max_upload_speed;
-    await loadFiles(true);
+    await Promise.all([loadFiles(true), loadTrackers(), loadPeers()]);
   } catch (err) {
     error.value = messageOf(err);
   } finally {
     loading.value = false;
+  }
+}
+
+/// Trackers and peers have their own endpoints; the torrent row does not
+/// carry them.
+async function loadTrackers(): Promise<void> {
+  try {
+    const result = await api.getTorrentTrackers(props.torrentId);
+    if (detail.value) detail.value.trackers = result.trackers;
+  } catch {
+    // A detail without trackers is still usable.
+  }
+}
+
+async function loadPeers(): Promise<void> {
+  try {
+    const result = await api.getTorrentPeers(props.torrentId);
+    peers.value = result.peers;
+  } catch {
+    peers.value = [];
+  }
+}
+
+async function addTrackerUrl(): Promise<void> {
+  const url = trackerUrl.value.trim();
+  if (!url) return;
+  trackerBusy.value = true;
+  try {
+    const result = await api.addTracker(props.torrentId, url);
+    if (detail.value) detail.value.trackers = result.trackers;
+    trackerUrl.value = "";
+    emit("toast", t("detail.trackerAdded"));
+  } catch (err) {
+    actionError.value = messageOf(err);
+  } finally {
+    trackerBusy.value = false;
+  }
+}
+
+async function removeTrackerUrl(url: string): Promise<void> {
+  trackerBusy.value = true;
+  try {
+    const result = await api.removeTracker(props.torrentId, url);
+    if (detail.value) detail.value.trackers = result.trackers;
+    emit("toast", t("detail.trackerRemoved"));
+  } catch (err) {
+    actionError.value = messageOf(err);
+  } finally {
+    trackerBusy.value = false;
   }
 }
 
@@ -580,7 +633,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <section v-if="detail.trackers.length" class="trackers">
+          <section v-if="detail.trackers.length || canWrite" class="trackers">
             <header class="trackers-head">
               <button
                 class="tracker-bar"
@@ -609,23 +662,70 @@ onBeforeUnmount(() => {
                 {{ t("detail.reannounce") }}
               </button>
             </header>
-            <ul v-if="trackersOpen" class="tracker-list">
+            <ul v-if="trackersOpen && detail.trackers.length" class="tracker-list">
               <li
                 v-for="tracker in detail.trackers"
-                :key="`${tracker.tier}-${tracker.url}`"
+                :key="tracker.url"
               >
                 <span class="tracker-url" :title="tracker.url">
                   {{ tracker.url }}
                 </span>
                 <span class="tracker-meta">
-                  tier {{ tracker.tier ?? "—" }} ·
-                  {{ tracker.message || (tracker.verified ? "OK" : "—") }}
+                  {{ tracker.status || "—" }}
+                  <template v-if="tracker.seeds !== undefined">
+                    · ▲ {{ tracker.seeds }} · ▼ {{ tracker.leechers }}
+                  </template>
+                  <template v-if="tracker.message"> · {{ tracker.message }}</template>
                 </span>
+                <button
+                  v-if="canWrite"
+                  class="action tiny"
+                  :disabled="trackerBusy"
+                  @click="removeTrackerUrl(tracker.url)"
+                >
+                  {{ t("detail.remove") }}
+                </button>
               </li>
             </ul>
+            <form
+              v-if="trackersOpen && canWrite"
+              class="tracker-add"
+              @submit.prevent="addTrackerUrl"
+            >
+              <input
+                v-model="trackerUrl"
+                type="url"
+                :placeholder="t('detail.trackerUrl')"
+                :disabled="trackerBusy"
+              />
+              <button
+                class="action"
+                type="submit"
+                :disabled="trackerBusy || !trackerUrl.trim()"
+              >
+                {{ t("Add tracker") }}
+              </button>
+            </form>
             <p v-if="trackersOpen && detail.tracker_status" class="tracker-status">
               {{ detail.tracker_status }}
             </p>
+          </section>
+
+          <section class="peers">
+            <h3>
+              {{ t("detail.peers") }}
+              <small v-if="peers.length">({{ peers.length }})</small>
+            </h3>
+            <ul v-if="peers.length" class="peer-list">
+              <li v-for="peer in peers" :key="peer.endpoint">
+                <span class="peer-endpoint">{{ peer.endpoint }}</span>
+                <span class="peer-client">{{ peer.client || "—" }}</span>
+                <span>{{ Math.round((peer.progress ?? 0) * 100) }}%</span>
+                <span>↓ {{ formatRate(peer.download_rate) }}</span>
+                <span>↑ {{ formatRate(peer.upload_rate) }}</span>
+              </li>
+            </ul>
+            <p v-else class="hint">{{ t("detail.noPeers") }}</p>
           </section>
 
           <p v-if="actionError" class="detail-error" role="alert">{{ actionError }}</p>

@@ -5,6 +5,7 @@ import {
   UnauthorizedError,
   addLabel,
   addTorrentFile,
+  addTracker,
   addTorrentMagnet,
   addTorrentUrl,
   bulkAction,
@@ -14,11 +15,15 @@ import {
   getLabels,
   getPushConfig,
   getPushSubscriptions,
+  getDaemonConfig,
   getSession,
   getToken,
   getTorrent,
   getTorrentFiles,
   getTorrentOptions,
+  getTorrentPeers,
+  getTorrentTrackers,
+  getWebSeeds,
   listDirs,
   listTorrentIds,
   listTorrents,
@@ -33,15 +38,21 @@ import {
   removeLabel,
   removePushSubscription,
   removeTorrent,
+  removeTracker,
+  renameFile,
   resumeSession,
   resumeTorrent,
   setFilePriorities,
+  setDaemonConfig,
   setLabel,
+  setSequential,
   setSessionLimits,
   setSessionQueue,
   setToken,
+  setSuperSeeding,
   setTorrentLimits,
   setTorrentOptions,
+  setWebSeeds,
   stateName,
   subscribePush,
   testPush,
@@ -387,13 +398,6 @@ describe("gateway compatibility shims", () => {
     await expect(
       setFilePriorities("7", { files: [{ index: 0, priority: 7 }] }),
     ).resolves.toEqual({ id: "7", priorities: [7] });
-    const options = await getTorrentOptions("7");
-    expect(options.options.auto_managed).toBe(true);
-    await expect(
-      setTorrentOptions("7", { sequential_download: true }),
-    ).resolves.toMatchObject({
-      options: { sequential_download: true, auto_managed: true },
-    });
     await expect(
       setTorrentLimits("7", { max_download_speed: 1 }),
     ).resolves.toEqual({ id: "7", max_download_speed: 1, max_upload_speed: 0 });
@@ -414,6 +418,99 @@ describe("gateway compatibility shims", () => {
     await expect(getPushSubscriptions()).resolves.toEqual({ subscriptions: [] });
     await expect(removePushSubscription("s1")).resolves.toEqual({
       unsubscribed: false,
+    });
+  });
+});
+
+describe("daemon detail endpoints", () => {
+  it("reads peers, trackers and web seeds", async () => {
+    mockFetch({
+      peers: [
+        {
+          endpoint: "1.2.3.4:51413",
+          client: "qBittorrent",
+          progress: 0.5,
+          download_rate: 10,
+          upload_rate: 2,
+        },
+      ],
+    });
+    await expect(getTorrentPeers("7")).resolves.toMatchObject({
+      peers: [{ endpoint: "1.2.3.4:51413" }],
+    });
+    expect(calls[0].url).toBe("/api/torrents/7/peers");
+
+    mockFetch({ id: 7, trackers: [{ url: "udp://t:1", status: "working" }] });
+    await expect(getTorrentTrackers("7")).resolves.toMatchObject({
+      trackers: [{ url: "udp://t:1", status: "working" }],
+    });
+    expect(calls[0].url).toBe("/api/torrents/7/trackers");
+
+    mockFetch({ id: 7, web_seeds: ["https://m/x.iso"] });
+    await expect(getWebSeeds("7")).resolves.toMatchObject({
+      web_seeds: ["https://m/x.iso"],
+    });
+    expect(calls[0].url).toBe("/api/torrents/7/webseeds");
+  });
+
+  it("adds and removes a tracker, replaces the web seeds", async () => {
+    mockFetch({ id: 7, trackers: [] });
+    await addTracker("7", "udp://t:1");
+    expect(calls[0].init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ url: "udp://t:1" });
+
+    mockFetch({ id: 7, trackers: [] });
+    await removeTracker("7", "udp://t:1");
+    expect(calls[0].init.method).toBe("DELETE");
+    expect(calls[0].url).toBe("/api/torrents/7/trackers?url=udp%3A%2F%2Ft%3A1");
+
+    mockFetch({ id: 7, web_seeds: ["https://m/x.iso"] });
+    await setWebSeeds("7", ["https://m/x.iso"]);
+    expect(calls[0].init.method).toBe("PUT");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      urls: ["https://m/x.iso"],
+    });
+  });
+
+  it("toggles sequential and super-seeding on their own endpoints", async () => {
+    mockFetch({ id: 7, sequential: true });
+    await setSequential("7", true);
+    expect(calls[0].url).toBe("/api/torrents/7/sequential");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ on: true });
+
+    mockFetch({ id: 7, super_seeding: false });
+    await setSuperSeeding("7", false);
+    expect(calls[0].url).toBe("/api/torrents/7/super-seeding");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ on: false });
+  });
+
+  it("reads the options from the torrent row", async () => {
+    mockFetch({ ...ROW, sequential: true, super_seeding: true });
+    const result = await getTorrentOptions("7");
+    expect(result.options.sequential_download).toBe(true);
+    expect(result.options.super_seeding).toBe(true);
+    expect(calls[0].url).toBe("/api/torrents/7");
+  });
+
+  it("renames a file and edits the daemon config", async () => {
+    mockFetch({ id: 7, files: [{ path: "new.mkv" }] });
+    await renameFile("7", 1, "new.mkv");
+    expect(calls[0].url).toBe("/api/torrents/7/rename-file");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      index: 1,
+      name: "new.mkv",
+    });
+
+    mockFetch({ revision: 4, env_locked: ["bind"], toml: "a = 1" });
+    await expect(getDaemonConfig()).resolves.toMatchObject({ revision: 4 });
+    expect(calls[0].url).toBe("/api/config");
+
+    mockFetch({ revision: 5 });
+    await setDaemonConfig("a = 2", 4);
+    expect(calls[0].init.method).toBe("PUT");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      toml: "a = 2",
+      revision: 4,
     });
   });
 });

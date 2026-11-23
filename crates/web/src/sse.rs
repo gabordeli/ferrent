@@ -97,6 +97,10 @@ pub fn torrent_json(torrent: &Torrent) -> Map<String, Value> {
     map.insert("label".to_owned(), json!(torrent.label));
     map.insert("error".to_owned(), json!(torrent.error));
     map.insert("queue_position".to_owned(), json!(torrent.queue_position));
+    map.insert("infohash".to_owned(), json!(torrent.infohash));
+    map.insert("pause_reasons".to_owned(), json!(torrent.pause_reasons));
+    map.insert("sequential".to_owned(), json!(torrent.sequential));
+    map.insert("super_seeding".to_owned(), json!(torrent.super_seeding));
     map
 }
 

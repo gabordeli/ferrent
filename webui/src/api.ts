@@ -9,6 +9,7 @@ import type {
   AuthInfo,
   BulkActionPayload,
   BulkResult,
+  DaemonConfig,
   DirListing,
   FilePriorityPayload,
   FilePriorityResult,
@@ -17,6 +18,7 @@ import type {
   LimitPayload,
   LimitState,
   LoginResult,
+  PeerInfo,
   QueueSettings,
   Session,
   Torrent,
@@ -26,6 +28,7 @@ import type {
   TorrentIds,
   TorrentList,
   TorrentOptions,
+  TorrentTracker,
 } from "./types";
 
 const TOKEN_KEY = "ferrent.session";
@@ -127,6 +130,10 @@ interface FerrentTorrent {
   label: string;
   error: string;
   queue_position?: number;
+  infohash?: string;
+  pause_reasons?: number;
+  sequential?: boolean;
+  super_seeding?: boolean;
 }
 
 function torrentOf(row: FerrentTorrent): Torrent {
@@ -434,30 +441,126 @@ export function setFilePriorities(
 export function getTorrentOptions(
   id: string,
 ): Promise<{ id: string; options: TorrentOptions }> {
-  return Promise.resolve({
-    id,
-    options: {
-      sequential_download: false,
-      prioritize_first_last_pieces: false,
-      auto_managed: true,
-      super_seeding: false,
-      stop_at_ratio: false,
-      stop_ratio: 0,
-      remove_at_ratio: false,
-      max_connections: 0,
-      max_upload_slots: 0,
-    },
-  });
+  return request<FerrentTorrent>(`/api/torrents/${encodeURIComponent(id)}`).then(
+    (torrent) => ({
+      id,
+      options: {
+        sequential_download: torrent.sequential ?? false,
+        prioritize_first_last_pieces: false,
+        auto_managed: true,
+        super_seeding: torrent.super_seeding ?? false,
+        stop_at_ratio: false,
+        stop_ratio: 0,
+        remove_at_ratio: false,
+        max_connections: 0,
+        max_upload_slots: 0,
+      },
+    }),
+  );
 }
 
-export function setTorrentOptions(
+export async function setTorrentOptions(
   id: string,
   payload: Partial<TorrentOptions>,
 ): Promise<{ id: string; options: TorrentOptions }> {
-  return getTorrentOptions(id).then((current) => ({
-    id,
-    options: { ...current.options, ...payload },
-  }));
+  if (payload.sequential_download !== undefined) {
+    await setSequential(id, payload.sequential_download);
+  }
+  if (payload.super_seeding !== undefined) {
+    await setSuperSeeding(id, payload.super_seeding);
+  }
+  return getTorrentOptions(id);
+}
+
+export function setSequential(
+  id: string,
+  on: boolean,
+): Promise<{ id: string; sequential: boolean }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/sequential`, {
+    method: "POST",
+    body: JSON.stringify({ on }),
+  });
+}
+
+export function setSuperSeeding(
+  id: string,
+  on: boolean,
+): Promise<{ id: string; super_seeding: boolean }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/super-seeding`, {
+    method: "POST",
+    body: JSON.stringify({ on }),
+  });
+}
+
+export function getTorrentPeers(id: string): Promise<{ peers: PeerInfo[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/peers`);
+}
+
+export function getTorrentTrackers(
+  id: string,
+): Promise<{ id: string; trackers: TorrentTracker[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/trackers`);
+}
+
+export function addTracker(
+  id: string,
+  url: string,
+): Promise<{ id: string; trackers: TorrentTracker[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/trackers`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+export function removeTracker(
+  id: string,
+  url: string,
+): Promise<{ id: string; trackers: TorrentTracker[] }> {
+  const query = `url=${encodeURIComponent(url)}`;
+  return request(`/api/torrents/${encodeURIComponent(id)}/trackers?${query}`, {
+    method: "DELETE",
+  });
+}
+
+export function getWebSeeds(
+  id: string,
+): Promise<{ id: string; web_seeds: string[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/webseeds`);
+}
+
+export function setWebSeeds(
+  id: string,
+  urls: string[],
+): Promise<{ id: string; web_seeds: string[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/webseeds`, {
+    method: "PUT",
+    body: JSON.stringify({ urls }),
+  });
+}
+
+export function renameFile(
+  id: string,
+  index: number,
+  name: string,
+): Promise<{ id: string; files: { path: string }[] }> {
+  return request(`/api/torrents/${encodeURIComponent(id)}/rename-file`, {
+    method: "POST",
+    body: JSON.stringify({ index, name }),
+  });
+}
+
+export function getDaemonConfig(): Promise<DaemonConfig> {
+  return request("/api/config");
+}
+
+export function setDaemonConfig(
+  toml: string,
+  revision?: number,
+): Promise<{ revision: number }> {
+  return request("/api/config", {
+    method: "PUT",
+    body: JSON.stringify({ toml, revision }),
+  });
 }
 
 export function setTorrentLimits(

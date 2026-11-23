@@ -25,6 +25,10 @@ vi.mock("../api", () => ({
   getTorrent: vi.fn(),
   getTorrentFiles: vi.fn(),
   getTorrentOptions: vi.fn(),
+  getTorrentPeers: vi.fn(async () => ({ peers: [] })),
+  getTorrentTrackers: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
+  addTracker: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
+  removeTracker: vi.fn(async () => ({ id: "7", trackers: detail.trackers })),
   setTorrentOptions: vi.fn(),
   listDirs: vi.fn(),
   setFilePriorities: vi.fn(),
@@ -343,6 +347,22 @@ describe("TorrentDetail", () => {
     expect(wrapper.emitted("toast")?.[0]).toEqual([
       t("detail.reannounceSent"),
     ]);
+  });
+
+  it("adds and removes a tracker", async () => {
+    const wrapper = factory();
+    await flushPromises();
+    await wrapper.get(".tracker-bar").trigger("click");
+
+    await wrapper.get(".tracker-add input").setValue("udp://new.example:6969");
+    await wrapper.get(".tracker-add").trigger("submit");
+    await flushPromises();
+    expect(api.addTracker).toHaveBeenCalledWith(detail.id, "udp://new.example:6969");
+
+    const firstUrl = detail.trackers[0].url;
+    await wrapper.get(".tracker-list .action.tiny").trigger("click");
+    await flushPromises();
+    expect(api.removeTracker).toHaveBeenCalledWith(detail.id, firstUrl);
   });
 
   it("starts a recheck", async () => {

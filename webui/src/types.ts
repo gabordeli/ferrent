@@ -101,6 +101,11 @@ export interface TorrentTracker {
   verified?: boolean;
   message?: string;
   next_announce?: number;
+  /// Machine-readable announce state: working, updating, unverified, error.
+  status?: string;
+  seeds?: number;
+  leechers?: number;
+  fails?: number;
 }
 
 export interface TorrentDetail extends Torrent {
@@ -141,6 +146,22 @@ export interface TorrentFile {
   offset: number;
   progress: number;
   priority: number;
+}
+
+/// One connected peer, as the daemon reports it.
+export interface PeerInfo {
+  endpoint: string;
+  client: string;
+  progress: number;
+  download_rate: number;
+  upload_rate: number;
+}
+
+/// The daemon's revision-guarded TOML document.
+export interface DaemonConfig {
+  revision: number;
+  env_locked: string[];
+  toml: string;
 }
 
 export interface FilePriorityPayload {
