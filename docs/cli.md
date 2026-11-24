@@ -47,6 +47,8 @@ token = "..."
 A `--server media` egy profil nevére is mutathat; a `servers use media`
 beállítja az `active`-ot, így a további parancsok `--server` nélkül is azt
 használják. A régi lapos `server`/`ca`/`token` kulcsok továbbra is működnek.
+A `ca` értékében a kezdő `~/` a `$HOME`-ból feloldódik (a GUI profilja
+ugyanígy).
 
 A default server `https://127.0.0.1:50051`. A `--ca` a daemon önaláírt
 tanúsítványa (a daemon kiírja az elérési útját és a SHA-256 fingerprintet).

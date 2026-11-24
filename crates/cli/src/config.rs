@@ -84,6 +84,7 @@ pub fn resolve(
                 "CA certificate required: use --ca, FERRENT_CA, or the config file".to_owned(),
             )
         })?;
+    let ca = expand_home(ca);
 
     let token = cli_token
         .or_else(|| env::var("FERRENT_TOKEN").ok())
@@ -189,6 +190,17 @@ fn save(path: &Path, file: &ConfigFile) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Expands a leading `~/`; a path from the config file never passes through
+/// a shell, so `~/.config/...` would otherwise be a literal directory name
+/// (FERRENT-16).
+fn expand_home(path: PathBuf) -> PathBuf {
+    let expanded = path
+        .to_str()
+        .and_then(|text| text.strip_prefix("~/"))
+        .and_then(|rest| env::var_os("HOME").map(|home| Path::new(&home).join(rest)));
+    expanded.unwrap_or(path)
+}
+
 fn default_config_path() -> PathBuf {
     if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(dir).join("ferrent").join("cli.toml");
@@ -256,6 +268,23 @@ mod tests {
         let (saved, active) = profiles(Some(path.clone())).expect("profiles");
         assert!(saved.is_empty());
         assert_eq!(active, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_home_relative_ca_is_expanded() {
+        let home = env::var_os("HOME").expect("HOME in the test environment");
+        let path = temp_file("tilde");
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            "server = \"https://example:50051\"\nca = \"~/.config/ferrent/ca.pem\"\ntoken = \"t\"\n",
+        )
+        .expect("seed config");
+
+        let resolved = resolve(None, None, None, Some(path.clone())).expect("resolve");
+        assert_eq!(resolved.ca, Path::new(&home).join(".config/ferrent/ca.pem"));
+
         let _ = fs::remove_file(path);
     }
 

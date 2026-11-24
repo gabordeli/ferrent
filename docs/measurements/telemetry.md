@@ -80,3 +80,38 @@ A Bugsinkban a `service=panic-probe` tagű esemény kereteinek
 dpkg-deb -x dist/ferrent_*_amd64.deb /tmp/pkg
 readelf -S /tmp/pkg/usr/bin/ferrentd | grep -E '\.symtab|\.debug_line'
 ```
+
+## 2026-11-24-i záró ellenőrzés
+
+**Telepített `.deb` (a .27-en, `1.0.0~rc1-1`):** a `readelf -S
+/usr/bin/ferrentd` megtalálja a `.debug_line`-t és a `.symtab`-ot, tehát a
+`cargo deb --no-strip` a gyakorlatban is működik, nem csak a build szkriptben.
+
+**AppImage (rc1):** a kicsomagolt `usr/bin/ferrent-gui`-ban **nincs**
+`.symtab`/`.debug_line` — a linuxdeploy strippel, és nincs rá kapcsoló. Az
+AppImage-ből indított GUI panicja tehát továbbra is `<unknown>` keretekkel
+megy a Bugsinkbe; a szimbolizált út a `.deb`. Ha ez fontos, a linuxdeploy
+után vissza kell másolni a nem strippelt binárist az AppDirba (a méretek
+fönt: a strippelt GUI ~15 MB, a szimbólumos 35 MB — döntési pont).
+
+**24h+ mérés:** a 2026-11-22-én resolved issue-k `count`-ja nem nőtt
+(FERRENT-14: 1, FERRENT-8: 9, FERRENT-12: 1, FERRENT-5: 21) — a szűrések
+után nincs új előfordulás.
+
+**Új issue-k triázsa (2026-11-24):**
+
+| Issue | Ok | Állapot |
+|---|---|---|
+| FERRENT-15 | a `panic-probe` saját eseményei (`environment=probe`, `service=panic-probe`) | resolve — ez a szimbolizáció kapuja |
+| FERRENT-16 | a CLI configjában a `ca = "~/…"` **nem** expandálódott (a fájl a `$HOME` alatt volt, a literál `~` miatt mégis „no such file”) | javítva, resolve |
+| FERRENT-17 | `ferrentd --token-file /tmp/pause-probe/token` — saját pause-próba, a fájl nem létezett | resolve — teszt-artefakt |
+
+A `~` feloldása (`crates/cli/src/config.rs` és a GUI profil betöltése,
+`crates/gui/src/config.rs`) csak a kezdő `~/`-t bontja ki a `$HOME`-ból, a
+többi részt szó szerint hagyja; tesztek: `a_home_relative_ca_is_expanded`,
+`a_home_relative_ca_is_expanded_on_load`.
+
+**FERRENT-11 továbbra is nyitva:** a v0.1.2 szimbolizálatlan címkéit nem
+lehet visszafejteni (a bináris már nincs meg), a GUI saját kódjában nincs
+`unwrap`, tehát függőségből jött. Az első, már szimbolizált előfordulás
+mondja meg a helyet; addig nincs mit „Option-kezelni”.

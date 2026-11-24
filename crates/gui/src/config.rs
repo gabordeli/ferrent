@@ -88,6 +88,17 @@ pub struct ServerProfile {
     pub fingerprint: Option<String>,
 }
 
+/// Expands a leading `~/`; the GUI saves absolute paths, but a hand-edited
+/// `gui.toml` may keep the shell shorthand (FERRENT-16).
+#[must_use]
+pub fn expand_home(path: PathBuf) -> PathBuf {
+    let expanded = path
+        .to_str()
+        .and_then(|text| text.strip_prefix("~/"))
+        .and_then(|rest| std::env::var_os("HOME").map(|home| Path::new(&home).join(rest)));
+    expanded.unwrap_or(path)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinDecision {
     First,
@@ -101,12 +112,16 @@ impl GuiConfig {
             return Ok(Self::default());
         }
         let text = fs::read_to_string(path)?;
-        toml::from_str(&text).map_err(|error| {
+        let mut config: Self = toml::from_str(&text).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid GUI config {}: {error}", path.display()),
             )
-        })
+        })?;
+        for profile in &mut config.profiles {
+            profile.ca = expand_home(profile.ca.clone());
+        }
+        Ok(config)
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -223,6 +238,25 @@ mod tests {
             let mode = fs::metadata(&path).expect("metadata").permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_home_relative_ca_is_expanded_on_load() {
+        let home = std::env::var_os("HOME").expect("HOME in the test environment");
+        let path = temp_path("tilde");
+        fs::write(
+            &path,
+            "[[profiles]]\nname = \"lab\"\nserver = \"https://lab:50051\"\nca = \"~/.config/ferrent/ca.pem\"\ntoken = \"t\"\n",
+        )
+        .expect("seed config");
+
+        let loaded = GuiConfig::load(&path).expect("load");
+        assert_eq!(
+            loaded.profiles[0].ca,
+            Path::new(&home).join(".config/ferrent/ca.pem")
+        );
 
         let _ = fs::remove_file(&path);
     }

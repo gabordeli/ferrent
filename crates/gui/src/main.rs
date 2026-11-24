@@ -1879,7 +1879,7 @@ impl App {
         ServerProfile {
             name,
             server: self.fields.server.trim().to_owned(),
-            ca: PathBuf::from(self.fields.ca.trim()),
+            ca: ferrent_gui::config::expand_home(PathBuf::from(self.fields.ca.trim())),
             token: self.fields.token.clone(),
             fingerprint,
         }
