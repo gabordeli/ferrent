@@ -1,11 +1,11 @@
 # iOS kliens – kutatás (M13-T12)
 
 > **Állapot (2026-11-24):** a PWA-telepítés nem elosztási út (10-ből 2 tudja a
-> kezdőképernyőre tenni) → a döntés Capacitor shell (#84). A #84
-> felülvizsgálat a **natív RPC** utat ajánlja, ha a cél a közvetlen
-> `ferrentd`-kapcsolat és az App Store; az iOS-munka egyelőre **parkol**. Az
-> alábbi „Javasolt út" a 2026-11-23-i PWA-első állapotot írja le; a
-> 2026-11-24-i szakasz a végén van.
+> kezdőképernyőre tenni). A #84 felülvizsgálat után a **döntés: natív SwiftUI
+> + grpc-swift 2**, minimum **iOS 18** (az iPhone 7 kiesik, csak iPhone 14-en
+> tesztelünk), felhős Mac build-del. Az iOS-munka egyelőre **parkol**, amíg a
+> prototípus el nem indul. Az alábbi „Javasolt út" a 2026-11-23-i PWA-első
+> állapotot írja le; a 2026-11-24-i szakasz a végén van.
 
 Kérdés: milyen úton kap a Ferrent iOS klienst, és mennyi munka az első
 használható verzió? A daemon a torrenteket futtatja; az iOS kliens **csak
@@ -96,14 +96,14 @@ Capacitor shell és a natív app külön repóban vagy a `mobile/` alatt élhet.
 
 **Új feltételek (user):** App Store-ba feltölthető, értékelhető app;
 **100%-ig kompatibilis a `ferrentd` RPC-protokolljával** (nem REST a
-gatewayen); nincs macOS (Linux asztal, iPhone 7 + iPhone 14, az iOS 15 a
-plafon); a developer fiókot a user intézi. A PWA-telepítés nem elosztási út
-(10-ből 2).
+gatewayen); nincs macOS (Linux asztal, iPhone 7 + iPhone 14 — a döntés után
+csak az iPhone 14 marad, mert az iOS 18 target az iPhone 7-et kizárja); a
+developer fiókot a user intézi. A PWA-telepítés nem elosztási út (10-ből 2).
 
 ### Mért tények
 
-- A proto **44 RPC-t** és egy szerver-streamet (`Watch`) ad
-  (`crates/protocol/proto/ferrent/v1/ferrent.proto`).
+- A proto **42 RPC-t** és egy szerver-streamet (`Watch`) ad
+  (`crates/protocol/proto/ferrent/v1/ferrent.proto`; `grep -c '^  rpc '` = 42).
 - A daemonban **nincs gRPC-Web** (`tonic-web` sehol); a `webui/` SPA **REST-et**
   hív a `ferrent-web` gatewayen (`docs/web-api.md`), relatív `/api` útvonalakkal,
   és a gatewayen **nincs CORS**.
@@ -112,7 +112,8 @@ plafon); a developer fiókot a user intézi. A PWA-telepítés nem elosztási ú
 - **Web Push** iOS 16.4+ és home-screen PWA → az iPhone 7 (iOS 15) nem tudja;
   a push tehát **APNs**.
 - **Minden iOS build macOS-t kér** (Capacitor is); a self-hosted GitLabon nincs
-  macOS runner → GitHub `macos-latest`, Codemagic vagy Xcode Cloud.
+  macOS runner. A felhős Mac útja viszont Linuxról is vezérelhető
+  (EAS Build / Codemagic / Xcode Cloud; lent a mért árakkal).
 - **App Store review:** a reviewer nem éri el a user daemonját → **demo mód**
   (`crates/gui/examples/demo_server.rs` mock engine) vagy publikus, read-only
   demo daemon kell.
@@ -121,9 +122,10 @@ plafon); a developer fiókot a user intézi. A PWA-telepítés nem elosztási ú
 
 | Út | RPC | TLS pinning | Review | Munka |
 |---|---|---|---|---|
-| **Natív SwiftUI + grpc-swift** | igazi gRPC/HTTP2, proto-ból generálva | igen (NIOSSL) | natív UI, kisebb 4.2 kockázat | 2–3 hét v1 |
+| **Natív SwiftUI + grpc-swift 2** | igazi gRPC/HTTP2, proto-ból generálva | igen (NIOSSL) | natív UI, kisebb 4.2 kockázat | 2–3 hét v1 |
 | **Capacitor + natív gRPC híd** | a Swift híd beszél gRPC-t | igen (a hídban) | webview-wrapper kockázat | ~1–1,5 hét |
 | **Capacitor + gRPC-Web** | `tonic-web` + CORS a daemonban, a SPA transportjának átírása | nem (WebView) | webview | 1–2 hét + SPA refactor |
+| **Expo/RN + gRPC-Web vagy natív híd** | grpc-web (tonic-web) vagy saját modul | hídnál igen, grpc-webnél nem | natív RN app, 4.2 kisebb kockázat | 1,5–2 hét + daemon-munka |
 
 Az **Expo + React Native** (#84) egy harmadik UI, és a gRPC-hez saját natív
 modul/dev build kell — a Mac nélküli előny csak a UI-fejlesztésre igaz.
@@ -144,13 +146,43 @@ ha a web UI-t meg akarjuk tartani. A PWA marad a desktop/Android böngészőkre.
 - [ ] **APNs**: `.p8` kulcs + Team ID + Key ID; gateway/daemon oldali küldő
       (ES256 JWT + HTTP/2) + device-token store. Ez a **#82 iOS-felét váltja**;
       a VAPID-os Web Push legfeljebb desktopra marad.
-- [ ] **iOS 15 target**: `NavigationView` (nem `NavigationStack`), grpc-swift
-      minimum verzió ellenőrzése, iPhone 7-es teszt.
+- [ ] **iOS 18 target** (a grpc-swift 2 `Package.swift`-jében iOS 18.0 /
+      macOS 15.0 az availability): az iPhone 7 (iOS 15.8) **kiesik**, a teszt
+      iPhone 14-en megy. iOS 15-öt csak a karbantartott grpc-swift 1.x adná.
 - [ ] **Hálózat**: a daemon gRPC-portja elérhető (portforward/VPN); LAN-on
       `NSLocalNetworkUsageDescription`; cert profilként **vagy** TOFU pinning
       (a natív app tudja).
-- [ ] **Prototype (2–3 nap)**: proto→Swift generálás, connect + `ListTorrents`
+- [ ] **Prototype (3–5 nap)**: proto→Swift generálás, connect + `ListTorrents`
       + `Watch` + pause/resume a valódi daemon ellen, CI-ból.
 
-**Állapot (2026-11-24): parkol** (user: „nagyjuk egyelőre az ios-t"); a
-következő lépés a prototype, amint van macOS build út.
+### Expo + React Native (#84) — review (2026-11-24)
+
+A #84 az Expo Go-s loopra épít; a user környezetében ez így nem áll meg:
+
+- **Expo Go az App Store-ban iOS 16.4+**, és az SDK 56–58 is iOS 16.4+ /
+  Xcode 26.4+. Az iPhone 7 (iOS 15.8) tehát **Expo Go-val sem megy**; csak az
+  SDK 55 (min iOS 15.1) volt az utolsó, ami vállalta — azóta pin kellene.
+- Az **Expo Go egy SDK-verziót** támogat, és **custom native modult nem** tud;
+  a gRPC-hez (vagy bármely natív könyvtárhoz) **development build** kell, és
+  ezzel a „Mac nélküli, azonnali" előny eltűnik.
+- A **React Native-nek nincs natív gRPC-ja**: vagy gRPC-Web (`tonic-web` +
+  CORS a daemonban, a kliens transport átírása — a `Watch` stream RN
+  `fetch`-csel kérdéses), vagy saját Swift híd. A „100% RPC" így nem
+  „ingyen" jön.
+- A „natív app" itt **EAS Build** (felhős Mac); a napi UI-loop valóban
+  Linuxon marad. App Store 4.2 szempontból az RN jobb, mint a webview-shell.
+
+### macOS nélküli build-utak (mért, 2026-11-24)
+
+| út | ár | megjegyzés |
+|---|---|---|
+| EAS Build Free | 0, **15 iOS build/hó** | 45 perces timeout, lassú sor |
+| Codemagic Free | 0, **500 macOS M2 perc/hó** | 1 párhuzamos; iOS-re a legbőkezűbb ingyen keret |
+| Xcode Cloud | **25 óra/hó** a 99 USD-s tagságban | a workflow-t Xcode-ban kell beállítani (egyszeri Mac) |
+| GitHub `macos-latest` | 0,062 USD/perc; privát free $12/hó ≈ **193 perc** | publikus tükörnél ingyenes (nyilvános kód) |
+| Scaleway M1 | 0,11 EUR/óra, 75 EUR/hó | Párizs, saját Xcode, SSH |
+| használt Mac mini M1 | ~400 EUR egyszeri | saját self-hosted runner |
+
+**Állapot (2026-11-24): parkol** (user: „nagyjuk egyelőre az ios-t"). A döntés
+rögzítve: **SwiftUI + grpc-swift 2, iOS 18, iPhone 7 nélkül**; a következő
+lépés a prototype, amint a build-út (Codemagic vagy Xcode Cloud) kiválasztva.
