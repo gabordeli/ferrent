@@ -6,10 +6,7 @@
 //! directory the service script creates, so a bare `ferrentd.exe` reads what
 //! the service wrote instead of inventing a path next to the binary.
 
-use std::path::{Path, PathBuf};
-
-#[cfg(windows)]
-use std::process::Command;
+use std::path::PathBuf;
 
 #[cfg(not(windows))]
 const UNIX_CONFIG: &str = "/etc/ferrent/config.toml";
@@ -20,10 +17,7 @@ const UNIX_DATA: &str = "./ferrent-data";
 
 #[cfg(windows)]
 fn ferrent_dir() -> PathBuf {
-    let base = std::env::var_os("ProgramData")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    base.join("ferrent")
+    ferrent_platform::windows_program_data_dir().expect("Windows has %ProgramData%")
 }
 
 /// The default configuration file; `$FERRENT_CONFIG` overrides it.
@@ -86,36 +80,8 @@ pub fn import_supported() -> bool {
 ///
 /// The `.deb` postinst creates the file `0640 root:ferrent`. On Windows the
 /// script that writes it inherits `%ProgramData%`'s ACL, which lets every user
-/// read it, so the daemon tightens the file it is about to use: SYSTEM and
-/// Administrators full, nothing else, no inheritance.
-///
-/// `icacls` takes well-known SIDs here on purpose: on a translated Windows
-/// the group is called `Rendszergazdák`, and the English name in the command
-/// would not resolve. A failure is a warning, not a startup error — a token
-/// the daemon can read still works, it is only readable by others too.
-#[cfg(windows)]
-pub fn harden_secret_file(path: &Path) {
-    let outcome = Command::new("icacls")
-        .arg(path)
-        .arg("/inheritance:r")
-        .arg("/grant:r")
-        .arg("*S-1-5-18:(F)")
-        .arg("*S-1-5-32-544:(F)")
-        .status();
-    match outcome {
-        Ok(status) if status.success() => {}
-        Ok(status) => eprintln!("warning: icacls exited with {status} on {}", path.display()),
-        Err(error) => eprintln!(
-            "warning: cannot restrict {} to SYSTEM and Administrators: {error}",
-            path.display()
-        ),
-    }
-}
-
-/// The `.deb` postinst already installs the token `0640 root:ferrent`, and the
-/// daemon may not own the file, so there is nothing to tighten here.
-#[cfg(not(windows))]
-pub fn harden_secret_file(_path: &Path) {}
+/// read it, so the daemon tightens the file it is about to use.
+pub use ferrent_platform::harden_machine_secret as harden_secret_file;
 
 #[cfg(test)]
 mod tests {

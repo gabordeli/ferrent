@@ -59,13 +59,8 @@ impl TlsMaterial {
         let material = Self::generate()?;
         fs::create_dir_all(dir)?;
         fs::write(&cert_path, &material.cert_pem)?;
-        fs::write(&key_path, &material.key_pem)?;
+        ferrent_platform::write_secret(&key_path, material.key_pem.as_bytes())?;
         fs::write(&fingerprint_path, &material.fingerprint)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))?;
-        }
         Ok(material)
     }
 }

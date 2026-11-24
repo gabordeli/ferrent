@@ -119,13 +119,14 @@ A döntés a daemoné, nem a GUI buildjéé — a thin client Linuxról is
 csatlakozhat Windows daemonhoz. A GUI import kezdőmappája is platform
 szerinti (`%APPDATA%\deluge\state` vs `/var/lib/deluged/config/state`).
 
-**Ami még hátra van:** a GUI `%APPDATA%\ferrent\gui.toml` útvonala és a 11
-`#![cfg(unix)]` teszt Windows változatai. A libtorrent cross-build, a ZIP, az
-NSIS telepítő, a service wrapper, a daemon `%ProgramData%` alapértékei és a
-token ACL-je (`icacls`, SYSTEM + Administrators) **kész**
-(`packaging/windows/`); a service a daemont NSSM-mel futtatja, és
-`AppStopMethodConsole`-lal adja át a Ctrl-C-t, hogy a fastresume mentés
-lefusson.
+**Ami még hátra van:** a 13 `#![cfg(unix)]` teszt Windows változatai és a
+futásidejű smoke (service, config-út, token-ACL, GUI csatlakozás). A GUI és a
+CLI `%APPDATA%\ferrent\{gui,cli}.toml` útvonala **kész** (2026-11-24,
+`crates/platform`), a libtorrent cross-build, a ZIP, az NSIS telepítő, a
+service wrapper, a daemon `%ProgramData%` alapértékei és a token ACL-je
+(`icacls`, SYSTEM + Administrators) szintén **kész** (`packaging/windows/`); a
+service a daemont NSSM-mel futtatja, és `AppStopMethodConsole`-lal adja át a
+Ctrl-C-t, hogy a fastresume mentés lefusson.
 
 ### CI: `windows-cross` a saját runneren
 
@@ -207,8 +208,8 @@ felhasználónak WSL kell.
 | NSIS telepítő (varázsló, start-menü, service, uninstall) | 1 nap | **kész** (2026-11-23) |
 | `ferrent.ico` (16–256 px) + beágyazás az exékbe (`crates/winres`) | fél nap | **kész** (2026-11-23) |
 | `%ProgramData%` alapértékek + token ACL (`crates/daemon/src/platform.rs`) | fél nap | **kész** (2026-11-23) |
-| A GUI `%APPDATA%\ferrent\gui.toml` útvonala | fél nap | hátra |
-| Windows tesztváltozatok a 11 Unix-kapus suite mellé | 2–3 nap | hátra |
+| GUI/CLI `%APPDATA%\ferrent\*.toml` útvonal (`crates/platform`) | fél nap | **kész** (2026-11-24) |
+| Windows tesztváltozatok a 13 Unix-kapus suite mellé | 2–3 nap | hátra |
 | **Összesen (all-in-one)** | **~2 hét** | |
 
 ## Nyitott pont

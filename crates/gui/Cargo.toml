@@ -16,6 +16,7 @@ name = "ferrent-gui"
 path = "src/main.rs"
 
 [dependencies]
+ferrent-platform = { path = "../platform" }
 ferrent-protocol = { path = "../protocol" }
 ferrent-telemetry = { path = "../telemetry" }
 ferrent-i18n = { path = "../i18n" }

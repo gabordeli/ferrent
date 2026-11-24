@@ -1508,6 +1508,7 @@ dependencies = [
  "ferrent-engine",
  "ferrent-i18n",
  "ferrent-import",
+ "ferrent-platform",
  "ferrent-protocol",
  "ferrent-telemetry",
  "ferrent-winres",
@@ -1528,6 +1529,7 @@ dependencies = [
  "chrono-tz",
  "ferrent-engine",
  "ferrent-import",
+ "ferrent-platform",
  "ferrent-protocol",
  "ferrent-telemetry",
  "ferrent-winres",
@@ -1566,6 +1568,7 @@ dependencies = [
  "ferrent-daemon",
  "ferrent-engine",
  "ferrent-i18n",
+ "ferrent-platform",
  "ferrent-protocol",
  "ferrent-telemetry",
  "ferrent-winres",
@@ -1592,6 +1595,10 @@ dependencies = [
  "serde_json",
  "sha1",
 ]
+
+[[package]]
+name = "ferrent-platform"
+version = "1.0.0-rc1"
 
 [[package]]
 name = "ferrent-protocol"
@@ -1622,6 +1629,7 @@ dependencies = [
  "base64 0.22.1",
  "ferrent-daemon",
  "ferrent-engine",
+ "ferrent-platform",
  "ferrent-protocol",
  "http-body-util",
  "rcgen",

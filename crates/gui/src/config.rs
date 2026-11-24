@@ -5,10 +5,9 @@
 
 use std::fs;
 use std::io;
-#[cfg(unix)]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use ferrent_platform::{expand_home, user_config_dir, write_secret};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -88,17 +87,6 @@ pub struct ServerProfile {
     pub fingerprint: Option<String>,
 }
 
-/// Expands a leading `~/`; the GUI saves absolute paths, but a hand-edited
-/// `gui.toml` may keep the shell shorthand (FERRENT-16).
-#[must_use]
-pub fn expand_home(path: PathBuf) -> PathBuf {
-    let expanded = path
-        .to_str()
-        .and_then(|text| text.strip_prefix("~/"))
-        .and_then(|rest| std::env::var_os("HOME").map(|home| Path::new(&home).join(rest)));
-    expanded.unwrap_or(path)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinDecision {
     First,
@@ -125,40 +113,17 @@ impl GuiConfig {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let text = toml::to_string_pretty(self)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(path)?;
-            file.write_all(text.as_bytes())?;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-        }
-        #[cfg(not(unix))]
-        fs::write(path, text)?;
-        Ok(())
+        write_secret(path, text.as_bytes())
     }
 
     #[must_use]
     pub fn default_path() -> PathBuf {
-        if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
-            return PathBuf::from(dir).join("ferrent").join("gui.toml");
-        }
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home)
-                .join(".config")
-                .join("ferrent")
-                .join("gui.toml");
-        }
-        PathBuf::from("ferrent-gui.toml")
+        user_config_dir().map_or_else(
+            || PathBuf::from("ferrent-gui.toml"),
+            |dir| dir.join("gui.toml"),
+        )
     }
 
     #[must_use]

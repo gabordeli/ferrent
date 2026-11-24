@@ -6,9 +6,9 @@
 
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use ferrent_platform::{expand_home, user_config_dir, write_secret};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
@@ -173,45 +173,17 @@ fn load(path: &Path) -> Result<ConfigFile, CliError> {
 
 /// Writes the file with mode 0600: it holds API tokens.
 fn save(path: &Path, file: &ConfigFile) -> Result<(), CliError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = toml::to_string_pretty(file)
         .map_err(|error| CliError::Config(format!("cannot encode config: {error}")))?;
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut handle = options.open(path)?;
-    handle.write_all(text.as_bytes())?;
+    write_secret(path, text.as_bytes())?;
     Ok(())
 }
 
-/// Expands a leading `~/`; a path from the config file never passes through
-/// a shell, so `~/.config/...` would otherwise be a literal directory name
-/// (FERRENT-16).
-fn expand_home(path: PathBuf) -> PathBuf {
-    let expanded = path
-        .to_str()
-        .and_then(|text| text.strip_prefix("~/"))
-        .and_then(|rest| env::var_os("HOME").map(|home| Path::new(&home).join(rest)));
-    expanded.unwrap_or(path)
-}
-
 fn default_config_path() -> PathBuf {
-    if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(dir).join("ferrent").join("cli.toml");
-    }
-    if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join(".config")
-            .join("ferrent")
-            .join("cli.toml");
-    }
-    PathBuf::from("ferrent-cli.toml")
+    user_config_dir().map_or_else(
+        || PathBuf::from("ferrent-cli.toml"),
+        |dir| dir.join("cli.toml"),
+    )
 }
 
 #[cfg(test)]

@@ -60,6 +60,9 @@ forrásokkal: [docs/comparison.md](docs/comparison.md).
 | Windows 10/11 | [docs/install-windows.md](docs/install-windows.md) (telepítő vagy ZIP) |
 | macOS | tervezett: [docs/install-macos.md](docs/install-macos.md) |
 
+A platformonkénti állapot (támogatott / előnézet / nem) és a bizonyítékok:
+[docs/platform-support.md](docs/platform-support.md).
+
 Demo adatokkal (mock daemon, 4 000 torrent) egy paranccsal kipróbálható:
 [docs/demo.md](docs/demo.md). Fejlesztői környezet, tesztek:
 [docs/development.md](docs/development.md).

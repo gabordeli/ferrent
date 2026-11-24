@@ -18,6 +18,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 ferrent-i18n = { path = "../i18n" }
 ferrent-import = { path = "../import" }
+ferrent-platform = { path = "../platform" }
 ferrent-protocol = { path = "../protocol" }
 ferrent-telemetry = { path = "../telemetry" }
 serde = { version = "1", features = ["derive"] }

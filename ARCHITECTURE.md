@@ -27,7 +27,9 @@ A Ferrent modern, alacsony erőforrás-igényű, nagy skálázhatóságú BitTor
 - Saját torrent motor implementálása (a `libtorrent` marad a motor).
 - Deluge pluginok bináris/source kompatibilitása (csak migráció és API-kompatibilitás).
 - Mobil kliens, média-lejátszó, streaming.
-- Windows/macOS daemon.
+- macOS daemon. A Windows daemon **előnézet** (buildel és csomagol, de a
+  futásidejű igazolás hátra van) — a részletes mátrix:
+  [docs/platform-support.md](docs/platform-support.md).
 - Több daemon egy klaszterben (horizontális skálázás).
 
 ## 2. Kulcsdöntések

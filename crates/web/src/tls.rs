@@ -7,8 +7,6 @@
 
 use std::fs;
 use std::net::IpAddr;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use axum_server::tls_rustls::RustlsConfig;
@@ -40,12 +38,9 @@ pub async fn load_or_generate(settings: &TlsConfig) -> Result<WebTls, String> {
         }
         fs::write(&settings.cert, cert.pem())
             .map_err(|error| format!("cannot write {}: {error}", settings.cert.display()))?;
-        fs::write(&settings.key, key.serialize_pem())
+        let key_pem = key.serialize_pem();
+        ferrent_platform::write_secret(&settings.key, key_pem.as_bytes())
             .map_err(|error| format!("cannot write {}: {error}", settings.key.display()))?;
-        #[cfg(unix)]
-        {
-            let _ = fs::set_permissions(&settings.key, fs::Permissions::from_mode(0o600));
-        }
     }
 
     let cert_pem = fs::read_to_string(&settings.cert)
@@ -103,6 +98,8 @@ pub fn fingerprint_of(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     fn settings(dir: &Path) -> TlsConfig {

@@ -12,6 +12,7 @@ members = [
     "crates/gui",
     "crates/i18n",
     "crates/import",
+    "crates/platform",
     "crates/web",
     "crates/telemetry",
     "crates/winres",
