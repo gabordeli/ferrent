@@ -22,6 +22,11 @@ buildelhetőséget.
 | `ferrent-web` gateway | **támogatott** — külön bináris, systemd alatt | **nem** — nincs a Windows ZIP-ben | **nem** |
 | Deluge import | **támogatott** — `import-deluge` + GUI | **kikapcsolva** — a daemon `import_enabled=false`-t hirdet a VM-tesztig | **nem** |
 
+**iOS kliens:** külön kutatás (`docs/research/ios.md`); 2026-11-24-én
+**parkol**, nincs build. A cél App Store-feltölthető app, közvetlen `ferrentd`
+RPC-kapcsolattal és APNs push-sal (a Web Push iOS 16.4+ / home-screen PWA,
+ezért az iPhone 7 nem tudja).
+
 ## Szabályok
 
 1. **A platform-képességet a daemon hirdeti.** Az `import_enabled` a
