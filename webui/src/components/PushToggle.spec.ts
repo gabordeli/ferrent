@@ -171,4 +171,21 @@ describe("PushToggle", () => {
     expect(wrapper.find(".push-toggle .action").exists()).toBe(false);
     expect(push.currentSubscription).not.toHaveBeenCalled();
   });
+
+  it("explains when the gateway disables push", async () => {
+    vi.mocked(api.getPushConfig).mockResolvedValue({
+      enabled: false,
+      public_key: "",
+      subscriptions: 0,
+    });
+    const wrapper = mountToggle();
+    await flushPromises();
+
+    await wrapper.get(".push-toggle .action").trigger("click");
+    await flushPromises();
+
+    expect(push.subscribe).not.toHaveBeenCalled();
+    expect(api.subscribePush).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain(t("push.disabled"));
+  });
 });

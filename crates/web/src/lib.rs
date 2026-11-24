@@ -8,6 +8,7 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod push;
 pub mod sse;
 pub mod tls;
 
@@ -27,7 +28,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-pub use config::{DaemonConfig, TlsConfig, WebConfig};
+pub use config::{DaemonConfig, PushConfig, TlsConfig, WebConfig};
 
 /// Shared state of the gateway.
 pub struct AppState {
@@ -38,6 +39,8 @@ pub struct AppState {
     pub hub: broadcast::Sender<String>,
     /// The daemon client, once connected.
     pub client: Mutex<Option<AuthClient>>,
+    /// Web Push, when the configuration enables it.
+    pub push: Option<Arc<push::PushState>>,
     /// Whether the daemon connection is up (for `/health`).
     pub daemon_up: AtomicBool,
     /// Whether the session cookie needs `Secure` (the listener is HTTPS).
@@ -49,11 +52,23 @@ impl AppState {
     #[must_use]
     pub fn new(config: WebConfig) -> Arc<Self> {
         let (hub, _) = broadcast::channel(64);
+        let push = if config.push.enabled {
+            match push::PushState::load(&config.push) {
+                Ok(push) => Some(Arc::new(push)),
+                Err(error) => {
+                    eprintln!("web: push disabled: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Arc::new(Self {
             sessions: auth::Sessions::new(config.session_ttl()),
             limiter: auth::LoginLimiter::new(config.login_per_minute),
             hub,
             client: Mutex::new(None),
+            push,
             daemon_up: AtomicBool::new(false),
             secure: config.tls.is_some(),
             config,
@@ -95,6 +110,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/logout", post(logout))
         .route("/api/session", get(session))
         .route("/api/events", get(events))
+        .route("/api/push/config", get(push::config))
+        .route(
+            "/api/push/subscribe",
+            post(push::subscribe).delete(push::unsubscribe),
+        )
+        .route("/api/push/subscriptions", get(push::subscriptions))
+        .route(
+            "/api/push/subscriptions/{id}",
+            axum::routing::delete(push::remove),
+        )
+        .route("/api/push/test", post(push::test))
         .route("/api/status", get(api::status))
         .route("/api/torrents", get(api::list).post(api::add))
         .route("/api/torrents/bulk", post(api::bulk))

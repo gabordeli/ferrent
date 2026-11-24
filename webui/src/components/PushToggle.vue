@@ -70,6 +70,10 @@ async function enable(): Promise<void> {
       return;
     }
     const config = await api.getPushConfig();
+    if (!config.enabled) {
+      error.value = t("push.disabled");
+      return;
+    }
     const subscription = await push.subscribe(config.public_key);
     await api.subscribePush(subscription.toJSON());
     state.value = "on";

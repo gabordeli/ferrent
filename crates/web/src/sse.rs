@@ -153,7 +153,12 @@ pub fn spawn_watch(state: Arc<AppState>) {
             loop {
                 tokio::select! {
                     message = stream.message() => match message {
-                        Ok(Some(response)) => batch.apply(&response),
+                        Ok(Some(response)) => {
+                            batch.apply(&response);
+                            if let Some(push) = state.push.as_ref() {
+                                push.observe(&response);
+                            }
+                        }
                         Ok(None) => break,
                         Err(error) => {
                             eprintln!("web: watch stream ended: {error}");

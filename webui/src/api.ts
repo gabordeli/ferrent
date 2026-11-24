@@ -683,7 +683,7 @@ export function moveTorrent(
   return Promise.resolve({ id, destination: location, moving: false });
 }
 
-// --- Push (not implemented by the gateway) --------------------------------
+// --- Push (VAPID subscriptions on the gateway) ---------------------------
 
 export interface PushConfig {
   enabled: boolean;
@@ -700,35 +700,49 @@ export interface PushSubscriptionInfo {
 }
 
 export function getPushConfig(): Promise<PushConfig> {
-  return Promise.resolve({ enabled: false, public_key: "", subscriptions: 0 });
+  return request<PushConfig>("/api/push/config");
 }
 
 export function subscribePush(
   subscription: PushSubscriptionJSON,
 ): Promise<{ count: number }> {
-  return Promise.resolve({ count: 0 });
+  return request<{ count: number }>("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(subscription),
+  });
 }
 
 export function unsubscribePush(
   endpoint: string,
 ): Promise<{ unsubscribed: boolean }> {
-  return Promise.resolve({ unsubscribed: false });
+  return request<{ unsubscribed: boolean }>("/api/push/subscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
 }
 
 export function testPush(endpoint: string): Promise<{ queued: boolean }> {
-  return Promise.resolve({ queued: false });
+  return request<{ queued: boolean }>("/api/push/test", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
 }
 
 export function getPushSubscriptions(): Promise<{
   subscriptions: PushSubscriptionInfo[];
 }> {
-  return Promise.resolve({ subscriptions: [] });
+  return request<{ subscriptions: PushSubscriptionInfo[] }>(
+    "/api/push/subscriptions",
+  );
 }
 
 export function removePushSubscription(
   id: string,
 ): Promise<{ unsubscribed: boolean }> {
-  return Promise.resolve({ unsubscribed: false });
+  return request<{ unsubscribed: boolean }>(
+    `/api/push/subscriptions/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function eventsUrl(): string {

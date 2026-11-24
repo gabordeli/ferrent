@@ -32,6 +32,12 @@ names = ["ferrent.local", "192.168.2.65"]   # amit a telefon megnyit
 url  = "https://localhost:50129"
 ca   = "/var/lib/ferrent/tls-cert.pem"
 token = "…"                    # a daemon tokenje (0640)
+
+[push]
+enabled = true
+subject = "mailto:you@example.com"   # VAPID kapcsolat (mailto: vagy https:)
+private_key   = "/var/lib/ferrent/vapid-private.pem"      # first start generálja
+subscriptions = "/var/lib/ferrent/push-subscriptions.json"
 ```
 
 - A **certificate first startkor generálódik** (SAN: `names` + `localhost` +
@@ -45,6 +51,11 @@ token = "…"                    # a daemon tokenje (0640)
   `daemon connect failed: transport error`-t ír.
 - `read_only = true` esetén a pause/add/label mind `403`; ez a „csak nézem”
   telefonnak vagy egy falikijelzőnek való.
+- A **`[push]` szekció** első indításkor generálja a VAPID kulcsot
+  (`vapid-private.pem`, 0600), a subscription store ugyanígy 0600; a
+  `User=ferrent` írja őket (`ReadWritePaths=/var/lib/ferrent`). A `subject`
+  legyen valódi kapcsolat (`mailto:` vagy `https:`). `enabled = false` esetén
+  a kliens „szerveroldali push kikapcsolva” üzenetet ad, a végpontok 404-et.
 
 ## 3. Indítás
 
@@ -65,6 +76,12 @@ A unit `User=ferrent`, `ProtectSystem=strict`, `ReadWritePaths=/var/lib/ferrent`
 2. Belépés a jelszóval (a „Felhasználónév” mező előtöltött, a gateway nem
    használja).
 3. Lista → detail → pause/resume → add (magnet vagy `.torrent`) → label.
+4. Session panel → **Értesítések**: engedélyezés után a böngésző engedélyt
+   kér, a feliratkozás a gateway store-jába kerül. A **Teszt** gomb egy
+   próbaértesítést küld; a torrent befejeződése vagy hibája automatikusan megy.
+   A Web Push **secure context**-et kér (HTTPS; a self-signed certet egyszer el
+   kell fogadni). iOS-en a Web Push 16.4+ és home-screen PWA; a natív shell /
+   APNs külön kutatás (`docs/research/ios.md`).
 
 A LAN-on kívüli (publikus) elérés **későbbi döntés**: akkor vagy egy meglévő
 443-as reverse proxy alá kerül a gateway (path vagy külön port), vagy port

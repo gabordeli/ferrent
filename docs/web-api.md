@@ -56,6 +56,27 @@ queue_position, infohash, pause_reasons, sequential, super_seeding`.
 moving` (üres/`all` = mind). **`sort`:** `id, name, progress, download_rate,
 upload_rate, queue, label`.
 
+## Push (Web Push)
+
+A gateway a saját VAPID kulcspárjával küld; a böngésző a `PushManager`-rel
+iratkozik fel, a subscription a gateway store-jában marad. Minden végpont
+session-cookie-t kér.
+
+| Metódus | Útvonal | Leírás |
+|---|---|---|
+| GET | `/api/push/config` | `{"enabled":true,"public_key":"<base64url P-256>","subscriptions":n}` |
+| POST | `/api/push/subscribe` | a `PushSubscription.toJSON()` teste: `{"endpoint","keys":{"p256dh","auth"}}` → `{"count":n}`; ugyanaz az endpoint frissül, nem duplikálódik |
+| DELETE | `/api/push/subscribe` | `{"endpoint":"…"}` → `{"unsubscribed":bool}` |
+| GET | `/api/push/subscriptions` | `{"subscriptions":[{"id","host","added","last_seen","user_agent"}]}` |
+| DELETE | `/api/push/subscriptions/{id}` | `{"unsubscribed":bool}` |
+| POST | `/api/push/test` | `{"endpoint":"…"}` → `{"queued":true}`; egy tesztértesítés |
+
+A payloadot a service worker fordítja szövegre: `{"kind":"finished","name":…}`,
+`{"kind":"error","name":…,"message":…}`, `{"kind":"test"}` — a `tag` a
+torrentenkénti coalescing. `410 Gone`/`404` esetén a gateway törli a
+subscriptiont. Ha a push ki van kapcsolva, a `config` `enabled:false`, a többi
+végpont **404** `{"error":"push is disabled"}`.
+
 ## Egyéb
 
 | Metódus | Útvonal | Leírás |

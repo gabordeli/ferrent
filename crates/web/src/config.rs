@@ -29,7 +29,34 @@ pub struct WebConfig {
     pub spa_dir: Option<PathBuf>,
     /// HTTPS for the gateway itself; without it the listener is plain HTTP.
     pub tls: Option<TlsConfig>,
+    /// Web Push (VAPID) settings; disabled by default.
+    pub push: PushConfig,
     pub daemon: DaemonConfig,
+}
+
+/// Web Push settings: the VAPID identity and where the subscriptions live.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PushConfig {
+    /// Whether the gateway offers push at all.
+    pub enabled: bool,
+    /// VAPID contact claim; `mailto:` or `https:`.
+    pub subject: String,
+    /// PKCS8 PEM private key; generated on first start when missing.
+    pub private_key: PathBuf,
+    /// JSON store of browser subscriptions.
+    pub subscriptions: PathBuf,
+}
+
+impl Default for PushConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            subject: "mailto:admin@localhost".to_owned(),
+            private_key: PathBuf::from("/var/lib/ferrent/vapid-private.pem"),
+            subscriptions: PathBuf::from("/var/lib/ferrent/push-subscriptions.json"),
+        }
+    }
 }
 
 /// The gateway's own certificate.
@@ -71,6 +98,7 @@ impl Default for WebConfig {
             login_per_minute: 5,
             spa_dir: None,
             tls: None,
+            push: PushConfig::default(),
             daemon: DaemonConfig::default(),
         }
     }
@@ -134,6 +162,27 @@ impl WebConfig {
         if self.login_per_minute == 0 {
             return Err("web.login_per_minute must be positive".to_owned());
         }
+        if self.push.enabled {
+            if !(self.push.subject.starts_with("mailto:")
+                || self.push.subject.starts_with("https://"))
+            {
+                return Err("push.subject must start with mailto: or https://".to_owned());
+            }
+            if self
+                .push
+                .private_key
+                .extension()
+                .and_then(|ext| ext.to_str())
+                != Some("pem")
+            {
+                return Err("push.private_key must be a .pem file".to_owned());
+            }
+            if self.push.private_key == self.push.subscriptions {
+                return Err(
+                    "push.private_key and push.subscriptions must be different files".to_owned(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -182,5 +231,25 @@ mod tests {
         let mut config = valid();
         config.coalesce_ms = 0;
         assert!(config.validate().is_err(), "zero coalesce");
+    }
+
+    #[test]
+    fn push_needs_a_contact_subject_and_separate_files() {
+        let mut config = valid();
+        config.push.enabled = true;
+        assert!(config.validate().is_ok(), "enabled with defaults");
+
+        let mut config = valid();
+        config.push.enabled = true;
+        config.push.subject = "admin@localhost".to_owned();
+        assert!(config.validate().is_err(), "subject without scheme");
+
+        let mut config = valid();
+        config.push.enabled = true;
+        config.push.private_key = config.push.subscriptions.clone();
+        assert!(
+            config.validate().is_err(),
+            "the key would overwrite the store"
+        );
     }
 }

@@ -401,24 +401,66 @@ describe("gateway compatibility shims", () => {
     await expect(
       setTorrentLimits("7", { max_download_speed: 1 }),
     ).resolves.toEqual({ id: "7", max_download_speed: 1, max_upload_speed: 0 });
+  });
+});
+
+describe("push endpoints", () => {
+  it("reads the VAPID config and manages subscriptions", async () => {
+    mockFetch({ enabled: true, public_key: "AQAB", subscriptions: 1 });
     await expect(getPushConfig()).resolves.toEqual({
-      enabled: false,
-      public_key: "",
-      subscriptions: 0,
+      enabled: true,
+      public_key: "AQAB",
+      subscriptions: 1,
     });
-    await expect(subscribePush({ endpoint: "https://push.test/1" })).resolves.toEqual(
-      { count: 0 },
-    );
+    expect(calls[0].url).toBe("/api/push/config");
+
+    const subscription = {
+      endpoint: "https://push.test/1",
+      keys: { p256dh: "key", auth: "auth" },
+    };
+    mockFetch({ count: 1 });
+    await expect(subscribePush(subscription)).resolves.toEqual({ count: 1 });
+    expect(calls[0].url).toBe("/api/push/subscribe");
+    expect(calls[0].init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(subscription);
+
+    mockFetch({ unsubscribed: true });
     await expect(unsubscribePush("https://push.test/1")).resolves.toEqual({
-      unsubscribed: false,
+      unsubscribed: true,
     });
+    expect(calls[0].init.method).toBe("DELETE");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      endpoint: "https://push.test/1",
+    });
+
+    mockFetch({ queued: true });
     await expect(testPush("https://push.test/1")).resolves.toEqual({
-      queued: false,
+      queued: true,
     });
-    await expect(getPushSubscriptions()).resolves.toEqual({ subscriptions: [] });
+    expect(calls[0].url).toBe("/api/push/test");
+
+    mockFetch({
+      subscriptions: [
+        {
+          id: "s1",
+          host: "push.test",
+          added: 1,
+          last_seen: 2,
+          user_agent: "UA",
+        },
+      ],
+    });
+    await expect(getPushSubscriptions()).resolves.toMatchObject({
+      subscriptions: [{ id: "s1", host: "push.test" }],
+    });
+    expect(calls[0].url).toBe("/api/push/subscriptions");
+
+    mockFetch({ unsubscribed: true });
     await expect(removePushSubscription("s1")).resolves.toEqual({
-      unsubscribed: false,
+      unsubscribed: true,
     });
+    expect(calls[0].url).toBe("/api/push/subscriptions/s1");
+    expect(calls[0].init.method).toBe("DELETE");
   });
 });
 

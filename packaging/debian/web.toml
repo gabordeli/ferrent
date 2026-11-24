@@ -25,3 +25,11 @@ names = ["ferrent.local", "192.168.2.65"]
 url = "https://127.0.0.1:50129"
 ca = "/var/lib/ferrent/tls-cert.pem"
 token = "replace-with-the-daemon-token"
+
+[push]
+# Web Push: the VAPID key is generated on first start (0600), the subscription
+# store too. Set a real contact in `subject` (mailto: or https:).
+enabled = true
+subject = "mailto:admin@example.com"
+private_key = "/var/lib/ferrent/vapid-private.pem"
+subscriptions = "/var/lib/ferrent/push-subscriptions.json"

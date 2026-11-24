@@ -11,6 +11,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use base64::Engine;
 use ferrent_daemon::config::ConfigStore;
 use ferrent_daemon::control::TorrentControl;
 use ferrent_daemon::labels::LabelState;
@@ -18,7 +19,7 @@ use ferrent_daemon::rpc::{AppState, TlsMaterial, serve, spawn_mirror};
 use ferrent_daemon::state::StateMirror;
 use ferrent_daemon::store::MemoryStore;
 use ferrent_engine::{MockEngine, TorrentEngine};
-use ferrent_web::{DaemonConfig, WebConfig, app};
+use ferrent_web::{DaemonConfig, PushConfig, WebConfig, app};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -304,4 +305,136 @@ async fn a_read_only_gateway_refuses_mutations() {
 
     let (status, _) = call(&web, "GET", "/api/torrents", None).await;
     assert_eq!(status, StatusCode::OK, "reads stay open");
+}
+
+fn web_from_config(config: WebConfig) -> Web {
+    let (state, router) = app(config);
+    let cookie = format!(
+        "ferrent_session={}",
+        state.sessions.issue(std::time::Instant::now())
+    );
+    Web {
+        router,
+        cookie,
+        state,
+    }
+}
+
+fn push_web(dir: &std::path::Path, enabled: bool) -> Web {
+    let config = WebConfig {
+        password: "test-pass".to_owned(),
+        push: PushConfig {
+            enabled,
+            subject: "mailto:test@example.com".to_owned(),
+            private_key: dir.join("vapid.pem"),
+            subscriptions: dir.join("subs.json"),
+        },
+        daemon: DaemonConfig {
+            url: "https://localhost:50129".to_owned(),
+            ca: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+            token: "token".to_owned(),
+            fingerprint: None,
+        },
+        ..WebConfig::default()
+    };
+    web_from_config(config)
+}
+
+#[tokio::test]
+async fn push_subscriptions_roundtrip_and_a_disabled_gateway() {
+    let dir = std::env::temp_dir().join(format!("ferrent-web-push-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+
+    let web = push_web(&dir, true);
+    let (status, body) = call(&web, "GET", "/api/push/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], true);
+    let public_key = body["public_key"].as_str().expect("public key");
+    assert!(!public_key.is_empty());
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/push/config")
+        .body(Body::empty())
+        .expect("request");
+    let anonymous = web.router.clone().oneshot(request).await.expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let p256dh = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([4_u8; 65]);
+    let auth = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([1_u8; 16]);
+    let subscription = json!({
+        "endpoint": "https://push.example/1",
+        "keys": { "p256dh": &p256dh, "auth": &auth },
+    });
+
+    let (status, body) = call(
+        &web,
+        "POST",
+        "/api/push/subscribe",
+        Some(json!({
+            "endpoint": "http://plain.example/1",
+            "keys": { "p256dh": &p256dh, "auth": &auth },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let (status, body) = call(
+        &web,
+        "POST",
+        "/api/push/subscribe",
+        Some(subscription.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 1);
+
+    let (status, body) = call(&web, "GET", "/api/push/subscriptions", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = body["subscriptions"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["host"], "push.example");
+    let id = rows[0]["id"].as_str().expect("id").to_owned();
+
+    let (status, body) = call(
+        &web,
+        "POST",
+        "/api/push/test",
+        Some(json!({ "endpoint": "https://push.example/1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["queued"], true);
+
+    let (status, body) = call(
+        &web,
+        "DELETE",
+        &format!("/api/push/subscriptions/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["unsubscribed"], true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir.join("subs.json"))
+            .expect("store")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "the client keys stay private");
+    }
+
+    let off = dir.join("off");
+    let disabled = push_web(&off, false);
+    let (status, body) = call(&disabled, "GET", "/api/push/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], false);
+
+    let (status, _) = call(&disabled, "POST", "/api/push/subscribe", Some(subscription)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let _ = std::fs::remove_dir_all(dir);
 }
