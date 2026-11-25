@@ -51,7 +51,7 @@ külön: [docs/platform-support.md](platform-support.md).
 | Execute – parancs eseményre | 🔌 | `[[hook]]` (added/complete/removed, timeout, argv) |
 | Extractor – kicsomagolás kész után | ❌ | nincs automatikus kicsomagolás |
 | Label – címkék + műveletek | 🔌 | label CRUD, auto-match, szín, limit, move-on-complete |
-| Notification – email/popup/blink/sound | 🔌 | webhook + Telegram + **Web Push** (böngésző), digest + quiet hours; headless is (912a657) |
+| Notification – email/popup/blink/sound | 🔌 | webhook + Telegram + **Web Push** (böngésző), digest + quiet hours; headless is (912a657); SMTP e-mail nincs (v1-ben nem cél) |
 | Scheduler – sávszélesség időhöz | 🔌 | `[scheduler]` |
 | Stats – grafikonok | ✅ | Statisztika fül: session-totál + 5 perces sparkline; `stats` CLI (M12-T4) |
 | WebUI | 🔌 | beépített `ferrent-web` (külön bináris) |
@@ -120,12 +120,19 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
    megvannak, a futásidejű visszajelzés nem.
 5. **Darab-térkép nézet** – a fájlonkénti prioritás kész, a darab-szintű
    nézet/prioritás nem; a web first/last jelölője még nem perzisztál.
-6. **uTorrent (és más kliens) import** – az adapter-váz kész, csak a Deluge
+6. **Web UI parity** – nincs Import oldal és torrentenkénti queue-move; a
+   torrent options panel több jelölője (first/last, auto-managed, ratio,
+   connection) megjelenik, de nem perzisztál.
+7. **uTorrent (és más kliens) import** – az adapter-váz kész, csak a Deluge
    van bekötve.
-7. **Prevent-suspend** – desktop-only, alacsony prioritás.
-8. **Kereső (több oldal)** – qB-szintű kényelem; plugin-architektúrát igényel.
-9. **Beépített auto-update** – APT repó és NSIS telepítő van, in-app updater
-   nincs.
+8. **Prevent-suspend** – desktop-only, alacsony prioritás.
+9. **Kereső (több oldal)** – qB-szintű kényelem; plugin-architektúrát igényel.
+10. **Beépített auto-update** – APT repó és NSIS telepítő van, in-app updater
+    nincs.
+11. **SMTP e-mail értesítés** – webhook/Telegram/Web Push van; a Deluge
+    Notification plugin e-mailje v1-ben nem cél.
+12. **GUI toolbar tooltipek** – a fő szövegek kulcsból jönnek, a
+    toolbar-feliratok (`Add torrent`, `Move up in queue`, …) még literálok.
 
 ## 6. M10 – Feature parity (lezárva)
 
@@ -149,7 +156,7 @@ valamint a Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 
 | Funkció | qBittorrent | Transmission | Deluge | Ferrent | Megjegyzés |
 |---|---|---|---|---|---|
-| Queue + prioritás | ✅ | ✅ | ✅ | ✅ | daemon-oldali sorrend |
+| Queue + prioritás | ✅ | ✅ | ✅ | ✅ | daemon-oldali sorrend; GUI + CLI move, a weben torrentenkénti move nincs |
 | Sávszélesség-ütemező | ✅ | ✅ | plugin | ✅ | `[scheduler]` |
 | RSS + regex szűrő | ✅ | ❌ | plugin | ✅ | M10-T4 |
 | Torrent készítés | ✅ | ✅ | ✅ | ✅ | M10-T3 |
@@ -169,7 +176,7 @@ valamint a Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ✅ | Statisztika fül + `stats` CLI; session-totál (M12-T4) |
 | **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben; GUI és web (M11-T2) |
-| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI, web, CLI chrume, állapotszavak és számlálók (M11-T3, d0c3c38, 0f5ac9d) |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI, web, CLI chrome, állapotszavak és számlálók; a GUI toolbar tooltipjei még angolul (M11-T3, d0c3c38, 0f5ac9d) |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) + NSIS; in-app updater nincs |
 
 ## 8. Következő kör jelöltjei (2026-11-25)
@@ -181,9 +188,12 @@ Haszon/ár szerint rendezve; a „kód” a becsült érintettséget jelzi.
 | 1 | **Windows futásidejű igazolás** (service, config-út, token-ACL, GUI) | az „előnézet” csak ezzel lesz támogatott | közepes |
 | 2 | **Streaming** (HTTP stream letöltés közben) | watch-while-downloading; a sequential már megvan | közepes–nagy |
 | 3 | **Extractor** (auto-unpack befejezés után) | napi haszon scene-release-eknél | közepes |
-| 4 | **Torrent-név átnevezése** | a fájl-rename kész, ez a maradék | kicsi |
-| 5 | **Port-teszt + random port + UPnP mapping státusz** | a config megvan, a visszajelzés hiányzik | kicsi |
-| 6 | **Darab-térkép + first/last perzisztálás** | a fájl-prioritás kész, a darab-nézet nem | közepes |
-| 7 | **uTorrent import adapter** | a `Source` váz kész, egy modul | kicsi–közepes |
-| 8 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
-| 9 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
+| 4 | **Web UI parity** (Import oldal, queue-move, options-perzisztálás) | a desktop GUI és a web ne csússzon szét | közepes |
+| 5 | **Torrent-név átnevezése** | a fájl-rename kész, ez a maradék | kicsi |
+| 6 | **Port-teszt + random port + UPnP mapping státusz** | a config megvan, a visszajelzés hiányzik | kicsi |
+| 7 | **Darab-térkép + first/last perzisztálás** | a fájl-prioritás kész, a darab-nézet nem | közepes |
+| 8 | **uTorrent import adapter** | a `Source` váz kész, egy modul | kicsi–közepes |
+| 9 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
+| 10 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
+| 11 | **SMTP e-mail értesítés** | Deluge-paritás; v1-ben nem cél | kicsi |
+| 12 | **GUI toolbar tooltipek i18n** | apró maradék a lokalizált chrome-ban | kicsi |

@@ -61,6 +61,9 @@ exit kódok, lokalizált súgó. Teljes referencia példákkal:
 
 - REST + SSE gateway a daemon gRPC-ja fölé, token-izolációval; a SPA a
   `webui/` alatt, a gateway szolgálja ki.
+- **Web Push:** saját VAPID kulcs + subscription store; torrent kész/hiba
+  eseményre böngésző-értesítés (`[push]`, 912a657). A SPA PWA-ként
+  telepíthető (manifest + service worker; iOS 16.4+ home-screen PWA).
 - Telepítés: [docs/web-install.md](web-install.md); API:
   [docs/web-api.md](web-api.md).
 
@@ -77,3 +80,40 @@ exit kódok, lokalizált súgó. Teljes referencia példákkal:
 - A GUI, a CLI és a súgók egy közös katalógusból (`ferrent-i18n`) jönnek;
   alapértelmezés a magyar, `FERRENT_LANG=en` angolra vált. A `--json`
   kulcsok nyelvfüggetlenek.
+
+## Még hiányzik (2026-11-25)
+
+A részletes, kód-mért lista a [feature-mátrix 5. szakaszában](feature-matrix.md#5-a-tényleges-hiányosságok-fontosság-szerint-2026-11-25);
+a viselkedési korlátok a [limitations.md](limitations.md)-ben.
+
+**Deluge-paritás:**
+
+- **Streaming** – HTTP stream letöltés közben (a sequential flag már van).
+- **Extractor** – automatikus kicsomagolás befejezés után.
+- **Torrent-név átnevezése** – a fájlnév-átnevezés kész, a torrent neve nem.
+- **Port-teszt / random port + UPnP mapping státusz** – a config kapcsolói
+  megvannak, a futásidejű visszajelzés nem.
+- **Darabtérkép nézet** – fájlszintű prioritás van, darabszintű nézet nincs.
+- **SMTP e-mail értesítés** – webhook/Telegram/Web Push van, e-mail nincs
+  (v1-ben nem cél).
+- **uTorrent (és más kliens) import** – a `Source` adapter kész, csak a
+  Deluge van bekötve.
+- **Prevent-suspend** – desktop-only, alacsony prioritás.
+- **Többoldalas kereső** – qBittorrent-szintű kényelem.
+- **In-app auto-update** – APT repó és NSIS telepítő van, önfrissítés nincs.
+
+**Kliens-rés:**
+
+- A **web UI-n** nincs Import oldal, nincs torrentenkénti queue-move, és a
+  torrent options panel több jelölője (első/utolsó darab, auto-managed,
+  ratio, connection) megjelenik, de még nem perzisztál.
+- A **GUI** torrent-név átnevezést és darabtérképet nem tud; a queue-move
+  viszont megvan (gomb + RPC + CLI). A toolbar tooltipjei (`Add torrent`,
+  `Move up in queue`, …) még angolul vannak, a többi chrome kulcsból jön.
+
+**Platform:**
+
+- **Windows:** előnézet (ZIP + NSIS, cross-build); a futásidejű igazolás
+  (service, config-út, token-ACL, GUI) hátra van.
+- **macOS:** nincs build. **iOS:** parkol, nincs build
+  ([platform-support.md](platform-support.md)).

@@ -1,6 +1,6 @@
 # Kliens-összehasonlítás
 
-A táblázat a 2026-11-23-i állapotot rögzíti; a többi kliens sorai a
+A táblázat a 2026-11-25-i állapotot rögzíti; a többi kliens sorai a
 hivatalos dokumentációból származnak (lábjegyzet), a Ferrent sorai ebből a
 repóból ([docs/features.md](features.md)). A részletes Deluge-mátrix:
 [docs/feature-matrix.md](feature-matrix.md).
@@ -9,7 +9,7 @@ repóból ([docs/features.md](features.md)). A részletes Deluge-mátrix:
 |---|---|---|---|---|---|
 | Nyelv | Python | C++/Qt | C | C++ (+ PHP a ruTorrent) | Rust |
 | Felépítés | daemon + thin client[1] | egy folyamat, opcionális fej nélküli `-nox`[2] | daemon + GUI/web[3] | ncurses daemon + web | daemon + natív GUI + web gateway |
-| Platform | Linux, macOS, Windows | Linux, macOS, Windows, BSD | Linux, macOS, Windows, BSD | Linux, BSD, macOS | Linux (amd64/arm64); macOS/Windows tervezett |
+| Platform | Linux, macOS, Windows | Linux, macOS, Windows, BSD | Linux, macOS, Windows, BSD | Linux, BSD, macOS | Linux (amd64/arm64); Windows előnézet; macOS nincs build |
 | Telepítés | disztribúció csomagja | disztribúció csomagja | disztribúció csomagja | disztribúció csomagja | aláírt APT repó; `.deb`; AppImage; Docker[5] |
 | Desktop GUI | GTK | Qt | GTK, Qt, macOS | – (ncurses) | `iced` (natív) |
 | Web UI | plugin[1] | beépített[2] | beépített[3] | ruTorrent[4] | `ferrent-web` + SPA |
@@ -20,8 +20,8 @@ repóból ([docs/features.md](features.md)). A részletes Deluge-mátrix:
 | Címkék | plugin | kategóriák + címkék | – | ruTorrent kategóriák | címkék, auto-hozzárendelés |
 | Watch mappa | plugin (AutoAdd) | beépített | beépített | beépített | AutoAdd stabilitás- és helykapuval |
 | Parancs eseményre | Execute plugin | „Run external program” | script | – | hook journal |
-| Értesítés | plugin | e-mail/desktop | – | ruTorrent plugin | webhook/Telegram outbox |
-| Torrent készítés | GUI | igen | igen | CLI | CLI (`create`) |
+| Értesítés | plugin | e-mail/desktop | – | ruTorrent plugin | webhook/Telegram/Web Push outbox |
+| Torrent készítés | GUI | igen | igen | CLI | CLI (`create`) + GUI |
 | Import más kliensből | – | – | – | – | Deluge import (címkék, pluginok) |
 | Licenc | GPL-3.0[1] | GPL-2.0+[2] | GPL-2.0/3.0[3] | GPL-2.0[4] | MIT OR Apache-2.0 |
 
@@ -52,8 +52,13 @@ A Deluge és a Transmission is így épül fel; a Ferrent ezt viszi tovább:
 
 ## Hol kevesebb
 
-- Nincs kicsomagoló, kereső és streaming; a plugin-ökoszisztéma fiatal.
-- macOS/Windows build még nincs ([docs/limitations.md](limitations.md)).
+- Nincs kicsomagoló, többoldalas kereső, HTTP streaming és uTorrent-import;
+  a plugin-ökoszisztéma fiatal.
+- Nincs torrent-név-átnevezés, darabtérkép nézet, port-teszt/random port és
+  SMTP e-mail értesítés.
+- A Windows build **előnézet** (futásban még méretlen), a macOS-nek nincs
+  buildje ([docs/limitations.md](limitations.md),
+  [docs/platform-support.md](platform-support.md)).
 
 ## Források
 

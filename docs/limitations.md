@@ -5,13 +5,19 @@ hibák: [docs/measurements/v1-rc1.md](measurements/v1-rc1.md).
 
 ## Funkcióhiány
 
-- Nincs kicsomagoló (extractor), beépített tracker-kereső, HTTP streaming
-  és uTorrent-import; a Deluge-import viszont kész
+- Nincs kicsomagoló (extractor), többoldalas kereső, HTTP streaming és
+  uTorrent-import; a Deluge-import viszont kész
   (`ferrent-cli import-deluge`, [docs/deluge-migration.md](deluge-migration.md)).
-- Nincs torrent-készítés a GUI-ból (a CLI `create` és a daemon RPC tudja).
+- Nincs torrent-név-átnevezés (a fájlnév-átnevezés kész), és nincs
+  darabtérkép nézet (GUI/web/CLI).
+- Nincs port-teszt, random port és UPnP mapping státusz; a config
+  kapcsolói megvannak.
+- Nincs SMTP e-mail értesítés (webhook, Telegram és Web Push van); v1-ben
+  nem cél.
 - A web UI a desktop GUI funkcionalitásának egy részét fedi le
-  ([docs/web-api.md](web-api.md)); a parity nyitott feladat (#76).
-- A `pieces` (darabtérkép) nézet nem elérhető a CLI-ből.
+  ([docs/web-api.md](web-api.md)): nincs Import oldal és torrentenkénti
+  queue-move; a torrent options panel több jelölője még nem perzisztál.
+- Nincs in-app auto-update (APT repó és NSIS telepítő van).
 
 ## Viselkedés
 
@@ -36,8 +42,9 @@ hibák: [docs/measurements/v1-rc1.md](measurements/v1-rc1.md).
 - A `.deb` Debian 12/13-ra és Ubuntu 24.04-re készül (amd64 + arm64; a GUI
   amd64). Fedora/Arch forrásból építhető
   ([docs/install-fedora.md](install-fedora.md),
-  [docs/install-arch.md](install-arch.md)); macOS és Windows tervezett
-  ([docs/install-macos.md](install-macos.md),
+  [docs/install-arch.md](install-arch.md)); a Windows **előnézet** (ZIP +
+  NSIS, cross-build, futásban méretlen), a macOS-nek nincs buildje
+  ([docs/platform-support.md](platform-support.md),
   [docs/install-windows.md](install-windows.md)).
 - A Docker image fej nélküli daemon (nincs benne GUI és web gateway):
   [docs/install-docker.md](install-docker.md).
