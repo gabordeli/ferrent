@@ -1,16 +1,22 @@
 # Deluge ↔ Ferrent feature-mátrix
 
-Mérve 2026-11-21.
+Mérve 2026-11-25 (`main`, d2e3ce2).
 
 **Források:** Deluge `about` (core feature lista) és `plugins` (bundled + 3rd
-party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
-(`crates/daemon/src/rpc/mod.rs`), a config séma
+party) oldala; Ferrent oldalon a `main` (d2e3ce2): a daemon RPC-listája
+(`crates/daemon/src/rpc/mod.rs`, 44 RPC), a config séma
 (`crates/daemon/src/config/schema.rs`), az engine `settings_pack`
-(`crates/engine/src/libtorrent/bridge.cpp`), valamint a
-`docs/measurements/*` mérések.
+(`crates/engine/src/libtorrent/bridge.cpp`), a CLI parancsfa
+(`crates/cli/src/main.rs`), a GUI fülek (`crates/gui/src/main.rs`), a web UI
+(`webui/src/`), valamint a `docs/measurements/*` mérések.
 
 **Jelölés:** ✅ built-in · 🟡 libtorrent default, de nincs config/UI felület ·
 🔌 Deluge-ban plugin, Ferrentben built-in · ❌ hiányzik a Ferrentből
+
+**Változás a 2026-11-21-es méréshez:** a blocklist, a sequential/super-seeding,
+a temp mappa, a tracker/web seed szerkesztés, az IP-filter, a statisztika és a
+nyelvesítés sora ✅-ra váltott; új sor a Web Push/PWA. A platformállapot
+külön: [docs/platform-support.md](platform-support.md).
 
 ## 1. Deluge core feature-ök (`about` oldal)
 
@@ -18,17 +24,17 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 |---|---|---|
 | Core/UI split, daemon mód | ✅ | `ferrentd` + gRPC/TLS, a kliens bármelyik gépről |
 | Távoli csatlakozás a daemonhoz | ✅ | TLS + token, tanúsítvány-pinning a GUI-ban |
-| Web UI | ✅ | `ferrent-web`: REST + SSE + SPA |
-| Console UI | ✅ | `ferrent-cli` (JSON kimenet, lapozás) |
+| Web UI | ✅ | `ferrent-web`: REST + SSE + SPA (PWA-ként telepíthető) |
+| Console UI | ✅ | `ferrent-cli` (JSON kimenet, lapozás, minden RPC lefedve) |
 | GTK+ UI | ✅ | natív `iced` GUI (nem GTK, de desktop kliens) |
 | BitTorrent Protocol Encryption | ✅ | `[network] encryption` = enabled/forced/disabled (M10-T1) |
-| Mainline DHT | 🟡 | default be |
-| Local Peer Discovery (LSD) | 🟡 | default be |
-| FAST protocol extension | 🟡 | default be |
-| µTorrent Peer Exchange (PEX) | 🟡 | default be |
-| UPnP és NAT-PMP | ✅ | `[network] upnp/natpmp` (default: be), a státusz nem látszik |
+| Mainline DHT | 🟡 | default be; nincs config/UI kapcsoló (a `settings_pack` nem állítja) |
+| Local Peer Discovery (LSD) | 🟡 | default be; nincs config/UI kapcsoló |
+| FAST protocol extension | 🟡 | default be; nincs config/UI kapcsoló |
+| µTorrent Peer Exchange (PEX) | 🟡 | default be; nincs config/UI kapcsoló |
+| UPnP és NAT-PMP | ✅ | `[network] upnp/natpmp` (default: be); a port-mapping állapota nem látszik |
 | Proxy support | ✅ | `[network]` HTTP/SOCKS5 (+ jelszavas), peer-proxy is (M10-T1) |
-| Web seed | ✅ | metainfóból, libtorrent |
+| Web seed | ✅ | metainfóból, libtorrent; a Trackers fülön szerkeszthető, CLI `webseeds` (M12-T2) |
 | Private torrents | ✅ | csak tracker, DHT/LSD nélkül (libtorrent) |
 | Global és per-torrent sebességlimit | ✅ | globális config + torrentenkénti RPC + label override |
 | Configurable bandwidth scheduler | ✅ | `[scheduler]` (idősáv, pause-seeding, limitek) |
@@ -41,13 +47,13 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Deluge plugin | Ferrent | Megjegyzés |
 |---|---|---|
 | AutoAdd – watch folderok | 🔌 | `[autoadd]`, több mappa, label/page |
-| Blocklist – IP blocklist import | ❌ | nincs `ip_filter` betöltés |
+| Blocklist – IP blocklist import | 🔌 | `[network] blocklist` + beépített eMule/PeerGuardian és CIDR parser, periodikus frissítés, `blocklist` CLI, GUI Network fül (M12-T3) |
 | Execute – parancs eseményre | 🔌 | `[[hook]]` (added/complete/removed, timeout, argv) |
-| Extractor – kicsomagolás kész után | ❌ | nincs |
+| Extractor – kicsomagolás kész után | ❌ | nincs automatikus kicsomagolás |
 | Label – címkék + műveletek | 🔌 | label CRUD, auto-match, szín, limit, move-on-complete |
-| Notification – email/popup/blink/sound | 🔌 | webhook + Telegram, digest + quiet hours (headless is!) |
+| Notification – email/popup/blink/sound | 🔌 | webhook + Telegram + **Web Push** (böngésző), digest + quiet hours; headless is (912a657) |
 | Scheduler – sávszélesség időhöz | 🔌 | `[scheduler]` |
-| Stats – grafikonok | ✅ | Statisztika fül: számok + 5 perces sparkline (M12-T4) |
+| Stats – grafikonok | ✅ | Statisztika fül: session-totál + 5 perces sparkline; `stats` CLI (M12-T4) |
 | WebUI | 🔌 | beépített `ferrent-web` (külön bináris) |
 | Toggle – session paused/resumed | ✅ | bulk pause/resume a kiválasztottakon |
 
@@ -64,14 +70,14 @@ party) oldala; Ferrent oldalon a `main` (efa82f4): a daemon RPC-listája
 | Copy Completed | 🔌 | label `move_completed_path` / DiskGuard zóna |
 | NetWatcher | 🔌 | netbind |
 | ltConfig | 🟡 | a config TOML néhány libtorrent-kapcsolót ad (limit, aktív, interfész) |
-| Pieces (darab-prioritás) | 🟡 | fájlonkénti prioritás ✅ (M10-T2, RPC + GUI + CLI); darab-nézet még nincs |
-| SequentialDownload | ❌ | nincs sequential flag |
+| Pieces (darab-prioritás) | 🟡 | fájlonkénti prioritás ✅ (M10-T2, RPC + GUI + CLI); darab-térkép nézet nincs; a web options panel „első/utolsó darab” jelölője jelenleg nem perzisztál |
+| SequentialDownload | ✅ | sor-menü + `add --sequential` + `set --sequential` + web toggle (M12-T1) |
 | PreventSuspend | ❌ | desktop-only, alacsony prioritás |
 | Streaming | ❌ | nincs HTTP stream a letöltés közben |
 | Default Trackers | ✅ | `[session] default_trackers` (M10-T3); a metainfót nem írja át |
-| Randomize / autoport | ❌ | nincs port-randomizálás/teszt |
+| Randomize / autoport | ❌ | nincs port-randomizálás és nincs port-teszt |
 | Updatorr, FlexGet/FlexRSS, YaRSS2 | 🟡 | a beépített `[rss]` watcher kiváltja a YaRSS2-t; FlexGet továbbra is külső |
-| uTorrentImport | ❌ | csak Deluge-import van (`M8-T1`) |
+| uTorrentImport | ❌ | a `crates/import` Source-adapterséget kliensfüggetlen, de egyelőre csak a Deluge van regisztrálva (`M8-T1`) |
 | Smart Move, Browse Button, CopyMagnetURI, IPstatusbar | ❌ | GUI-kényelem |
 
 ## 4. Ami a Ferrentben van, a Deluge-ban viszont nem (vagy csak plugin)
@@ -88,50 +94,56 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 - **TLS + token auth** a daemon RPC-n (a Deluge jelszavas, titkosítás nélküli
   JSON-RPC-t használ a hálózaton).
 - **Deluge-állapot import** (`import-deluge`: label.conf, autoadd, execute,
-  scheduler, .torrent + fastresume).
+  scheduler, .torrent + fastresume); a `Source` adapter kliensfüggetlen, az új
+  kliens egy modul + egy registry-bejegyzés. A platform-kapu a daemoné
+  (`import_enabled` a `GetStatus`-ban).
 - **Crash-safe state**: redb + checkpoint, `kill -9` után recheck nélkül
   (mért: 227 ms), sérült rekord karanténba.
 - **Egy bináris, Python nélkül** (nincs interpreter/plugin-ökoszisztéma).
-- **Config revíziók** + GUI workbench (Connection/Session/Labels/Storage),
-  `Save`/`Reload` dirty-kezeléssel.
+- **Config revíziók** + GUI workbench (Connection/Session/Labels/Storage/RSS/
+  Network), `Save`/`Reload` dirty-kezeléssel.
+- **Web Push** a böngészőnek: saját VAPID kulcs, subscription store,
+  torrent kész/hiba eseményre (912a657); a SPA PWA-ként telepíthető
+  (iOS home-screen; a Web Push iOS 16.4+).
 - **Saját tracker** a teszthálóhoz (infra, nem kliens-funkció).
+- **Windows port (előnézet)**: daemon + CLI cross-build, ZIP + NSIS; futásban
+  még méretlen ([docs/platform-support.md](platform-support.md)).
 
-## 5. A tényleges hiányosságok, fontosság szerint
+## 5. A tényleges hiányosságok, fontosság szerint (2026-11-25)
 
-1. ~~**Per-file prioritás + szelektív letöltés**~~ – **kész (M10-T2)**: RPC +
-   GUI Files (kattintható sorok) + CLI; a skip-elt fájl nem töltődik le, a
-   prioritás restart után is megmarad (`docs/measurements/m10-file-priorities.md`).
-2. ~~**Proxy támogatás** (HTTP/SOCKS5 + peer-proxy)~~ – **kész (M10-T1)**:
-   `[network]` proxy + encryption + UPnP/NAT-PMP, SOCKS5-tel mérve
-   (`docs/measurements/m10-network-settings.md`).
-3. ~~**RSS-watcher**~~ – **kész (M10-T4)**: `[rss]` feedek, regex szűrő,
-   tartós dedupe, `ferrent-cli rss` + Settings → RSS fül
-   (`docs/measurements/m10-rss-watcher.md`).
-4. **IP blocklist** – privát trackereknél/anti-leechhez; közepes.
-5. ~~**Torrent készítés + default trackerek**~~ – **kész (M10-T3)**:
-   `CreateTorrent` RPC + `ferrent-cli create` + GUI gomb; a default trackert a
-   `[session] default_trackers` adja (`docs/measurements/m10-torrent-creation.md`).
-6. **Sequential download** – kicsi, streameléshez/watch-while-downloading.
-7. **Statisztika-nézet / session összesítés** – GUI-kényelem.
-8. **Pieces nézet, streaming, prevent-suspend** – alacsony prioritás.
+1. **Streaming** – HTTP stream a letöltés közben; a sequential már megvan,
+   ez a watch-while-downloading másik fele.
+2. **Extractor** – automatikus kicsomagolás befejezés után (Deluge plugin).
+3. **Torrent-név átnevezése** – a fájlnév-átnevezés kész (M11-T4), a torrent
+   saját neve még nem szerkeszthető.
+4. **Port-teszt és random port + UPnP mapping státusz** – a config kapcsolói
+   megvannak, a futásidejű visszajelzés nem.
+5. **Darab-térkép nézet** – a fájlonkénti prioritás kész, a darab-szintű
+   nézet/prioritás nem; a web first/last jelölője még nem perzisztál.
+6. **uTorrent (és más kliens) import** – az adapter-váz kész, csak a Deluge
+   van bekötve.
+7. **Prevent-suspend** – desktop-only, alacsony prioritás.
+8. **Kereső (több oldal)** – qB-szintű kényelem; plugin-architektúrát igényel.
+9. **Beépített auto-update** – APT repó és NSIS telepítő van, in-app updater
+   nincs.
 
-## 6. Javaslat: M10 – Feature parity
+## 6. M10 – Feature parity (lezárva)
 
-| Task | Tartalom | Miért |
+| Task | Tartalom | Állapot |
 |---|---|---|
-| **M10-T1** | Proxy + titkosítás/UPnP config surface (engine settings → TOML → GUI Advanced) | privacy, a Deluge core-ban van |
-| **M10-T2** | Per-file prioritás + szelektív letöltés (RPC + GUI Files + CLI) | a legnagyobb funkcionális lyuk |
-| **M10-T3** | Torrent készítés + `default_trackers` | kicsi, önálló, azonnal használható |
-| **M10-T4** | RSS-watcher (feed → szűrő → add, label, dedupe) | beépített, Deluge-ban plugin |
+| **M10-T1** | Proxy + titkosítás/UPnP config surface | ✅ kész |
+| **M10-T2** | Per-file prioritás + szelektív letöltés | ✅ kész |
+| **M10-T3** | Torrent készítés + `default_trackers` | ✅ kész |
+| **M10-T4** | RSS-watcher | ✅ kész |
 
-Az IP blocklist, a sequential letöltés és a stats/pieces nézet egy következő
-kör (M11) jelöltje; a streaming és a prevent-suspend továbbra is opcionális.
+Az M11 (téma, i18n, recheck/rename, tracker/web seed) és az M12 (sequential/
+super-seeding/temp, IP-filter, stats) is lezárva; a nyitott lista az 5. szakasz.
 
 ## 7. Más kliensek — mit érdemes átvenni
 
-Források (2026-11-21): Wikipedia *Comparison of BitTorrent clients*,
-`qbittorrent.org` feature lista, a Deluge-oldalak (fent), valamint a
-Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
+Források (2026-11-21, frissítve 2026-11-25): Wikipedia *Comparison of
+BitTorrent clients*, `qbittorrent.org` feature lista, a Deluge-oldalak (fent),
+valamint a Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 **kliens-szintű, felhasználói** funkciókat hasonlítja; a protokoll-dolgokat
 (DHT, PEX, LSD, µTP, titkosítás) mindegyik tudja.
 
@@ -149,31 +161,29 @@ Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Temp / incomplete mappa** | ✅ | ✅ | ✅ | ✅ | `[session] temp_dir`: a payload oda megy, befejezéskor a zónába/download_dir-be mozdul (M12-T1) |
 | **Tracker szerkesztés** | ✅ | ✅ | ✅ | ✅ | Trackers fül: hozzáadás/törlés + CLI `trackers --add/--remove` (M12-T2) |
 | **Web seed kezelés** | ✅ | rész | rész | ✅ | Trackers fül + `webseeds <id> [--set …]` (M12-T2) |
-| **Sequential download** | ✅ | ❌ | ✅ | ✅ | sor-menü + `add --sequential` (M12-T1) |
-| **Super-seeding** | ✅ | ❌ | ✅ | ✅ | sor-menü, torrentenként (M12-T1) |
+| **Sequential download** | ✅ | ❌ | ✅ | ✅ | sor-menü + `add --sequential` + web toggle (M12-T1) |
+| **Super-seeding** | ✅ | ❌ | ✅ | ✅ | sor-menü, torrentenként + web/CLI (M12-T1) |
 | **IP filter** (eMule/P2P) | ✅ | ❌ | plugin | ✅ | `[network] blocklist` + `ip_filter`; CLI `blocklist`, GUI Network fül (M12-T3) |
+| **Web Push / PWA értesítés** | ❌ | ❌ | plugin (desktop) | ✅ | `[push]` VAPID + subscription store, kész/hiba esemény (912a657) |
 | **Beépített tracker** | ✅ | ❌ | ❌ | 🟡 | külön `ferrent-tracker` bináris |
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ✅ | Statisztika fül + `stats` CLI; session-totál (M12-T4) |
-| **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben (M11-T2) |
-| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | 🟡 | magyar default + angol, a GUI chrome kész (M11-T3); állapotszavak/számlálók még angolul |
-| Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) |
+| **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben; GUI és web (M11-T2) |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI, web, CLI chrume, állapotszavak és számlálók (M11-T3, d0c3c38, 0f5ac9d) |
+| Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) + NSIS; in-app updater nincs |
 
-## 8. Következő kör jelöltjei (M11/M12)
+## 8. Következő kör jelöltjei (2026-11-25)
 
-Haszon/ár szerint rendezve; a „kód” oszlop a becsült érintettséget jelzi.
+Haszon/ár szerint rendezve; a „kód” a becsült érintettséget jelzi.
 
-| # | Funkció | Miért | Kód | Javaslat |
-|---|---|---|---|---|
-| 1 | **Bugsink-hibák javítása** (FERRENT-4 redb lock, FERRENT-5 transport, FERRENT-11 `unwrap`) | a kiadási kapu része; valódi felhasználói hibák | kicsi–közepes | M11-T1 (hardening) |
-| 2 | ~~**Téma: sötét/világos + akcentus**~~ – **kész (M11-T2)**: `Palette` + accessorok, Settings → Appearance, `gui.toml` (`docs/measurements/m11-theme.md`) | — | — | kész |
-| 3 | **Nyelvesítés (hu default, en)** | a user kérése; induláshoz elég a GUI+CLI szövegei | közepes | M11-T3 |
-| 4 | ~~**Force recheck + átnevezés**~~ – **kész (M11-T4)**: sor-menü + rename modal, `RecheckTorrent`/`RenameTorrentFile` RPC, CLI; élesben mérve (`docs/measurements/m11-recheck-rename.md`) | — | — | kész |
-| 5 | **Tracker szerkesztés + web seed** | privát trackereknél napi haszon | közepes | M11-T5 |
-| 6 | **Sequential + super-seeding + temp mappa** | watch-while-downloading; temp mappa a DiskGuardhoz illik | közepes | M12-T1 |
-| 7 | ~~**IP filter (eMule/P2P formátum)**~~ – **kész (M12-T3)**: `[network] blocklist` + CIDR/p2p parser, `blocklist` CLI, GUI Network fül (`docs/measurements/m12-ip-filter.md`) | — | — | kész |
-| 8 | **Statisztika-nézet** | session-összesítés, grafikon | közepes | M12-T3 |
-| 9 | **Kereső (több oldal)** | qB-szintű kényelem; plugin-architektúrát igényel | nagy | M13 jelölt |
-
-A #1 a legfontosabb: a #22 lezárása után a nyitott Bugsink-tételek a kiadási
-kapu (hónapokig tartó éles futás) egyetlen ismert akadálya.
+| # | Funkció | Miért | Kód |
+|---|---|---|---|
+| 1 | **Windows futásidejű igazolás** (service, config-út, token-ACL, GUI) | az „előnézet” csak ezzel lesz támogatott | közepes |
+| 2 | **Streaming** (HTTP stream letöltés közben) | watch-while-downloading; a sequential már megvan | közepes–nagy |
+| 3 | **Extractor** (auto-unpack befejezés után) | napi haszon scene-release-eknél | közepes |
+| 4 | **Torrent-név átnevezése** | a fájl-rename kész, ez a maradék | kicsi |
+| 5 | **Port-teszt + random port + UPnP mapping státusz** | a config megvan, a visszajelzés hiányzik | kicsi |
+| 6 | **Darab-térkép + first/last perzisztálás** | a fájl-prioritás kész, a darab-nézet nem | közepes |
+| 7 | **uTorrent import adapter** | a `Source` váz kész, egy modul | kicsi–közepes |
+| 8 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
+| 9 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
