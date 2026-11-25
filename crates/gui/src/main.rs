@@ -4266,7 +4266,7 @@ impl App {
                     .size(10)
                     .color(theme::text_muted()),
                 container(action_button(
-                    "Refresh",
+                    i18n::t("Refresh"),
                     Message::HooksRefresh,
                     !settings.loading,
                 ))
@@ -4525,7 +4525,7 @@ impl App {
                 horizontal_space(),
                 action_button(i18n::t("Add"), Message::NotifyAdd, !settings.loading),
                 action_button(
-                    "Remove",
+                    i18n::t("Remove"),
                     Message::NotifyRemove,
                     settings.notify_selected.is_some() && !settings.loading,
                 ),
@@ -4546,7 +4546,7 @@ impl App {
                     !settings.loading
                 ),
                 action_button(
-                    "Remove",
+                    i18n::t("Remove"),
                     Message::NotifyTelegramRemove,
                     settings.notify_telegram.is_some() && !settings.loading,
                 ),
@@ -6022,7 +6022,11 @@ impl App {
             row![
                 horizontal_space(),
                 action_button(i18n::t("Cancel"), Message::CloseModal, true),
-                action_button("Add torrent", Message::AddConfirmed, !self.add_in_flight),
+                action_button(
+                    i18n::t("Add torrent"),
+                    Message::AddConfirmed,
+                    !self.add_in_flight,
+                ),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -6055,7 +6059,7 @@ impl App {
             row![
                 horizontal_space(),
                 action_button(i18n::t("Cancel"), Message::CloseModal, true),
-                action_button("Remove", Message::RemoveConfirmed, true),
+                action_button(i18n::t("Remove"), Message::RemoveConfirmed, true),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -6180,7 +6184,7 @@ impl App {
                 row![
                     button("Test & save").on_press(Message::TestServer),
                     button("New").on_press(Message::NewServer),
-                    button("Refresh").on_press(Message::OpenServers),
+                    button(i18n::t("Refresh")).on_press(Message::OpenServers),
                 ]
                 .spacing(8),
             ]
@@ -6673,48 +6677,63 @@ impl App {
             .values()
             .any(|torrent| torrent.state != TorrentState::Seeding as i32);
         let icons = row![
-            toolbar_icon(glyph::PLUS, "Add torrent", Message::PickTorrent, true),
+            toolbar_icon(
+                glyph::PLUS,
+                i18n::t("Add torrent"),
+                Message::PickTorrent,
+                true
+            ),
             toolbar_icon(
                 glyph::TRASH,
-                "Remove selected",
+                i18n::t("Remove selected"),
                 Message::OpenRemove,
                 selected > 0
             ),
-            toolbar_icon(glyph::SEARCH, "Search", Message::ToggleSearch, true),
+            toolbar_icon(
+                glyph::SEARCH,
+                i18n::t("Search"),
+                Message::ToggleSearch,
+                true
+            ),
             toolbar_icon(
                 glyph::PAUSE,
-                "Pause selected",
+                i18n::t("Pause selected"),
                 Message::Action(TorrentAction::Pause),
                 selected > 0
             ),
             toolbar_icon(
                 glyph::PLAY,
-                "Resume selected",
+                i18n::t("Resume selected"),
                 Message::Action(TorrentAction::Resume),
                 selected > 0
             ),
             toolbar_icon(
                 glyph::ARROW_UP,
-                "Move up in queue",
+                i18n::t("Move up in queue"),
                 Message::QueueMove(true),
                 unfinished
             ),
             toolbar_icon(
                 glyph::ARROW_DOWN,
-                "Move down in queue",
+                i18n::t("Move down in queue"),
                 Message::QueueMove(false),
                 unfinished
             ),
             Element::<Message>::from(horizontal_space()),
-            toolbar_icon(glyph::REFRESH, "Refresh", Message::Refresh, true),
+            toolbar_icon(glyph::REFRESH, i18n::t("Refresh"), Message::Refresh, true),
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center);
 
         let search: Element<'_, Message> = if self.search_visible {
             row![
-                toolbar_icon(glyph::CLOSE, "Close search", Message::ToggleSearch, true),
-                text_input("Search torrents…", &self.filter)
+                toolbar_icon(
+                    glyph::CLOSE,
+                    i18n::t("Close search"),
+                    Message::ToggleSearch,
+                    true
+                ),
+                text_input(i18n::t("Search torrents…"), &self.filter)
                     .id(self.filter_id.clone())
                     .on_input(Message::FilterChanged)
                     .width(Length::Fill),
@@ -8570,6 +8589,30 @@ mod import_gate_tests {
             import_enabled: false,
             ..ServerStatus::default()
         })));
+    }
+}
+
+#[cfg(test)]
+mod toolbar_i18n_tests {
+    use super::*;
+
+    #[test]
+    fn every_toolbar_label_has_a_hungarian_translation() {
+        i18n::install(i18n::Lang::Hu);
+        for label in [
+            "Add torrent",
+            "Remove selected",
+            "Search",
+            "Pause selected",
+            "Resume selected",
+            "Move up in queue",
+            "Move down in queue",
+            "Refresh",
+            "Close search",
+            "Search torrents…",
+        ] {
+            assert_ne!(i18n::t(label), label, "missing translation for {label:?}");
+        }
     }
 }
 
