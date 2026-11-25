@@ -109,8 +109,7 @@ a viselkedési korlátok a [limitations.md](limitations.md)-ben.
   torrent options panel több jelölője (első/utolsó darab, auto-managed,
   ratio, connection) megjelenik, de még nem perzisztál.
 - A **GUI** torrent-név átnevezést és darabtérképet nem tud; a queue-move
-  viszont megvan (gomb + RPC + CLI). A toolbar tooltipjei (`Add torrent`,
-  `Move up in queue`, …) még angolul vannak, a többi chrome kulcsból jön.
+  viszont megvan (gomb + RPC + CLI).
 
 **Platform:**
 

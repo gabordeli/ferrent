@@ -130,8 +130,6 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
    nincs.
 10. **SMTP e-mail értesítés** – webhook/Telegram/Web Push van; a Deluge
     Notification plugin e-mailje v1-ben nem cél.
-11. **GUI toolbar tooltipek** – a fő szövegek kulcsból jönnek, a
-    toolbar-feliratok (`Add torrent`, `Move up in queue`, …) még literálok.
 
 ## 6. M10 – Feature parity (lezárva)
 
@@ -175,7 +173,7 @@ valamint a Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ✅ | Statisztika fül + `stats` CLI; session-totál (M12-T4) |
 | **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben; GUI és web (M11-T2) |
-| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI, web, CLI chrome, állapotszavak és számlálók; a GUI toolbar tooltipjei még angolul (M11-T3, d0c3c38, 0f5ac9d) |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI (toolbar tooltipek is), web, CLI chrome, állapotszavak és számlálók (M11-T3, d0c3c38, 0f5ac9d, 55fcbac) |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) + NSIS; in-app updater nincs |
 
 ## 8. Következő kör jelöltjei (2026-11-25)
@@ -194,4 +192,3 @@ Haszon/ár szerint rendezve; a „kód” a becsült érintettséget jelzi.
 | 8 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
 | 9 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
 | 10 | **SMTP e-mail értesítés** | Deluge-paritás; v1-ben nem cél | kicsi |
-| 11 | **GUI toolbar tooltipek i18n** | apró maradék a lokalizált chrome-ban | kicsi |
