@@ -74,6 +74,9 @@ exit kódok, lokalizált súgó. Teljes referencia példákkal:
   [docs/deluge-migration.md](deluge-migration.md). A daemon a `GetStatus`-ban
   jelzi, tesztelt-e a platform (Windows: még nem — a GUI elrejti az oldalt, a
   CLI `import-deluge` továbbra is elérhető).
+- uTorrent `resume.dat` + `.torrent` import (`ferrent-cli import-utorrent`),
+  `--save-root`/`--path-map` útvonal-képezéssel, szüneteltetve:
+  [docs/utorrent-migration.md](utorrent-migration.md).
 
 ## Nemzetköziesítés
 
@@ -96,8 +99,6 @@ a viselkedési korlátok a [limitations.md](limitations.md)-ben.
 - **Darabtérkép nézet** – fájlszintű prioritás van, darabszintű nézet nincs.
 - **SMTP e-mail értesítés** – webhook/Telegram/Web Push van, e-mail nincs
   (v1-ben nem cél).
-- **uTorrent (és más kliens) import** – a `Source` adapter kész, csak a
-  Deluge van bekötve.
 - **Prevent-suspend** – desktop-only, alacsony prioritás.
 - **Többoldalas kereső** – qBittorrent-szintű kényelem.
 - **In-app auto-update** – APT repó és NSIS telepítő van, önfrissítés nincs.

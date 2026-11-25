@@ -7,7 +7,8 @@ ferrent-cli \- control a Ferrent daemon over TLS
 .SH DESCRIPTION
 .B ferrent-cli
 talks to the Ferrent daemon's TLS gRPC API. It lists and edits torrents,
-manages labels, trackers, limits and saved servers, and imports Deluge state.
+manages labels, trackers, limits and saved servers, and imports Deluge or
+uTorrent state.
 Every reading command accepts \fB\-\-json\fR for stable machine output.
 .SH OPTIONS
 .TP
@@ -110,6 +111,9 @@ saved daemons in cli.toml: list, add, remove, use
 .TP
 .B import-deluge
 import a Deluge state directory (paused adds)
+.TP
+.B import-utorrent
+import a uTorrent app-data directory (resume.dat; paused adds)
 .TP
 .B watch
 stream torrent deltas until Ctrl-C

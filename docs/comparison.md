@@ -22,7 +22,7 @@ repóból ([docs/features.md](features.md)). A részletes Deluge-mátrix:
 | Parancs eseményre | Execute plugin | „Run external program” | script | – | hook journal |
 | Értesítés | plugin | e-mail/desktop | – | ruTorrent plugin | webhook/Telegram/Web Push outbox |
 | Torrent készítés | GUI | igen | igen | CLI | CLI (`create`) + GUI |
-| Import más kliensből | – | – | – | – | Deluge import (címkék, pluginok) |
+| Import más kliensből | – | – | – | – | Deluge + uTorrent (`resume.dat`) |
 | Licenc | GPL-3.0[1] | GPL-2.0+[2] | GPL-2.0/3.0[3] | GPL-2.0[4] | MIT OR Apache-2.0 |
 
 A „plugin” azt jelenti, hogy a funkció nem a magban, hanem egy hivatalos

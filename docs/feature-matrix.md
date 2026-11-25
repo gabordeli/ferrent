@@ -77,7 +77,7 @@ külön: [docs/platform-support.md](platform-support.md).
 | Default Trackers | ✅ | `[session] default_trackers` (M10-T3); a metainfót nem írja át |
 | Randomize / autoport | ❌ | nincs port-randomizálás és nincs port-teszt |
 | Updatorr, FlexGet/FlexRSS, YaRSS2 | 🟡 | a beépített `[rss]` watcher kiváltja a YaRSS2-t; FlexGet továbbra is külső |
-| uTorrentImport | ❌ | a `crates/import` Source-adapterséget kliensfüggetlen, de egyelőre csak a Deluge van regisztrálva (`M8-T1`) |
+| uTorrentImport | ✅ | CLI `import-utorrent` + RPC (`resume.dat` + `.torrent`, `save-root`/`path-map`, paused); a GUI Import oldal egyelőre Deluge-only (M14-T8) |
 | Smart Move, Browse Button, CopyMagnetURI, IPstatusbar | ❌ | GUI-kényelem |
 
 ## 4. Ami a Ferrentben van, a Deluge-ban viszont nem (vagy csak plugin)
@@ -93,10 +93,11 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 - **Prometheus `/metrics`** beépítve (opcionális Bearer tokennel).
 - **TLS + token auth** a daemon RPC-n (a Deluge jelszavas, titkosítás nélküli
   JSON-RPC-t használ a hálózaton).
-- **Deluge-állapot import** (`import-deluge`: label.conf, autoadd, execute,
-  scheduler, .torrent + fastresume); a `Source` adapter kliensfüggetlen, az új
-  kliens egy modul + egy registry-bejegyzés. A platform-kapu a daemoné
-  (`import_enabled` a `GetStatus`-ban).
+- **Deluge- és uTorrent-állapot import** (`import-deluge`: label.conf,
+  autoadd, execute, scheduler, .torrent + fastresume; `import-utorrent`:
+  resume.dat + .torrent, `save-root`/`path-map`); a `Source` adapter
+  kliensfüggetlen, az új kliens egy modul + egy registry-bejegyzés. A
+  platform-kapu a daemoné (`import_enabled` a `GetStatus`-ban).
 - **Crash-safe state**: redb + checkpoint, `kill -9` után recheck nélkül
   (mért: 227 ms), sérült rekord karanténba.
 - **Egy bináris, Python nélkül** (nincs interpreter/plugin-ökoszisztéma).
@@ -123,15 +124,13 @@ Ezek a weboldal „csak a Ferrentben” oszlopához kellenek:
 6. **Web UI parity** – nincs Import oldal és torrentenkénti queue-move; a
    torrent options panel több jelölője (first/last, auto-managed, ratio,
    connection) megjelenik, de nem perzisztál.
-7. **uTorrent (és más kliens) import** – az adapter-váz kész, csak a Deluge
-   van bekötve.
-8. **Prevent-suspend** – desktop-only, alacsony prioritás.
-9. **Kereső (több oldal)** – qB-szintű kényelem; plugin-architektúrát igényel.
-10. **Beépített auto-update** – APT repó és NSIS telepítő van, in-app updater
-    nincs.
-11. **SMTP e-mail értesítés** – webhook/Telegram/Web Push van; a Deluge
+7. **Prevent-suspend** – desktop-only, alacsony prioritás.
+8. **Kereső (több oldal)** – qB-szintű kényelem; plugin-architektúrát igényel.
+9. **Beépített auto-update** – APT repó és NSIS telepítő van, in-app updater
+   nincs.
+10. **SMTP e-mail értesítés** – webhook/Telegram/Web Push van; a Deluge
     Notification plugin e-mailje v1-ben nem cél.
-12. **GUI toolbar tooltipek** – a fő szövegek kulcsból jönnek, a
+11. **GUI toolbar tooltipek** – a fő szövegek kulcsból jönnek, a
     toolbar-feliratok (`Add torrent`, `Move up in queue`, …) még literálok.
 
 ## 6. M10 – Feature parity (lezárva)
@@ -192,8 +191,7 @@ Haszon/ár szerint rendezve; a „kód” a becsült érintettséget jelzi.
 | 5 | **Torrent-név átnevezése** | a fájl-rename kész, ez a maradék | kicsi |
 | 6 | **Port-teszt + random port + UPnP mapping státusz** | a config megvan, a visszajelzés hiányzik | kicsi |
 | 7 | **Darab-térkép + first/last perzisztálás** | a fájl-prioritás kész, a darab-nézet nem | közepes |
-| 8 | **uTorrent import adapter** | a `Source` váz kész, egy modul | kicsi–közepes |
-| 9 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
-| 10 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
-| 11 | **SMTP e-mail értesítés** | Deluge-paritás; v1-ben nem cél | kicsi |
-| 12 | **GUI toolbar tooltipek i18n** | apró maradék a lokalizált chrome-ban | kicsi |
+| 8 | **Kereső** (több oldal) | qB-szintű kényelem; plugin-architektúrát igényel | nagy |
+| 9 | **In-app auto-update** | APT/NSIS van, önfrissítés nincs | közepes |
+| 10 | **SMTP e-mail értesítés** | Deluge-paritás; v1-ben nem cél | kicsi |
+| 11 | **GUI toolbar tooltipek i18n** | apró maradék a lokalizált chrome-ban | kicsi |

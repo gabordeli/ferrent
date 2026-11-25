@@ -5,9 +5,11 @@ hibák: [docs/measurements/v1-rc1.md](measurements/v1-rc1.md).
 
 ## Funkcióhiány
 
-- Nincs kicsomagoló (extractor), többoldalas kereső, HTTP streaming és
-  uTorrent-import; a Deluge-import viszont kész
-  (`ferrent-cli import-deluge`, [docs/deluge-migration.md](deluge-migration.md)).
+- Nincs kicsomagoló (extractor), többoldalas kereső és HTTP streaming; a
+  Deluge- és uTorrent-import viszont kész
+  (`ferrent-cli import-deluge` / `import-utorrent`,
+  [docs/deluge-migration.md](deluge-migration.md),
+  [docs/utorrent-migration.md](utorrent-migration.md)).
 - Nincs torrent-név-átnevezés (a fájlnév-átnevezés kész), és nincs
   darabtérkép nézet (GUI/web/CLI).
 - Nincs port-teszt, random port és UPnP mapping státusz; a config

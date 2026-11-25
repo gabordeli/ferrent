@@ -13,13 +13,13 @@ use ferrent_protocol::v1::{
     DeleteLabelRequest, GetAutoAddStatusRequest, GetConfigRequest, GetDisksRequest,
     GetHookStatusRequest, GetNotificationStatusRequest, GetRssStatusRequest, GetStatsRequest,
     GetStatusRequest, GetTorrentFilesRequest, GetTorrentPeersRequest, GetTorrentRequest,
-    GetTorrentTrackersRequest, GetWebSeedsRequest, ImportStateRequest, Label, ListLabelsRequest,
-    ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest, PreviewRssFeedRequest,
-    QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest, RemoveTorrentRequest,
-    RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest, ScanAutoAddRequest,
-    SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest, SetSequentialRequest,
-    SetSuperSeedingRequest, SetTorrentLabelRequest, SetTorrentLimitsRequest, SetWebSeedsRequest,
-    SortField, UpdateLabelRequest, WatchRequest,
+    GetTorrentTrackersRequest, GetWebSeedsRequest, ImportStateRequest, ImportStateResponse, Label,
+    ListLabelsRequest, ListTorrentsRequest, MoveTorrentRequest, PauseTorrentRequest,
+    PreviewRssFeedRequest, QueueDirection, RecheckTorrentRequest, RefreshBlocklistRequest,
+    RemoveTorrentRequest, RemoveTrackerRequest, RenameTorrentFileRequest, ResumeTorrentRequest,
+    ScanAutoAddRequest, SendTestNotificationRequest, SetConfigRequest, SetFilePrioritiesRequest,
+    SetSequentialRequest, SetSuperSeedingRequest, SetTorrentLabelRequest, SetTorrentLimitsRequest,
+    SetWebSeedsRequest, SortField, UpdateLabelRequest, WatchRequest,
 };
 use serde_json::json;
 
@@ -114,6 +114,21 @@ enum Command {
         /// `scheduler.conf` (default: the parent of `--state-dir`).
         #[arg(long)]
         config_dir: Option<PathBuf>,
+        /// Only list what was found; do not add anything to the daemon.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Import a uTorrent app-data directory (resume.dat and its .torrent files).
+    ImportUtorrent {
+        /// uTorrent's app-data directory, the one holding `resume.dat`.
+        #[arg(long)]
+        app_dir: PathBuf,
+        /// Replace every torrent's save path on the daemon host.
+        #[arg(long)]
+        save_root: Option<String>,
+        /// Map a client path prefix to a daemon path (`FROM=TO`; repeatable).
+        #[arg(long = "path-map")]
+        path_map: Vec<String>,
         /// Only list what was found; do not add anything to the daemon.
         #[arg(long)]
         dry_run: bool,
@@ -629,6 +644,15 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     {
         return import_deluge_report(state_dir, config_dir.as_deref(), json);
     }
+    if let Command::ImportUtorrent {
+        app_dir,
+        save_root,
+        path_map,
+        dry_run: true,
+    } = &command
+    {
+        return import_utorrent_report(app_dir, save_root.as_deref(), path_map, json);
+    }
 
     // `servers` edits the local config, so it runs before the daemon resolves.
     if let Command::Servers { command } = &command {
@@ -720,41 +744,41 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 })
                 .await?
                 .into_inner();
-            if json {
-                let outcomes: Vec<_> = response
-                    .outcomes
-                    .iter()
-                    .map(|outcome| {
-                        json!({
-                            "name": outcome.name,
-                            "status": outcome.status,
-                            "detail": outcome.detail,
-                        })
-                    })
-                    .collect();
-                output::print_json(&json!({
-                    "found": response.outcomes.len(),
-                    "added": response.added,
-                    "already_present": response.skipped,
-                    "failed": response.failed,
-                    "warnings": response.warnings,
-                    "outcomes": outcomes,
-                }));
-            } else {
-                println!(
-                    "imported {}, already present {}, failed {} of {} torrents",
-                    response.added,
-                    response.skipped,
-                    response.failed,
-                    response.outcomes.len()
-                );
-                for outcome in &response.outcomes {
-                    if outcome.status == "error" {
-                        println!("  {}: {}", outcome.name, outcome.detail);
-                    }
-                }
-                print_import_warnings(&response.warnings);
+            report_import_state(&response, json);
+        }
+        Command::ImportUtorrent {
+            app_dir,
+            save_root,
+            path_map,
+            dry_run: true,
+        } => {
+            import_utorrent_report(&app_dir, save_root.as_deref(), &path_map, json)?;
+        }
+        Command::ImportUtorrent {
+            app_dir,
+            save_root,
+            path_map,
+            dry_run: false,
+        } => {
+            let mut options = std::collections::HashMap::new();
+            if let Some(root) = save_root {
+                options.insert("save_root".to_owned(), root);
             }
+            if !path_map.is_empty() {
+                options.insert("path_map".to_owned(), path_map.join(";"));
+            }
+            let response = client
+                .import_state(ImportStateRequest {
+                    source: "utorrent".to_owned(),
+                    state_dir: app_dir.to_string_lossy().into_owned(),
+                    config_dir: String::new(),
+                    paused: true,
+                    info_hashes: Vec::new(),
+                    options,
+                })
+                .await?
+                .into_inner();
+            report_import_state(&response, json);
         }
         Command::List {
             filter,
@@ -1806,7 +1830,35 @@ fn import_deluge_report(
         state_dir: state_dir.to_path_buf(),
     };
     let report = ferrent_import::scan(&options).map_err(CliError::Config)?;
+    print_import_report(&report, json);
+    Ok(())
+}
 
+/// `import-utorrent --dry-run`: reads the uTorrent resume state without a
+/// daemon. `save_root` and `path_map` are the same keys the RPC receives.
+fn import_utorrent_report(
+    app_dir: &std::path::Path,
+    save_root: Option<&str>,
+    path_map: &[String],
+    json: bool,
+) -> Result<(), CliError> {
+    let mut options = std::collections::BTreeMap::new();
+    options.insert("app_dir".to_owned(), app_dir.to_string_lossy().into_owned());
+    if let Some(root) = save_root {
+        options.insert("save_root".to_owned(), root.to_owned());
+    }
+    if !path_map.is_empty() {
+        options.insert("path_map".to_owned(), path_map.join(";"));
+    }
+    let report = ferrent_import::build_source("utorrent", &options)
+        .map_err(CliError::Config)?
+        .scan()
+        .map_err(CliError::Config)?;
+    print_import_report(&report, json);
+    Ok(())
+}
+
+fn print_import_report(report: &ferrent_import::Report, json: bool) {
     if json {
         let torrents: Vec<_> = report
             .torrents
@@ -1838,11 +1890,49 @@ fn import_deluge_report(
             },
             "warnings": report.warnings,
         }));
-        return Ok(());
+        return;
     }
 
-    output::print_import_table(&report);
-    Ok(())
+    output::print_import_table(report);
+}
+
+fn report_import_state(response: &ImportStateResponse, json: bool) {
+    if json {
+        let outcomes: Vec<_> = response
+            .outcomes
+            .iter()
+            .map(|outcome| {
+                json!({
+                    "name": outcome.name,
+                    "status": outcome.status,
+                    "detail": outcome.detail,
+                })
+            })
+            .collect();
+        output::print_json(&json!({
+            "found": response.outcomes.len(),
+            "added": response.added,
+            "already_present": response.skipped,
+            "failed": response.failed,
+            "warnings": response.warnings,
+            "outcomes": outcomes,
+        }));
+        return;
+    }
+
+    println!(
+        "imported {}, already present {}, failed {} of {} torrents",
+        response.added,
+        response.skipped,
+        response.failed,
+        response.outcomes.len()
+    );
+    for outcome in &response.outcomes {
+        if outcome.status == "error" {
+            println!("  {}: {}", outcome.name, outcome.detail);
+        }
+    }
+    print_import_warnings(&response.warnings);
 }
 
 fn print_import_warnings(warnings: &[String]) {

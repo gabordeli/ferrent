@@ -384,6 +384,21 @@ kilistázza a plugin-configokat is. **Éles próbánál csak publikus trackeres
 torrentekkel futtasd**: a resume után az add announce-ol, és a privát tracker
 kitilthat.
 
+### `ferrent-cli import-utorrent --app-dir <dir>`
+
+```text
+$ ferrent-cli import-utorrent --app-dir ~/.wine/drive_c/users/me/AppData/Roaming/uTorrent \
+    --path-map 'C:\downloads=/srv/torrents' --dry-run
+name                     size      label   path
+debian-13.8.0.iso        758 MiB           /srv/torrents
+```
+
+uTorrent `resume.dat` + a mellette lévő `.torrent` fájlok importja. A Windows-os
+mentési utat `--save-root <dir>` (mindent felülír) vagy `--path-map FROM=TO`
+(prefixenként, többször is) képezi a daemon hostjára. A torrentek **paused**
+kerülnek be, info-hash szerint dedupálva; a `--dry-run` daemon nélkül fut.
+A részletek: [utorrent-migration.md](utorrent-migration.md).
+
 ### `ferrent-cli watch [--count N]`
 
 ```text
@@ -401,7 +416,7 @@ Minden daemon RPC-nek van CLI-megfelelője; a két kivétel szándékos:
 
 | RPC | CLI | Miért |
 |---|---|---|
-| `ImportPreview` | `import-deluge --dry-run` (helyi scan) | hogy a dry run daemon nélkül is működjön; az `ImportState` a daemon oldali út |
+| `ImportPreview` | `import-deluge --dry-run`, `import-utorrent --dry-run` (helyi scan) | hogy a dry run daemon nélkül is működjön; az `ImportState` a daemon oldali út |
 | `GetStatus` | `status`, `blocklist` | a `blocklist` a státuszból olvassa a tartomány-számot `--refresh` nélkül |
 
 A többi RPC egy-az-egyben megfelel: `AddTorrent`→`add`, `ListTorrents`→`list`,

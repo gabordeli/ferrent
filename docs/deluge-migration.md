@@ -4,6 +4,7 @@ A Deluge állapotkönyvtárából a torrentek és a címkék átemelhetők; a
 pluginok konfigurációja beolvasva, de nem alkalmazva. A import ugyanazt a
 kódot használja a GUI-ban (bal oldali sáv → Importálás) és a CLI-ben
 (`ferrent-cli import-deluge`), így az előnézet és a végrehajtás nem térhet el.
+A uTorrent-útvonal: [utorrent-migration.md](utorrent-migration.md).
 
 ## Hol van a forrás
 
@@ -30,9 +31,9 @@ A Deluge a torrenteket az info-hash-ről elnevezett fájlokban tartja; a
 
 ## Mit nem visz át
 
-- **Resume/fastresume** adat: az első indulásnál a daemon ellenőrzi a
-  fájlokat (recheck nélkül, a resume data hiányában a libtorrent a
-  fájlméretekből dolgozik).
+- **Resume/fastresume** adat: a `torrents.fastresume` blobját átadjuk a
+  daemonnak, így a már letöltött payload recheck nélkül áll vissza; ha nincs
+  blob, a libtorrent a fájlméretekből dolgozik.
 - **Ratio, összes feltöltés/letöltés, queue-sorrend**: a Deluge számlálói nem
   jönnek át.
 - **Pluginok működése**: az `autoadd.conf`/`execute.conf`/`scheduler.conf`
