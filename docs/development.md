@@ -61,6 +61,35 @@ kikapcsolása kell: `env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 …`;
 a teljes, mért recept (xauth, ablak-offset a kattintásnál, teljes
 felbontású crop): [docs/headless-gui.md](headless-gui.md).
 
+## Éles dev deploy (verziózás nélkül)
+
+A fejlesztői build kimehet a .27 szerverre és a laptopra anélkül, hogy tag,
+`.deb`-telepítés vagy kiadási pipeline lenne:
+
+```bash
+./packaging/debian/dev-deploy.sh server   # build + telepítés a .27-re + restart
+./packaging/debian/dev-deploy.sh gui      # laptop GUI a target/release-ből, majd indítás
+./packaging/debian/dev-deploy.sh all      # mindkettő
+./packaging/debian/dev-deploy.sh status   # mi fut most a szerveren
+./packaging/debian/dev-deploy.sh rollback # vissza a csomagolt /usr/bin/ferrentd-re
+```
+
+- A build a `debian:12` konténerben fut (`FERRENT_SKIP_GUI=1`, statikus
+  libtorrent), mert a .27 glibc 2.36-os: a laptopon (trixie, 2.41) épült
+  binárist nem lehet átmásolni. A kész binárist a script a `.deb`-ből
+  bontja ki, a csomagverzió nem számít.
+- A szerveren a csomagolt fájlokhoz nem nyúl: a dev build a
+  `/usr/local/bin/ferrentd` + `/usr/local/lib/ferrent-dev/` alá kerül, és egy
+  systemd drop-in állítja rá az `ExecStart`-ot. A `rollback` csak ezt a
+  drop-int törli, `apt`-ra nincs szükség.
+- Restart előtt a script feljegyzi a paused torrentek id-jait, és a restart
+  után visszaállítja azokat, amelyeket a daemon újraaktivált — a
+  szüneteltetett állapot így nem veszik el.
+- Az azonosítás a git-fához kötött: a `status` kiírja a telepített build
+  azonosítóját (`<commit>` vagy `<commit>+<dirty-hash>`) és a bináris
+  sha256-ját; változatlan fánál a `build` kihagyja az újrafordítást
+  (`--rebuild` kényszeríti).
+
 ## Demo adatok
 
 ```bash
