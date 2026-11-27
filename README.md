@@ -5,6 +5,9 @@ Deluge-utód Rustban: `ferrentd` daemon + natív `ferrent-gui` thin client +
 daemon és a kliensek TLS gRPC-n beszélnek, a tanúsítványt fingerprint
 pineli, az állapot redb-ben él és restart után recheck nélkül áll vissza.
 
+**Weboldal és letöltés:** <https://ferrent-torrent.org> — AppImage, `.deb`
+(amd64/arm64) és a dokumentáció.
+
 ![Ferrent desktop GUI: torrent lista, oldalsáv-számlálók, címkék és
 állapotok](docs/images/gui-table.png)
 
