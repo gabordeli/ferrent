@@ -107,7 +107,7 @@ impl Default for WebConfig {
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
-            url: "https://127.0.0.1:50129".to_owned(),
+            url: "https://127.0.0.1:50051".to_owned(),
             ca: PathBuf::from("/var/lib/ferrent/tls-cert.pem"),
             token: String::new(),
             fingerprint: None,

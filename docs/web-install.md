@@ -29,7 +29,7 @@ key  = "/var/lib/ferrent/web-key.pem"
 names = ["ferrent.local", "192.168.2.65"]   # amit a telefon megnyit
 
 [daemon]
-url  = "https://localhost:50129"
+url  = "https://localhost:50051"
 ca   = "/var/lib/ferrent/tls-cert.pem"
 token = "…"                    # a daemon tokenje (0640)
 

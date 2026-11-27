@@ -22,7 +22,7 @@ names = ["ferrent.local", "192.168.2.65"]
 
 [daemon]
 # The daemon keeps listening on loopback; only the gateway faces the LAN.
-url = "https://127.0.0.1:50129"
+url = "https://127.0.0.1:50051"
 ca = "/var/lib/ferrent/tls-cert.pem"
 token = "replace-with-the-daemon-token"
 

@@ -74,6 +74,11 @@ benne. A daemon a `127.0.0.1:50051`-en hallgat TLS-sel; a GUI/CLI a
 `https://localhost:50051` címet használja, és az önaláírt tanúsítvány
 ujjlenyomatát az első csatlakozáskor kell jóváhagyni.
 
+Portok egy helyen: a **daemon 50051** (loopback, TLS), a webes gateway
+**8443** (`docs/web-install.md`), a Docker image pedig **50129**
+(`docs/install-docker.md`). A `FERRENT_BIND` vagy a config `bind` kulcsa
+bármelyiket felülírja.
+
 A `ferrent-gui` a desktop indítót is telepíti
 (`/usr/share/applications/ferrent.desktop`, `Categories=Network;FileTransfer;P2P;`)
 és az ikont (`hicolor/{128x128,256x256}/apps/ferrent.png`), így az alkalmazás
