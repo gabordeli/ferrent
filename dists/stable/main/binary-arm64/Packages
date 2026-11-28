@@ -1,60 +1,21 @@
 Package: ferrent
-Version: 0.1.3-1
+Version: 1.0.0~rc2-1
 Architecture: arm64
 Maintainer: Gabor Deli <gabor.deli@gmail.com>
-Installed-Size: 219469
+Installed-Size: 171802
 Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6:arm64
 Breaks: ferrentd (<= 0.1.2-1)
 Replaces: ferrentd (<= 0.1.2-1)
 Provides: ferrentd
-Filename: pool/main/f/ferrent/ferrent_0.1.3-1_arm64.deb
-Size: 30525824
-MD5sum: d5da48d21d6e6be33ade6430ba92f0b9
-SHA1: 5f25a2fe11924be8c47a8c62f701e56a79025855
-SHA256: 5972808a75f3c9e671018009d9e446ae34a647bc4435471218eceaab895457d5
+Filename: pool/main/f/ferrent/ferrent_1.0.0.rc2-1_arm64.deb
+Size: 26193224
+MD5sum: 9fcf966e9e7d97f13e9d3a1c3811e61a
+SHA1: e7f348e51769eeb787bf02163f75629c1829b93c
+SHA256: cb64869cafc4f76248d1d566172509922c8f297f25b27b6f4683a928132b8980
 Section: net
 Priority: optional
 Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
 Description: Headless Ferrent BitTorrent daemon
  Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
- restart.
-
-Package: ferrent
-Version: 1.0.0~rc1-1
-Architecture: arm64
-Maintainer: Gabor Deli <gabor.deli@gmail.com>
-Installed-Size: 167427
-Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6:arm64
-Breaks: ferrentd (<= 0.1.2-1)
-Replaces: ferrentd (<= 0.1.2-1)
-Provides: ferrentd
-Filename: pool/main/f/ferrent/ferrent_1.0.0.rc1-1_arm64.deb
-Size: 25554888
-MD5sum: 6dbf442f73ae6f62d5142e3840a08cce
-SHA1: f1c8219003e62e890799b35f36b368fef560b2a8
-SHA256: 1a878f2f4cfb10275dfc33639ab38beb93342d1d4505d113564978441320b155
-Section: net
-Priority: optional
-Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
-Description: Headless Ferrent BitTorrent daemon
- Ferrent BitTorrent daemon and CLI with TLS gRPC, redb state and fastresume
- restart.
-
-Package: ferrentd
-Version: 0.1.2-1
-Architecture: arm64
-Maintainer: Gabor Deli <gabor.deli@gmail.com>
-Installed-Size: 136535
-Depends: adduser, init-system-helpers, libc6 (>= 2.34), libssl3 (>= 3.0.0), libstdc++6:arm64
-Filename: pool/main/f/ferrentd/ferrentd_0.1.2-1_arm64.deb
-Size: 19042792
-MD5sum: fab038cf326387f294f2645311753cdc
-SHA1: 220aa52c2941d29fec842c59a9a334616a9c819d
-SHA256: ccca48d3a584dfc966c4eeae6810cb1f253d420e32b6ba2046df5b2b410428de
-Section: net
-Priority: optional
-Homepage: https://cirice-gitlab.ddns.net/gabor/ferrent
-Description: Headless Ferrent BitTorrent daemon
- Headless Ferrent BitTorrent daemon with TLS gRPC, redb state and fastresume
  restart.
 
