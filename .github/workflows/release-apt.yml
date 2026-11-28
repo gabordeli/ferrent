@@ -98,6 +98,9 @@ jobs:
       - name: Sign and publish the repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          # The site carries the current release only: the pool is rebuilt from
+          # this release's assets, so a deleted version disappears from Pages.
+          APT_REPO_PRUNE: "1"
         run: |
           set -e
           packaging/apt/build-repo.sh site dist

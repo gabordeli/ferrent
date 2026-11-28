@@ -4,7 +4,8 @@
 #   packaging/apt/build-repo.sh [repo-dir] [deb-dir ...]
 #
 # Defaults: repo-dir = target/apt-repo, deb-dir = target/debian-dist.
-# Every existing file in the pool is kept, so old versions stay installable.
+# Every existing file in the pool is kept, so old versions stay installable;
+# APT_REPO_PRUNE=1 drops them first, leaving only the given .deb files.
 # The signing key comes from GNUPGHOME/GPG_KEY_ID; see packaging/apt/README.md.
 set -euo pipefail
 
@@ -20,6 +21,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 dist="$repo/dists/stable"
 pool="$repo/pool/main"
 mkdir -p "$pool" "$dist"
+
+# The published repository carries one release: with APT_REPO_PRUNE=1 the pool
+# keeps exactly the .deb files given below, so a deleted release cannot stay
+# installable (and its files cannot be found at a dead URL).
+if [ "${APT_REPO_PRUNE:-0}" = 1 ]; then
+    find "$pool" -type f -name '*.deb' -delete
+fi
 
 for dir in "$@"; do
     [ -d "$dir" ] || { echo "no such directory: $dir" >&2; exit 1; }
