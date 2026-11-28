@@ -1,0 +1,42 @@
+name: prune-deployments
+
+# Keeps the Pages deployments list at one entry: the token the small
+# deployment record needs is the repository's own, not a personal PAT.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose old deployments go away
+        default: github-pages
+      keep:
+        description: How many of the newest deployments stay
+        default: "1"
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the deployments beyond the newest ones
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -euo pipefail
+          # Newest first, so the tail is what goes.
+          ids=$(gh api --paginate \
+            "repos/$REPO/deployments?environment=$ENVIRONMENT&per_page=100" \
+            --jq '.[].id' | tail -n +$((KEEP + 1)))
+          if [ -z "$ids" ]; then
+            echo "nothing to prune"
+            exit 0
+          fi
+          for id in $ids; do
+            echo "deleting deployment $id"
+            gh api -X DELETE "repos/$REPO/deployments/$id"
+          done
