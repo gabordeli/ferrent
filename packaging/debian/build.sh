@@ -117,6 +117,14 @@ RUN curl -sSL -o /tmp/lt.tar.gz \\
  && cmake --install /tmp/lt-build \\
  && rm -rf /tmp/lt-build /tmp/libtorrent-rasterbar-$LT_VERSION /tmp/lt.tar.gz
 
+# rustup re-checks a channel toolchain on every cargo run; when a new stable is
+# out it updates in place, and that rename fails inside an image layer
+# ("Invalid cross-device link"). A *linked* toolchain never syncs, so the build
+# uses one: same binaries, no network, no surprise upgrade mid-build.
+RUN tc=\$(ls /root/.rustup/toolchains | head -1) \\
+ && rustup toolchain link build "/root/.rustup/toolchains/\$tc"
+ENV RUSTUP_TOOLCHAIN=build
+
 COPY . /src
 WORKDIR /src
 ENV PKG_CONFIG_PATH=$pkg_config_path FERRENT_LIBTORRENT_STATIC=1
