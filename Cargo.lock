@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-cli"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "clap",
  "ferrent-daemon",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-daemon"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -1883,7 +1883,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-engine"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-gui"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "chrono",
  "ferrent-daemon",
@@ -1914,14 +1914,14 @@ dependencies = [
 
 [[package]]
 name = "ferrent-i18n"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "ferrent-import"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "serde_json",
  "sha1",
@@ -1929,11 +1929,11 @@ dependencies = [
 
 [[package]]
 name = "ferrent-platform"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 
 [[package]]
 name = "ferrent-protocol"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -1946,14 +1946,14 @@ dependencies = [
 
 [[package]]
 name = "ferrent-telemetry"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "sentry",
 ]
 
 [[package]]
 name = "ferrent-web"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "axum",
  "axum-server",
@@ -1980,7 +1980,7 @@ dependencies = [
 
 [[package]]
 name = "ferrent-winres"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 
 [[package]]
 name = "ff"
