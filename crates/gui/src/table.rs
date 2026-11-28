@@ -923,6 +923,9 @@ pub fn column_menu_items(_layout: &ColumnLayout) -> Vec<(String, Column)> {
         .collect()
 }
 
+// The row renderer takes the whole drawing context: splitting it into a struct
+// would only move the same fields one level down (see the other renderers).
+#[allow(clippy::too_many_arguments)]
 fn draw_row(
     frame: &mut Frame,
     layout: &ColumnLayout,
