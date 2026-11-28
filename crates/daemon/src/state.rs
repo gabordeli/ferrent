@@ -50,6 +50,14 @@ fn queue_key(status: &TorrentStatus) -> i32 {
     }
 }
 
+/// Downloading torrents sort ahead of everything else, whatever the chosen
+/// key: they are what the user is watching, and a page boundary must not hide
+/// them. The flag is a pre-key, so `descending` still flips only the chosen
+/// ordering inside the two groups.
+fn downloading_first(status: &TorrentStatus) -> u8 {
+    u8::from(status.state != TorrentState::Downloading)
+}
+
 /// Proto `TorrentState` code for a status, so the query and the GUI agree.
 #[must_use]
 pub fn state_code(state: &TorrentState) -> i32 {
@@ -361,7 +369,10 @@ impl StateMirror {
             } else {
                 ordering
             };
-            ordering.then_with(|| left.id.cmp(&right.id))
+            downloading_first(left)
+                .cmp(&downloading_first(right))
+                .then(ordering)
+                .then_with(|| left.id.cmp(&right.id))
         });
 
         let total = items.len();
@@ -560,6 +571,48 @@ mod tests {
             ..TorrentQuery::default()
         });
         assert_eq!(all.len(), 4_000);
+    }
+
+    #[test]
+    fn downloading_torrents_sort_first() {
+        let mirror = StateMirror::new();
+        mirror.seed(vec![
+            status(1, "alpha"),
+            status(2, "beta"),
+            status(3, "gamma"),
+        ]);
+        for (id, state) in [(1, TorrentState::Paused), (3, TorrentState::Seeding)] {
+            mirror.apply(EngineEvent::StateChanged { id, state });
+        }
+        mirror.publish();
+
+        let ids = |sort, descending| -> Vec<TorrentId> {
+            mirror
+                .query(&TorrentQuery {
+                    sort,
+                    descending,
+                    ..TorrentQuery::default()
+                })
+                .into_iter()
+                .map(|torrent| torrent.id)
+                .collect()
+        };
+
+        // Torrent 2 is the only one downloading; it leads every ordering.
+        assert_eq!(ids(TorrentSort::Id, false), vec![2, 1, 3]);
+        // `descending` flips the non-downloading group only.
+        assert_eq!(ids(TorrentSort::Id, true), vec![2, 3, 1]);
+        assert_eq!(ids(TorrentSort::Name, true), vec![2, 3, 1]);
+
+        // Paging must not push it off the first page.
+        let (first, total) = mirror.query_page(&TorrentQuery {
+            sort: TorrentSort::Name,
+            descending: true,
+            limit: 1,
+            ..TorrentQuery::default()
+        });
+        assert_eq!(total, 3);
+        assert_eq!(first[0].id, 2);
     }
 
     #[test]

@@ -514,7 +514,9 @@ message Torrent {
   bool super_seeding = 18;
 }
 
-// Sort key for the torrent list.
+// Sort key for the torrent list. Torrents in the downloading state are
+// ordered ahead of the rest whatever key is chosen, so a page boundary never
+// hides what is actively downloading.
 enum SortField {
   // Defaults to id.
   SORT_FIELD_UNSPECIFIED = 0;

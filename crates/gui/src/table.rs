@@ -698,6 +698,7 @@ impl canvas::Program<TableMessage> for Table<'_> {
                     self.layout,
                     &self.label_colors,
                     torrent,
+                    index + 1,
                     y,
                     content_width,
                     self.hscroll,
@@ -927,6 +928,7 @@ fn draw_row(
     layout: &ColumnLayout,
     label_colors: &BTreeMap<String, Color>,
     torrent: &Torrent,
+    row: usize,
     y: f32,
     width: f32,
     hscroll: f32,
@@ -939,13 +941,9 @@ fn draw_row(
     for slot in layout.slots_scrolled(width, hscroll) {
         let (content, color, size, font) = match slot.column {
             Column::Position => (
-                // The queue number only means something while the torrent is
-                // still waiting for its pieces; a seeding row shows a dash.
-                if torrent.progress < 1.0 && torrent.queue_position >= 0 {
-                    torrent.queue_position.to_string()
-                } else {
-                    "—".to_owned()
-                },
+                // Plain row number: the queue position is only meaningful
+                // while a torrent waits, and it left gaps in the list.
+                row.to_string(),
                 text_dim(),
                 11.0,
                 mono,
