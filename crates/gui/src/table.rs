@@ -944,9 +944,15 @@ fn draw_row(
     for slot in layout.slots_scrolled(width, hscroll) {
         let (content, color, size, font) = match slot.column {
             Column::Position => (
-                // Plain row number: the queue position is only meaningful
-                // while a torrent waits, and it left gaps in the list.
-                row.to_string(),
+                // Only a torrent that still has pieces to fetch carries a
+                // number; a complete one (seeding or paused) leaves the cell
+                // empty. Downloading sorts first, so the numbers are the
+                // contiguous run at the top of the list.
+                if torrent.progress < 1.0 {
+                    row.to_string()
+                } else {
+                    String::new()
+                },
                 text_dim(),
                 11.0,
                 mono,

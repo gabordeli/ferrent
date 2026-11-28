@@ -2607,7 +2607,7 @@ impl App {
                 }
             }
             if matches!(action, TorrentAction::Remove { .. }) {
-                self.refresh_page()
+                Task::batch([self.refresh_page(), self.load_labels()])
             } else {
                 Task::none()
             }
@@ -2654,7 +2654,9 @@ impl App {
                 self.status = format!("Added torrent {id}");
                 self.add_path.clear();
                 self.reset_page();
-                self.request_page(0)
+                // The sidebar shows the per-label torrent counts, so the new
+                // torrent must move its label's number right away.
+                Task::batch([self.request_page(0), self.load_labels()])
             }
             Err(error) => {
                 self.status = format!("Add failed: {error}");
