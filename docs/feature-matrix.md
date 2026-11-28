@@ -173,7 +173,7 @@ valamint a Transmission/Tixati/BiglyBT ismert feature-készlete. A tábla csak a
 | **Kereső** (több oldal) | ✅ | ❌ | ❌ | ❌ | qB plugin-os kereső |
 | **Statisztika/grafikonok** | ✅ | ✅ | plugin | ✅ | Statisztika fül + `stats` CLI; session-totál (M12-T4) |
 | **Téma** (sötét/világos) | ✅ | ✅ | ✅ | ✅ | dark/light + akcentus, futásidőben; GUI és web (M11-T2) |
-| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ | magyar default + angol; GUI (toolbar tooltipek is), web, CLI chrome, állapotszavak és számlálók (M11-T3, d0c3c38, 0f5ac9d, 55fcbac) |
+| **Nyelvesítés** | ✅ ~70 | ✅ | ✅ | ✅ 2 teljes | magyar default + angol; a GUI, web és CLI minden szövege lefedve; további nyelv = katalógus-bővítés (M11-T3, d0c3c38, 0f5ac9d, 55fcbac) |
 | Automatikus frissítés | rész | ✅ | ❌ | 🟡 | APT repó (M3-T3) + NSIS; in-app updater nincs |
 
 ## 8. Következő kör jelöltjei (2026-11-25)
